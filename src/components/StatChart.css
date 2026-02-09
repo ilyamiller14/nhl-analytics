@@ -1,0 +1,42 @@
+.stat-chart-container {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.chart-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--gray-900);
+  margin: 0 0 1.5rem 0;
+  text-align: center;
+}
+
+/* Recharts Customization */
+.recharts-wrapper {
+  font-family: inherit;
+}
+
+.recharts-cartesian-axis-tick-value {
+  fill: var(--gray-600);
+}
+
+.recharts-legend-item-text {
+  color: var(--gray-700) !important;
+}
+
+.recharts-tooltip-wrapper {
+  outline: none;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .stat-chart-container {
+    padding: 1rem;
+  }
+
+  .chart-title {
+    font-size: 1.125rem;
+  }
+}

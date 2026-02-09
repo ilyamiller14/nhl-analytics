@@ -1,0 +1,241 @@
+.analytics-filters {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 32px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 2px solid #e1e8ed;
+}
+
+.filters-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #e1e8ed;
+}
+
+.filters-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.filters-icon {
+  font-size: 24px;
+}
+
+.filters-title h3 {
+  font-size: 20px;
+  color: #2c3e50;
+  margin: 0;
+}
+
+.filter-badge {
+  background: #003087;
+  color: white;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.filters-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.btn-toggle-advanced,
+.btn-reset-filters {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.btn-toggle-advanced {
+  background: #e8f0f7;
+  color: #003087;
+}
+
+.btn-toggle-advanced:hover {
+  background: #d1e0ed;
+}
+
+.btn-reset-filters {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.btn-reset-filters:hover {
+  background: #ffe69c;
+}
+
+/* Quick Filters */
+.quick-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-group label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #657786;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.filter-group select {
+  padding: 10px 12px;
+  border: 2px solid #e1e8ed;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.filter-group select:hover {
+  border-color: #003087;
+}
+
+.filter-group select:focus {
+  outline: none;
+  border-color: #003087;
+  box-shadow: 0 0 0 3px rgba(0, 48, 135, 0.1);
+}
+
+/* Advanced Filters */
+.advanced-filters {
+  background: #f8fafb;
+  padding: 24px;
+  border-radius: 8px;
+  margin-top: 24px;
+  border: 1px solid #e1e8ed;
+}
+
+.filters-section {
+  margin-bottom: 24px;
+}
+
+.filters-section:last-child {
+  margin-bottom: 0;
+}
+
+.filters-section h4 {
+  font-size: 16px;
+  color: #2c3e50;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e1e8ed;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+/* Active Filters Summary */
+.active-filters-summary {
+  background: linear-gradient(135deg, #e8f0f7 0%, #f0f5fa 100%);
+  padding: 16px;
+  border-radius: 8px;
+  margin-top: 24px;
+  border: 1px solid #d1e0ed;
+}
+
+.summary-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #003087;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: white;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 13px;
+  color: #2c3e50;
+  border: 1px solid #d1e0ed;
+}
+
+.filter-chip button {
+  background: none;
+  border: none;
+  color: #dc3545;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+}
+
+.filter-chip button:hover {
+  background: #f8d7da;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .filters-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .filters-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .btn-toggle-advanced,
+  .btn-reset-filters {
+    flex: 1;
+  }
+
+  .quick-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-chips {
+    flex-direction: column;
+  }
+
+  .filter-chip {
+    justify-content: space-between;
+  }
+}

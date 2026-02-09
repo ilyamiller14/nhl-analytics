@@ -1,0 +1,287 @@
+/* Distance Fatigue Chart Styles */
+
+.distance-fatigue-chart {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.distance-fatigue-chart .chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.distance-fatigue-chart .chart-title-section {
+  flex: 1;
+  min-width: 200px;
+}
+
+.distance-fatigue-chart .chart-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 0.25rem 0;
+}
+
+.distance-fatigue-chart .chart-subtitle {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+.distance-fatigue-chart .chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.distance-fatigue-chart .view-toggle {
+  display: flex;
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.distance-fatigue-chart .toggle-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.distance-fatigue-chart .toggle-btn:hover {
+  color: #374151;
+}
+
+.distance-fatigue-chart .toggle-btn.active {
+  background: white;
+  color: #1f2937;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Summary Metrics */
+.distance-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.distance-fatigue-chart .metric-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.distance-fatigue-chart .metric-card.highlight {
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  border-color: #3b82f6;
+}
+
+.distance-fatigue-chart .metric-label {
+  font-size: 0.7rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.5rem;
+}
+
+.distance-fatigue-chart .metric-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.distance-fatigue-chart .metric-value.positive {
+  color: #10b981;
+}
+
+.distance-fatigue-chart .metric-value.negative {
+  color: #ef4444;
+}
+
+/* Chart Section */
+.distance-fatigue-chart .chart-section {
+  margin-bottom: 1.5rem;
+}
+
+.distance-fatigue-chart .section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.correlation-badge {
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.25rem 0.5rem;
+  background: #f3f4f6;
+  border-radius: 4px;
+  color: #6b7280;
+}
+
+.distance-fatigue-chart .chart-container {
+  margin: 1rem 0;
+}
+
+.chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: #6b7280;
+  font-size: 0.95rem;
+}
+
+/* Correlation Legend */
+.correlation-legend {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.correlation-legend .legend-label {
+  font-size: 0.8rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.correlation-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.correlation-legend .legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* Shift Stats */
+.shift-stats {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
+.shift-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.shift-stat .stat-label {
+  font-size: 0.7rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.25rem;
+}
+
+.shift-stat .stat-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+/* Footer */
+.chart-footer {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.footer-note {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  text-align: center;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .distance-fatigue-chart .chart-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .distance-fatigue-chart .chart-controls {
+    justify-content: flex-start;
+  }
+
+  .distance-metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .correlation-legend {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .shift-stats {
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .distance-fatigue-chart {
+    padding: 1rem;
+  }
+
+  .distance-metrics {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .distance-fatigue-chart .metric-card {
+    padding: 0.75rem;
+  }
+
+  .distance-fatigue-chart .metric-value {
+    font-size: 1rem;
+  }
+
+  .distance-fatigue-chart .view-toggle {
+    flex-wrap: wrap;
+  }
+
+  .distance-fatigue-chart .toggle-btn {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+  }
+}

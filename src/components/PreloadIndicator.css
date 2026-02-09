@@ -1,0 +1,189 @@
+/**
+ * Preload Indicator Styles
+ */
+
+.preload-indicator {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #1e293b;
+  color: #f1f5f9;
+  border-radius: 12px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+  font-size: 0.85rem;
+}
+
+.preload-indicator:hover {
+  background: #334155;
+}
+
+.preload-indicator.expanded {
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 12px 16px;
+  min-width: 200px;
+}
+
+.preload-indicator.complete {
+  background: #166534;
+}
+
+.preload-indicator.complete:hover {
+  background: #15803d;
+}
+
+/* Icon */
+.preload-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.preload-icon svg {
+  color: #4ade80;
+}
+
+/* Spinner */
+.preload-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #475569;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: preload-spin 1s linear infinite;
+}
+
+@keyframes preload-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Mini display (collapsed) */
+.preload-mini {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  min-width: 30px;
+  text-align: center;
+}
+
+/* Expanded details */
+.preload-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.preload-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* Progress bar */
+.preload-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: #475569;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.preload-progress-fill {
+  height: 100%;
+  background: #3b82f6;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Stats */
+.preload-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.preload-current {
+  color: #60a5fa;
+}
+
+.preload-complete-msg {
+  font-size: 0.8rem;
+  color: #86efac;
+}
+
+/* Light mode */
+@media (prefers-color-scheme: light) {
+  .preload-indicator {
+    background: #f1f5f9;
+    color: #1e293b;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  .preload-indicator:hover {
+    background: #e2e8f0;
+  }
+
+  .preload-indicator.complete {
+    background: #dcfce7;
+    color: #166534;
+  }
+
+  .preload-indicator.complete:hover {
+    background: #bbf7d0;
+  }
+
+  .preload-icon svg {
+    color: #22c55e;
+  }
+
+  .preload-spinner {
+    border-color: #cbd5e1;
+    border-top-color: #3b82f6;
+  }
+
+  .preload-mini {
+    color: #64748b;
+  }
+
+  .preload-progress-bar {
+    background: #cbd5e1;
+  }
+
+  .preload-stats {
+    color: #64748b;
+  }
+
+  .preload-current {
+    color: #2563eb;
+  }
+
+  .preload-complete-msg {
+    color: #16a34a;
+  }
+}
+
+/* Mobile: position at bottom center */
+@media (max-width: 640px) {
+  .preload-indicator {
+    bottom: 10px;
+    right: 10px;
+    left: 10px;
+    justify-content: center;
+  }
+
+  .preload-indicator.expanded {
+    left: 10px;
+    min-width: unset;
+  }
+}

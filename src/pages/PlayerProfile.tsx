@@ -1,0 +1,861 @@
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { toPng } from 'html-to-image';
+import { usePlayerStats } from '../hooks/usePlayerStats';
+import { usePlayerGameData } from '../hooks/usePlayerGameData';
+import { useAdvancedPlayerAnalytics } from '../hooks/useAdvancedPlayerAnalytics';
+import StatChart from '../components/StatChart';
+// IceRinkChart removed - using IceChartsPanel instead
+import AdvancedAnalyticsTable from '../components/AdvancedAnalyticsTable';
+import AdvancedAnalyticsDashboard from '../components/AdvancedAnalyticsDashboard';
+import IceChartsPanel from '../components/IceChartsPanel';
+import RollingAnalyticsChart from '../components/charts/RollingAnalyticsChart';
+import PlayerAnalyticsCard from '../components/PlayerAnalyticsCard';
+import PlayerSearch from '../components/PlayerSearch';
+import SpeedProfileChart, { type SpeedData } from '../components/charts/SpeedProfileChart';
+import TrackingRadarChart, { type PlayerTrackingData, type TrackingMetrics } from '../components/charts/TrackingRadarChart';
+import ZoneTimeChart, { type ZoneData } from '../components/charts/ZoneTimeChart';
+import { edgeTrackingService } from '../services/edgeTrackingService';
+import { EDGE_CACHE } from '../utils/cacheUtils';
+import { type RollingMetrics } from '../services/rollingAnalytics';
+import type { Shot } from '../components/charts/ShotChart';
+import type { Hit } from '../components/charts/HitChart';
+import type { Faceoff } from '../components/charts/FaceoffChart';
+import {
+  formatDate,
+  formatHeight,
+  formatWeight,
+  calculateAge,
+  formatPosition,
+  formatPlusMinus,
+  formatShootingPct,
+  formatTOIString,
+  formatSeasonId,
+} from '../utils/formatters';
+import { calculatePointsPerGame } from '../utils/statCalculations';
+import { getRadarChartData } from '../services/playerService';
+import './PlayerProfile.css';
+
+// Helper to get NHL regular season stats from seasonTotals
+function getNHLSeasons(seasonTotals: any[] | undefined) {
+  if (!seasonTotals) return [];
+  return seasonTotals
+    .filter(s => s.leagueAbbrev === 'NHL' && s.gameTypeId === 2)
+    .sort((a, b) => a.season - b.season);
+}
+
+// Format season number to display format
+function formatSeasonDisplay(season: number): string {
+  const startYear = Math.floor(season / 10000);
+  const endYear = season % 10000;
+  return `${startYear}-${String(endYear).slice(-2)}`;
+}
+
+function PlayerProfile() {
+  const { playerId } = useParams<{ playerId: string }>();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<'stats' | 'charts' | 'analytics' | 'advanced' | 'edge' | 'card'>('stats');
+  const [isSharing, setIsSharing] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const { data: player, isLoading, error } = usePlayerStats(
+    playerId ? parseInt(playerId, 10) : null
+  );
+
+  // Reset active tab when player changes
+  useEffect(() => {
+    setActiveTab('stats');
+  }, [playerId]);
+
+  // Handle share functionality
+  const handleShare = useCallback(async () => {
+    if (!cardRef.current) return;
+
+    setIsSharing(true);
+
+    const fileName = `${player?.firstName.default}-${player?.lastName.default}-analytics.png`;
+
+    const downloadImage = (dataUrl: string) => {
+      const link = document.createElement('a');
+      link.download = fileName;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
+
+    const tryShare = async (dataUrl: string) => {
+      if (navigator.share) {
+        try {
+          const response = await fetch(dataUrl);
+          const blob = await response.blob();
+          const file = new File([blob], fileName, { type: 'image/png' });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: `${player?.firstName.default} ${player?.lastName.default} Analytics`,
+            });
+            return true;
+          }
+        } catch {
+          // Share failed
+        }
+      }
+      return false;
+    };
+
+    try {
+      // First attempt: try with all images
+      let dataUrl: string;
+      try {
+        dataUrl = await toPng(cardRef.current, {
+          quality: 0.95,
+          backgroundColor: '#ffffff',
+          pixelRatio: 2, // Higher resolution
+          cacheBust: true,
+          includeQueryParams: true,
+        });
+      } catch {
+        // If that fails, try without external images
+        console.log('Retrying without external images...');
+        dataUrl = await toPng(cardRef.current, {
+          quality: 0.95,
+          backgroundColor: '#ffffff',
+          pixelRatio: 2,
+          filter: (node: HTMLElement) => {
+            if (node.tagName === 'IMG') {
+              const src = (node as HTMLImageElement).src;
+              return src.startsWith('data:') || src.startsWith(window.location.origin);
+            }
+            return true;
+          },
+        });
+      }
+
+      // Try to share, fall back to download
+      const shared = await tryShare(dataUrl);
+      if (!shared) {
+        downloadImage(dataUrl);
+      }
+
+    } catch (err) {
+      console.error('Error generating image:', err);
+      alert('Unable to generate image. Please use your browser\'s screenshot feature:\n\n• Mac: Cmd+Shift+4\n• Windows: Win+Shift+S\n• Mobile: Volume+Power buttons');
+    } finally {
+      setIsSharing(false);
+    }
+  }, [player]);
+
+  // Fetch real shot data from NHL API - must be called before any conditional returns
+  const { data: gameData, isLoading: gameDataLoading } = usePlayerGameData(
+    player?.playerId || null,
+    player?.currentTeamId || null,
+    player?.featuredStats?.season?.toString() || '20252026'
+  );
+
+  // Fetch advanced analytics data - must be called before any conditional returns
+  const {
+    analytics: advancedAnalytics,
+    isLoading: analyticsLoading,
+    error: analyticsError
+  } = useAdvancedPlayerAnalytics(
+    player?.playerId || null,
+    player?.currentTeamId || null,
+    player?.featuredStats?.season?.toString() || '20252026'
+  );
+
+  // Rolling analytics data - computed from advanced analytics hook
+  const rollingData: RollingMetrics[] = useMemo(() => {
+    // Use rolling metrics from advanced analytics if available
+    if (advancedAnalytics?.rollingMetrics && advancedAnalytics.rollingMetrics.length > 0) {
+      return advancedAnalytics.rollingMetrics;
+    }
+    return [];
+  }, [advancedAnalytics?.rollingMetrics]);
+
+  // Fetch EDGE tracking data
+  const {
+    data: edgeData,
+    isLoading: edgeLoading,
+    error: edgeError,
+  } = useQuery({
+    queryKey: ['edge-player-detail', player?.playerId],
+    queryFn: async () => {
+      if (!player?.playerId) return null;
+      try {
+        return await edgeTrackingService.getAllSkaterData(player.playerId);
+      } catch (err) {
+        console.warn('EDGE data not available:', err);
+        return null;
+      }
+    },
+    enabled: !!player?.playerId && player?.position !== 'G',
+    staleTime: EDGE_CACHE.EDGE_PLAYER_DETAIL,
+    retry: 1,
+  });
+
+  // Transform EDGE data for charts
+  const edgeSpeedData: SpeedData | null = useMemo(() => {
+    if (!edgeData?.speed) return null;
+    // Create synthetic speed events from tier burst counts
+    const events: { speed: number }[] = [];
+    // Add representative events for each tier
+    for (let i = 0; i < edgeData.speed.bursts18To20; i++) {
+      events.push({ speed: 19 });
+    }
+    for (let i = 0; i < edgeData.speed.bursts20To22; i++) {
+      events.push({ speed: 21 });
+    }
+    for (let i = 0; i < edgeData.speed.bursts22Plus; i++) {
+      events.push({ speed: 23 });
+    }
+    return {
+      events,
+      averageSpeed: edgeData.detail.avgSpeed,
+      topSpeed: edgeData.speed.topSpeed,
+    };
+  }, [edgeData]);
+
+  const edgeTrackingMetrics: PlayerTrackingData | null = useMemo(() => {
+    if (!edgeData?.comparison || !player) return null;
+    const c = edgeData.comparison;
+    return {
+      playerId: player.playerId,
+      playerName: `${player.firstName.default} ${player.lastName.default}`,
+      position: (player.position === 'D' ? 'D' : 'F') as 'F' | 'D',
+      metrics: {
+        topSpeed: c.percentiles.topSpeed?.leaguePercentile || 50,
+        avgSpeed: c.percentiles.avgSpeed?.leaguePercentile || 50,
+        acceleration: 50, // Not directly available, use average
+        agility: 50, // Not directly available, use average
+        endurance: c.percentiles.distancePerGame?.leaguePercentile || 50,
+        distancePerGame: c.percentiles.distancePerGame?.leaguePercentile || 50,
+      } as TrackingMetrics,
+    };
+  }, [edgeData, player]);
+
+  const edgeZoneData: ZoneData | null = useMemo(() => {
+    if (!edgeData?.zoneTime) return null;
+    const z = edgeData.zoneTime;
+    return {
+      periods: [], // Per-period breakdown not available from API
+      totalOZTime: z.offensiveZoneTime,
+      totalNZTime: z.neutralZoneTime,
+      totalDZTime: z.defensiveZoneTime,
+    };
+  }, [edgeData]);
+
+  // Generate EDGE tracking badges for player header
+  const edgeBadges: { label: string; color: string }[] = useMemo(() => {
+    if (!edgeData?.comparison) return [];
+    const badges: { label: string; color: string }[] = [];
+    const c = edgeData.comparison;
+
+    if (c.percentiles.topSpeed?.leaguePercentile >= 90) {
+      badges.push({ label: 'Top 10% Speed', color: '#ef4444' });
+    } else if (c.percentiles.topSpeed?.leaguePercentile >= 75) {
+      badges.push({ label: 'Elite Skater', color: '#f97316' });
+    }
+
+    if (c.percentiles.bursts22Plus?.leaguePercentile >= 90) {
+      badges.push({ label: 'Explosive', color: '#3b82f6' });
+    }
+
+    if (c.percentiles.distancePerGame?.leaguePercentile >= 90) {
+      badges.push({ label: 'Workhorse', color: '#10b981' });
+    }
+
+    return badges;
+  }, [edgeData]);
+
+  if (isLoading) {
+    return (
+      <div className="page-container">
+        <div className="loading">
+          <div className="loading-spinner"></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="page-container">
+        <div className="error">
+          <h2 className="error-title">Error Loading Player</h2>
+          <p className="error-message">{error.message}</p>
+          <Link to="/search" className="btn btn-primary" style={{ marginTop: '1rem' }}>
+            Back to Search
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!player) {
+    return (
+      <div className="page-container">
+        <div className="empty-state">
+          <h2 className="empty-state-title">Player Not Found</h2>
+          <p className="empty-state-message">The requested player could not be found.</p>
+          <Link to="/search" className="btn btn-primary" style={{ marginTop: '1rem' }}>
+            Back to Search
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const currentSeasonStats = player.featuredStats?.regularSeason?.subSeason;
+  const careerStats = player.careerTotals?.regularSeason;
+  const playoffStats = player.careerTotals?.playoffs;
+
+  // Get avgToi from seasonTotals (not available in featuredStats.subSeason)
+  const currentSeasonId = player.featuredStats?.season;
+  const currentSeasonTotals = player.seasonTotals?.find(
+    (s) => s.season === currentSeasonId && s.gameTypeId === 2 // 2 = Regular Season
+  );
+  const avgToi = currentSeasonTotals?.avgToi || currentSeasonStats?.avgToi;
+
+  const age = calculateAge(player.birthDate);
+  const ppg = currentSeasonStats
+    ? calculatePointsPerGame(currentSeasonStats.points, currentSeasonStats.gamesPlayed)
+    : 0;
+
+  // gameData, advancedAnalytics, gameDataLoading, analyticsLoading, and analyticsError
+  // are now defined before the early returns above
+
+  // Convert game data for new advanced visualization components
+  const mapStrength = (s?: string): 'even' | 'powerplay' | 'shorthanded' | undefined => {
+    if (!s) return undefined;
+    if (s === '5v5' || s === '4v4' || s === '3v3') return 'even';
+    if (s === 'PP') return 'powerplay';
+    if (s === 'SH') return 'shorthanded';
+    return 'even';
+  };
+
+  // Use personalShots for shot chart (player's own shots, not team on-ice shots)
+  const advancedShots: Shot[] = gameData?.personalShots.map(shot => ({
+    x: shot.x,
+    y: shot.y,
+    result: shot.type === 'goal' ? 'goal' :
+            shot.type === 'shot' ? 'save' :
+            shot.type === 'miss' ? 'miss' : 'block',
+    xGoal: shot.xGoal,
+    shotType: shot.shotType,
+    strength: mapStrength(shot.strength),
+  })) || [];
+
+  // TODO: Extract hits and faceoffs from game data when available
+  const advancedHits: Hit[] = [];
+  const advancedFaceoffs: Faceoff[] = [];
+
+  return (
+    <div className="player-profile">
+      <div className="profile-header">
+        <div className="profile-header-content">
+          <div className="profile-hero">
+            <div className="profile-image-container">
+              {player.headshot ? (
+                <img src={player.headshot} alt={player.firstName.default} className="profile-image" />
+              ) : (
+                <div className="profile-image-placeholder">
+                  {player.firstName.default[0]}
+                  {player.lastName.default[0]}
+                </div>
+              )}
+              {player.teamLogo && (
+                <img src={player.teamLogo} alt={player.currentTeamAbbrev} className="profile-team-logo" />
+              )}
+            </div>
+
+            <div className="profile-info">
+              <div className="profile-name-section">
+                <h1 className="profile-name">
+                  {player.firstName.default} {player.lastName.default}
+                </h1>
+                {player.sweaterNumber && (
+                  <span className="profile-number">#{player.sweaterNumber}</span>
+                )}
+              </div>
+
+              <div className="profile-meta">
+                <span className={`profile-position position-${player.position}`}>
+                  {formatPosition(player.position)}
+                </span>
+                {player.fullTeamName && (
+                  <>
+                    <span className="meta-divider">•</span>
+                    <span className="profile-team">{player.fullTeamName.default}</span>
+                  </>
+                )}
+                {!player.isActive && (
+                  <>
+                    <span className="meta-divider">•</span>
+                    <span className="inactive-badge">Inactive</span>
+                  </>
+                )}
+                {edgeBadges.length > 0 && edgeBadges.map((badge, idx) => (
+                  <span
+                    key={idx}
+                    className="edge-badge"
+                    style={{ backgroundColor: badge.color, marginLeft: idx === 0 ? '0.5rem' : '0.25rem' }}
+                  >
+                    {badge.label}
+                  </span>
+                ))}
+              </div>
+
+              <div className="profile-bio-stats">
+                {age && <div className="bio-stat">Age: {age}</div>}
+                {player.heightInInches && (
+                  <div className="bio-stat">Height: {formatHeight(player.heightInInches)}</div>
+                )}
+                {player.weightInPounds && (
+                  <div className="bio-stat">Weight: {formatWeight(player.weightInPounds)}</div>
+                )}
+                {player.shootsCatches && (
+                  <div className="bio-stat">Shoots: {player.shootsCatches}</div>
+                )}
+                {player.birthCity && (
+                  <div className="bio-stat">
+                    Born: {player.birthCity.default}, {player.birthCountry} ({formatDate(player.birthDate)})
+                  </div>
+                )}
+                {player.draftDetails && (
+                  <div className="bio-stat">
+                    Draft: {player.draftDetails.year} - Round {player.draftDetails.round}, Pick{' '}
+                    {player.draftDetails.overallPick} ({player.draftDetails.teamAbbrev})
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="profile-body">
+        <div className="page-container">
+          {/* Tabs */}
+          <div className="profile-tabs">
+            <button
+              className={`profile-tab ${activeTab === 'stats' ? 'active' : ''}`}
+              onClick={() => setActiveTab('stats')}
+            >
+              Statistics
+            </button>
+            <button
+              className={`profile-tab ${activeTab === 'charts' ? 'active' : ''}`}
+              onClick={() => setActiveTab('charts')}
+            >
+              Ice Charts {gameDataLoading && <span className="loading-indicator" />}
+            </button>
+            <button
+              className={`profile-tab ${activeTab === 'analytics' ? 'active' : ''}`}
+              onClick={() => setActiveTab('analytics')}
+            >
+              Analytics
+            </button>
+            <button
+              className={`profile-tab ${activeTab === 'advanced' ? 'active' : ''}`}
+              onClick={() => setActiveTab('advanced')}
+            >
+              Advanced {analyticsLoading && <span className="loading-indicator" />}
+            </button>
+            <button
+              className={`profile-tab ${activeTab === 'edge' ? 'active' : ''}`}
+              onClick={() => setActiveTab('edge')}
+            >
+              EDGE Tracking {edgeLoading && <span className="loading-indicator" />}
+            </button>
+            <button
+              className={`profile-tab ${activeTab === 'card' ? 'active' : ''}`}
+              onClick={() => setActiveTab('card')}
+            >
+              Share Card
+            </button>
+            <Link
+              to={`/attack-dna/player/${playerId}`}
+              className="profile-tab attack-dna-link"
+            >
+              Attack DNA
+              <span className="new-badge">NEW</span>
+            </Link>
+            {player?.position !== 'G' && (
+              <Link
+                to={`/movement/${playerId}`}
+                className="profile-tab"
+              >
+                Movement
+              </Link>
+            )}
+          </div>
+
+          {/* Stats Tab */}
+          {activeTab === 'stats' && (
+            <>
+              {currentSeasonStats && (
+                <section className="stats-section">
+                  <h2 className="section-title">
+                    Current Season ({formatSeasonId(player.featuredStats!.season)})
+                  </h2>
+                  <div className="stats-grid">
+                    <div className="stat-card">
+                      <div className="stat-card-label">Games Played</div>
+                      <div className="stat-card-value">{currentSeasonStats.gamesPlayed}</div>
+                    </div>
+                    <div className="stat-card highlight">
+                      <div className="stat-card-label">Goals</div>
+                      <div className="stat-card-value">{currentSeasonStats.goals}</div>
+                    </div>
+                    <div className="stat-card highlight">
+                      <div className="stat-card-label">Assists</div>
+                      <div className="stat-card-value">{currentSeasonStats.assists}</div>
+                    </div>
+                    <div className="stat-card highlight">
+                      <div className="stat-card-label">Points</div>
+                      <div className="stat-card-value">{currentSeasonStats.points}</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-card-label">+/-</div>
+                      <div className="stat-card-value">
+                        {formatPlusMinus(currentSeasonStats.plusMinus)}
+                      </div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-card-label">PIM</div>
+                      <div className="stat-card-value">{currentSeasonStats.pim}</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-card-label">Shots</div>
+                      <div className="stat-card-value">{currentSeasonStats.shots}</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-card-label">Shooting %</div>
+                      <div className="stat-card-value">
+                        {formatShootingPct(currentSeasonStats.shootingPctg)}
+                      </div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-card-label">PPG</div>
+                      <div className="stat-card-value">{ppg.toFixed(2)}</div>
+                    </div>
+                    {avgToi && (
+                      <div className="stat-card">
+                        <div className="stat-card-label">Avg TOI</div>
+                        <div className="stat-card-value">
+                          {formatTOIString(avgToi)}
+                        </div>
+                      </div>
+                    )}
+                    {currentSeasonStats.powerPlayGoals !== undefined && (
+                      <div className="stat-card">
+                        <div className="stat-card-label">PP Goals</div>
+                        <div className="stat-card-value">{currentSeasonStats.powerPlayGoals}</div>
+                      </div>
+                    )}
+                    {currentSeasonStats.shorthandedGoals !== undefined && (
+                      <div className="stat-card">
+                        <div className="stat-card-label">SH Goals</div>
+                        <div className="stat-card-value">{currentSeasonStats.shorthandedGoals}</div>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {/* Season History Table */}
+              {player.seasonTotals && getNHLSeasons(player.seasonTotals).length > 0 && (
+                <>
+                  <section className="stats-section">
+                    <h2 className="section-title">Season-by-Season Stats</h2>
+                    <div className="table-wrapper">
+                      <table className="season-history-table">
+                        <thead>
+                          <tr>
+                            <th>Season</th>
+                            <th>Team</th>
+                            <th style={{ textAlign: 'center' }}>GP</th>
+                            <th style={{ textAlign: 'center' }}>G</th>
+                            <th style={{ textAlign: 'center' }}>A</th>
+                            <th style={{ textAlign: 'center' }}>PTS</th>
+                            <th style={{ textAlign: 'center' }}>+/-</th>
+                            <th style={{ textAlign: 'center' }}>PIM</th>
+                            <th style={{ textAlign: 'center' }}>P/GP</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {getNHLSeasons(player.seasonTotals).reverse().map((s, idx) => (
+                            <tr key={`${s.season}-${idx}`}>
+                              <td>{formatSeasonDisplay(s.season)}</td>
+                              <td>{s.teamName?.default || '-'}</td>
+                              <td style={{ textAlign: 'center' }}>{s.gamesPlayed}</td>
+                              <td style={{ textAlign: 'center' }}>{s.goals}</td>
+                              <td style={{ textAlign: 'center' }}>{s.assists}</td>
+                              <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{s.points}</td>
+                              <td style={{ textAlign: 'center', color: s.plusMinus > 0 ? 'green' : s.plusMinus < 0 ? 'red' : 'inherit' }}>
+                                {s.plusMinus > 0 ? '+' : ''}{s.plusMinus}
+                              </td>
+                              <td style={{ textAlign: 'center' }}>{s.pim}</td>
+                              <td style={{ textAlign: 'center' }}>
+                                {s.gamesPlayed > 0 ? (s.points / s.gamesPlayed).toFixed(2) : '0.00'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  {currentSeasonStats && (
+                    <section className="stats-section">
+                      <h2 className="section-title">Current Season Performance Radar</h2>
+                      <div className="radar-chart-container">
+                        <StatChart
+                          data={getRadarChartData(currentSeasonStats as any)}
+                          type="radar"
+                          dataKeys={[{ key: 'value', name: 'Performance', color: '#003087' }]}
+                          xAxisKey="stat"
+                          height={400}
+                        />
+                        <p className="chart-note">
+                          Radar chart shows performance relative to NHL elite thresholds. Values are
+                          normalized to a 0-100 scale.
+                        </p>
+                      </div>
+                    </section>
+                  )}
+                </>
+              )}
+
+              {/* Career Stats */}
+              {careerStats && (
+                <section className="stats-section">
+                  <h2 className="section-title">Career Regular Season</h2>
+                  <div className="career-stats-summary-large">
+                    <div className="career-stat">
+                      <span className="career-stat-value">{careerStats.gamesPlayed}</span>
+                      <span className="career-stat-label">Games</span>
+                    </div>
+                    <div className="career-stat">
+                      <span className="career-stat-value">{careerStats.goals}</span>
+                      <span className="career-stat-label">Goals</span>
+                    </div>
+                    <div className="career-stat">
+                      <span className="career-stat-value">{careerStats.assists}</span>
+                      <span className="career-stat-label">Assists</span>
+                    </div>
+                    <div className="career-stat">
+                      <span className="career-stat-value">{careerStats.points}</span>
+                      <span className="career-stat-label">Points</span>
+                    </div>
+                    <div className="career-stat">
+                      <span className="career-stat-value">
+                        {formatPlusMinus(careerStats.plusMinus)}
+                      </span>
+                      <span className="career-stat-label">+/-</span>
+                    </div>
+                    <div className="career-stat">
+                      <span className="career-stat-value">{careerStats.pim}</span>
+                      <span className="career-stat-label">PIM</span>
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {playoffStats && playoffStats.gamesPlayed > 0 && (
+                <section className="stats-section">
+                  <h2 className="section-title">Career Playoffs</h2>
+                  <div className="career-stats-summary-large">
+                    <div className="career-stat">
+                      <span className="career-stat-value">{playoffStats.gamesPlayed}</span>
+                      <span className="career-stat-label">Games</span>
+                    </div>
+                    <div className="career-stat">
+                      <span className="career-stat-value">{playoffStats.goals}</span>
+                      <span className="career-stat-label">Goals</span>
+                    </div>
+                    <div className="career-stat">
+                      <span className="career-stat-value">{playoffStats.assists}</span>
+                      <span className="career-stat-label">Assists</span>
+                    </div>
+                    <div className="career-stat">
+                      <span className="career-stat-value">{playoffStats.points}</span>
+                      <span className="career-stat-label">Points</span>
+                    </div>
+                    <div className="career-stat">
+                      <span className="career-stat-value">
+                        {formatPlusMinus(playoffStats.plusMinus)}
+                      </span>
+                      <span className="career-stat-label">+/-</span>
+                    </div>
+                    <div className="career-stat">
+                      <span className="career-stat-value">{playoffStats.pim}</span>
+                      <span className="career-stat-label">PIM</span>
+                    </div>
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+
+          {/* Ice Charts Tab - Advanced Visualizations */}
+          {activeTab === 'charts' && (
+            <section className="stats-section">
+              <IceChartsPanel
+                shots={advancedShots}
+                hits={advancedHits}
+                faceoffs={advancedFaceoffs}
+                passes={gameData?.passes || []}
+                playerName={`${player.firstName.default} ${player.lastName.default}`}
+                gamesAnalyzed={gameData?.gamesProcessed || 0}
+                isLoading={gameDataLoading}
+              />
+            </section>
+          )}
+
+          {/* Analytics Charts Tab */}
+          {activeTab === 'analytics' && currentSeasonStats && (
+            <section className="stats-section">
+              <AdvancedAnalyticsTable
+                goals={currentSeasonStats.goals}
+                assists={currentSeasonStats.assists}
+                points={currentSeasonStats.points}
+                shots={currentSeasonStats.shots || 0}
+                plusMinus={currentSeasonStats.plusMinus || 0}
+                toiMinutes={(avgToi
+                  ? parseFloat(avgToi.split(':')[0]) + parseFloat(avgToi.split(':')[1]) / 60
+                  : 0) * currentSeasonStats.gamesPlayed}
+                gamesPlayed={currentSeasonStats.gamesPlayed}
+                position={player.position}
+                playerName={`${player.firstName.default} ${player.lastName.default}`}
+                realShotsFor={gameData?.shotsFor || []}
+                realShotsAgainst={gameData?.shotsAgainst || []}
+                gamesAnalyzed={gameData?.gamesProcessed || 0}
+              />
+            </section>
+          )}
+
+          {/* Advanced Analytics Tab */}
+          {activeTab === 'advanced' && (
+            <section className="stats-section">
+              {analyticsLoading && (
+                <div className="loading">
+                  <div className="loading-spinner"></div>
+                  <p>Calculating advanced analytics from play-by-play data...</p>
+                </div>
+              )}
+
+              {analyticsError && (
+                <div className="error">
+                  <h3 className="error-title">Error Loading Advanced Analytics</h3>
+                  <p className="error-message">{analyticsError.message}</p>
+                </div>
+              )}
+
+              {!analyticsLoading && !analyticsError && advancedAnalytics && (
+                <AdvancedAnalyticsDashboard
+                  analytics={advancedAnalytics}
+                  playerName={`${player.firstName.default} ${player.lastName.default}`}
+                />
+              )}
+
+              {!analyticsLoading && !analyticsError && !advancedAnalytics && (
+                <div className="empty-state">
+                  <h3 className="empty-state-title">No Analytics Available</h3>
+                  <p className="empty-state-message">
+                    Advanced analytics data is not available for this player in the current season.
+                  </p>
+                </div>
+              )}
+
+              {/* Rolling Analytics Time Series */}
+              {rollingData.length > 0 && (
+                <div style={{ marginTop: '2rem' }}>
+                  <RollingAnalyticsChart
+                    data={rollingData}
+                    windowSize={5}
+                    playerName={`${player.firstName.default} ${player.lastName.default}`}
+                  />
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Share Card Tab */}
+          {activeTab === 'card' && currentSeasonStats && (
+            <section className="stats-section">
+              <div className="card-section">
+                <h2 className="section-title">Shareable Analytics Card</h2>
+                <p className="section-description">
+                  A compact summary of key stats and advanced analytics, designed for sharing on social media.
+                </p>
+
+                {/* Player Search */}
+                <div className="card-search-section">
+                  <h3 className="subsection-title">Search Another Player</h3>
+                  <PlayerSearch
+                    placeholder="Search for a player..."
+                    onPlayerSelect={(selectedPlayer) => {
+                      navigate(`/player/${selectedPlayer.playerId}`);
+                      setActiveTab('card');
+                    }}
+                  />
+                </div>
+
+                <div className="card-preview" ref={cardRef}>
+                  <PlayerAnalyticsCard
+                    playerName={`${player.firstName.default} ${player.lastName.default}`}
+                    playerNumber={player.sweaterNumber}
+                    position={formatPosition(player.position)}
+                    teamName={player.fullTeamName?.default || player.currentTeamAbbrev || ''}
+                    teamAbbrev={player.currentTeamAbbrev || ''}
+                    teamLogo={player.teamLogo}
+                    headshot={player.headshot}
+                    season={formatSeasonId(player.featuredStats!.season)}
+                    gamesPlayed={currentSeasonStats.gamesPlayed}
+                    goals={currentSeasonStats.goals}
+                    assists={currentSeasonStats.assists}
+                    points={currentSeasonStats.points}
+                    plusMinus={currentSeasonStats.plusMinus || 0}
+                    analytics={advancedAnalytics || undefined}
+                    rollingMetrics={rollingData}
+                    pointsPerGame={ppg}
+                    goalsPerGame={currentSeasonStats.goals / currentSeasonStats.gamesPlayed}
+                    avgToi={avgToi}
+                    shots={currentSeasonStats.shots}
+                    powerPlayGoals={currentSeasonStats.powerPlayGoals}
+                    gameWinningGoals={currentSeasonStats.gameWinningGoals}
+                  />
+                </div>
+                <div className="card-actions">
+                  <button
+                    className="btn btn-primary share-btn"
+                    onClick={handleShare}
+                    disabled={isSharing}
+                  >
+                    {isSharing ? 'Generating...' : 'Share / Download'}
+                  </button>
+                  <p className="card-tip">
+                    Click the button to share directly or download as an image.
+                  </p>
+                </div>
+              </div>
+            </section>
+          )}
+
+          <div className="profile-actions">
+            <Link to="/compare" className="btn btn-primary">
+              Add to Comparison
+            </Link>
+            <Link to="/search" className="btn btn-secondary">
+              Search Another Player
+            </Link>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default PlayerProfile;

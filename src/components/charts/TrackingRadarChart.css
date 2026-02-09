@@ -1,0 +1,298 @@
+/* Tracking Radar Chart Styles */
+
+.tracking-radar-chart {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.tracking-radar-chart .chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.tracking-radar-chart .chart-title-section {
+  flex: 1;
+  min-width: 200px;
+}
+
+.tracking-radar-chart .chart-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 0.25rem 0;
+}
+
+.tracking-radar-chart .chart-subtitle {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+/* Overall Rating Badge */
+.overall-rating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 3px solid;
+  min-width: 100px;
+}
+
+.rating-value {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.rating-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 0.25rem;
+}
+
+/* Radar Container */
+.radar-container {
+  margin: 1rem 0;
+}
+
+/* Custom Tooltip */
+.radar-tooltip {
+  background: white;
+  padding: 12px 16px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e5e7eb;
+  min-width: 180px;
+}
+
+.radar-tooltip .tooltip-header {
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.radar-tooltip .tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  margin: 4px 0;
+  font-size: 0.875rem;
+}
+
+.radar-tooltip .tooltip-label {
+  color: #6b7280;
+}
+
+.radar-tooltip .tooltip-value {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.radar-tooltip .tooltip-value.percentile {
+  color: #3b82f6;
+}
+
+.radar-tooltip .tooltip-description {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-top: 8px;
+  font-style: italic;
+}
+
+/* Metric Details */
+.metric-details {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.details-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 1rem 0;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.metric-detail-card {
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.metric-detail-card .metric-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.metric-detail-card .metric-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.metric-detail-card .metric-percentile {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: white;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.metric-values {
+  margin-bottom: 0.75rem;
+}
+
+.value-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  margin: 0.25rem 0;
+}
+
+.value-row .value-label {
+  color: #6b7280;
+}
+
+.value-row .value-number {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.value-row.league .value-number {
+  color: #9ca3af;
+}
+
+/* Percentile Bar */
+.percentile-bar {
+  position: relative;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.percentile-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.percentile-marker {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 10px;
+  background: #374151;
+  border-radius: 1px;
+  transform: translateX(-50%);
+}
+
+/* Chart Legend */
+.chart-legend {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.chart-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.legend-line {
+  width: 24px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.legend-line.player {
+  background: #3b82f6;
+}
+
+.legend-line.league {
+  background: #9ca3af;
+  background-image: repeating-linear-gradient(
+    90deg,
+    #9ca3af 0px,
+    #9ca3af 5px,
+    transparent 5px,
+    transparent 10px
+  );
+}
+
+/* Empty State */
+.tracking-radar-chart .chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  color: #6b7280;
+  font-size: 0.95rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .tracking-radar-chart .chart-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .overall-rating {
+    align-self: center;
+  }
+
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chart-legend {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .tracking-radar-chart {
+    padding: 1rem;
+  }
+
+  .rating-value {
+    font-size: 1.5rem;
+  }
+
+  .metric-detail-card {
+    padding: 0.75rem;
+  }
+
+  .metrics-grid {
+    gap: 0.75rem;
+  }
+}

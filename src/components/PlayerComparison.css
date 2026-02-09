@@ -1,0 +1,123 @@
+.player-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.comparison-section {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.comparison-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--gray-900);
+  margin: 0 0 1.5rem 0;
+  text-align: center;
+}
+
+/* Comparison Table */
+.comparison-table-container {
+  overflow-x: auto;
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.comparison-table thead {
+  background: var(--gray-50);
+}
+
+.comparison-table th,
+.comparison-table td {
+  padding: 1rem;
+  text-align: center;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.comparison-table th:first-child,
+.comparison-table td:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+
+.player-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.table-player-headshot {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.player-name-short {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.player-team-short {
+  font-size: 0.8rem;
+  color: var(--gray-600);
+  font-weight: 500;
+}
+
+.metric-name {
+  font-weight: 600;
+  color: var(--gray-700);
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--gray-900);
+}
+
+.comparison-table tbody tr:hover {
+  background: var(--gray-50);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .comparison-section {
+    padding: 1rem;
+  }
+
+  .comparison-title {
+    font-size: 1.25rem;
+  }
+
+  .comparison-table th,
+  .comparison-table td {
+    padding: 0.75rem 0.5rem;
+    font-size: 0.875rem;
+  }
+
+  .table-player-headshot {
+    width: 36px;
+    height: 36px;
+  }
+
+  .player-name-short {
+    font-size: 0.85rem;
+  }
+
+  .player-team-short {
+    font-size: 0.75rem;
+  }
+}

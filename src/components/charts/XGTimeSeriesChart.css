@@ -1,0 +1,114 @@
+/* xG% Time Series Chart Styles */
+
+.xg-timeseries-chart {
+  --xg-positive: #10b981;
+  --xg-negative: #ef4444;
+  --xg-neutral: #6b7280;
+
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.chart-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.chart-value {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.timeseries-svg {
+  display: block;
+}
+
+.reference-line {
+  stroke: #475569;
+  stroke-width: 1;
+  stroke-dasharray: 4, 4;
+  opacity: 0.6;
+}
+
+.area-fill {
+  fill: url(#areaGradient);
+  opacity: 0.2;
+}
+
+.main-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.data-point {
+  stroke: #1e293b;
+  stroke-width: 1.5;
+  transition: r 0.2s ease;
+}
+
+.data-point.latest {
+  stroke-width: 2;
+}
+
+.data-point:hover {
+  r: 5;
+}
+
+.axis-label {
+  font-size: 9px;
+  fill: #64748b;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.axis-label.fifty {
+  fill: #94a3b8;
+  font-weight: 600;
+}
+
+.chart-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #334155;
+}
+
+.stat-label {
+  font-size: 0.65rem;
+  color: #64748b;
+}
+
+.stat-range {
+  font-size: 0.65rem;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.xg-timeseries-empty {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border-radius: 8px;
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+}
+
+.xg-timeseries-empty span {
+  font-size: 0.75rem;
+  color: #64748b;
+}

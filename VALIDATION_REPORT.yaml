@@ -1,0 +1,471 @@
+---
+validation_report:
+  title: "NHL Analytics Codebase Logic Consistency Audit"
+  generated_at: "2026-02-09"
+  status: "ISSUES FOUND"
+  summary: "7 critical consistency issues identified across coordinate systems, time parsing, and utility functions"
+
+inconsistencies:
+
+  # ============================================================================
+  # 1. COORDINATE SYSTEM CONSISTENCY
+  # ============================================================================
+  - id: "COORD-001"
+    severity: "CRITICAL"
+    category: "Coordinate System"
+    title: "Y Coordinate Range Inconsistency"
+    description: |
+      The rink.ts constants correctly define Y range as -42.5 to 42.5, but some files use inconsistent documentation.
+      This could lead to subtle bugs in coordinate transformations.
+    findings:
+      - file: "src/constants/rink.ts"
+        lines: [22, 23]
+        code: "MIN_Y: -42.5, MAX_Y: 42.5"
+        status: "CORRECT"
+      - file: "src/components/charts/NHLRink.tsx"
+        lines: [214]
+        code: "y: 42.5 - apiY"
+        status: "CORRECT - Properly inverts Y axis for SVG"
+    impact: "Minor - appears to be correctly implemented everywhere despite documentation"
+    files_affected:
+      - src/constants/rink.ts
+      - src/components/charts/NHLRink.tsx
+      - src/services/playByPlayService.ts
+    recommendation: "Code is correct; ensure all future coordinate work verifies Y is inverted for SVG rendering"
+
+  # ============================================================================
+  # 2. DUPLICATE normalizeCoordinates FUNCTION
+  # ============================================================================
+  - id: "FUNC-001"
+    severity: "CRITICAL"
+    category: "Duplicate Utility Functions"
+    title: "Two Different normalizeCoordinates Implementations"
+    description: |
+      normalizeCoordinates is defined in TWO different files with identical names but used in different contexts.
+      This creates confusion and maintainability issues. Both should be consolidated.
+    findings:
+      - file: "src/constants/rink.ts"
+        lines: [259, 260, 261, 262]
+        code: |
+          export function normalizeCoordinates(x: number, y: number): { x: number; y: number } {
+            return {
+              x: (x - COORDINATES.MIN_X) / (COORDINATES.MAX_X - COORDINATES.MIN_X) * 100,
+              y: (y - COORDINATES.MIN_Y) / (COORDINATES.MAX_Y - COORDINATES.MIN_Y) * 100,
+            };
+          }
+        purpose: "Converts NHL coordinates to 0-100 scale"
+
+      - file: "src/services/playByPlayService.ts"
+        lines: [463, 464, 465, 468]
+        code: |
+          export function normalizeCoordinates(xCoord: number, yCoord: number) {
+            const normalizedX = ((xCoord + 100) / 200) * 100;
+            const normalizedY = ((yCoord + 42.5) / 85) * 100;
+            return { x: Math.max(0, Math.min(100, normalizedX)), ... };
+          }
+        purpose: "Same purpose, with clamping to 0-100"
+
+      - file: "src/constants/rink.ts"
+        lines: [241]
+        code: "const normalizedX = (x + 100) / 2; // Different formula in isInSlot!"
+        status: "INCONSISTENT - Different normalization formula"
+
+    calculation_analysis:
+      - function_1: "(x - MIN) / (MAX - MIN) = (x + 100) / 200"
+        equivalent_form: "(x + 100) / 200"
+        result: "0-100 range (decimal)"
+
+      - function_2: "((x + 100) / 200) * 100"
+        equivalent_form: "(x + 100) / 2"
+        result: "0-100 range (percentage)"
+
+      - isInSlot_formula: "(x + 100) / 2"
+        result: "0-100 range, same as function_2"
+        mismatch: "But used with SLOT.MIN_X: 69 which expects NHL coordinates, not normalized!"
+
+    impact: "HIGH - isInSlot(x, y) has BROKEN logic: normalizes X to 0-100 but compares against 69/89 (NHL coords)"
+
+    files_affected:
+      - src/constants/rink.ts (lines 241-243)
+      - src/services/playByPlayService.ts (lines 463-474)
+
+    problematic_usage:
+      - location: "src/constants/rink.ts:240-244"
+        issue: |
+          export function isInSlot(x: number, y: number): boolean {
+            const normalizedX = (x + 100) / 2;  // Converts -100..100 to 0..100
+            return normalizedX >= SLOT.MIN_X && normalizedX <= SLOT.MAX_X &&
+                   y >= SLOT.MIN_Y && y <= SLOT.MAX_Y;
+          }
+        explanation: "SLOT.MIN_X=69, SLOT.MAX_X=89 are NHL coordinates (for positive X zone)"
+        actual_behavior: "Comparing normalized 0-100 value against 69-89 NHL coords"
+        result: "Logic broken - will never match correctly"
+
+    recommendation: |
+      Option A: Use NHL coordinates directly (x=-100..100, y=-42.5..42.5)
+        - Remove the (x + 100) / 2 normalization
+        - Compare against absolute values: absX >= 69 && absX <= 89
+
+      Option B: Keep normalization, fix the thresholds
+        - SLOT.MIN_X = 69/100 = 0.69
+        - SLOT.MAX_X = 89/100 = 0.89
+        - Current SLOT.NORMALIZED already has these!
+
+  # ============================================================================
+  # 3. TIME PARSING INCONSISTENCY - DUPLICATE IMPLEMENTATIONS
+  # ============================================================================
+  - id: "TIME-001"
+    severity: "HIGH"
+    category: "Time Parsing"
+    title: "Multiple parseTimeToSeconds Implementations"
+    description: |
+      parseTimeToSeconds should be centralized but multiple local implementations exist.
+      While functionally equivalent, this violates DRY principle and creates maintenance burden.
+    findings:
+      - shared_source:
+          file: "src/utils/timeUtils.ts"
+          lines: [18, 19, 20, 21, 22, 23]
+          code: |
+            export function parseTimeToSeconds(timeStr: string): number {
+              if (!timeStr) return 0;
+              const parts = timeStr.split(':');
+              const minutes = parseInt(parts[0] || '0', 10);
+              const seconds = parseInt(parts[1] || '0', 10);
+              return minutes * 60 + seconds;
+            }
+          status: "CANONICAL - This is the shared source"
+
+      - duplicates:
+          - file: "src/services/breakoutAnalytics.ts"
+            lines: [263, 264, 265, 266]
+            name: "parseTime (local)"
+            usage_count: 1
+
+          - file: "src/services/zoneTracking.ts"
+            lines: [336, 337, 338, 339, 340]
+            name: "parseTime (local)"
+            usage_count: 5
+
+          - file: "src/services/momentumTracking.ts"
+            lines: [55, 56, 57]
+            name: "convertToGameTime (local variant)"
+            usage_count: 2
+
+          - file: "src/services/winProbability.ts"
+            lines: [183, 184, 185]
+            name: "Inline split and parse"
+            usage_count: 1
+
+      - usage_inconsistencies:
+          - location: "src/services/momentumTracking.ts:56"
+            code: "const [minutes, seconds] = timeInPeriod.split(':').map(Number);"
+            issue: "Uses .map(Number) instead of parseInt with radix 10"
+            impact: "May parse octal in edge cases (not likely with time strings, but unsafe)"
+
+          - location: "src/services/winProbability.ts:184"
+            code: "const periodTime = minutes * 60 + seconds;"
+            issue: "Same split/map approach, but no validation for undefined"
+
+    files_with_local_implementations:
+      - src/services/breakoutAnalytics.ts
+      - src/services/zoneTracking.ts
+      - src/services/momentumTracking.ts
+      - src/services/winProbability.ts
+      - src/utils/formatters.ts (line 59-60, similar code)
+
+    recommendation: |
+      1. Replace all local parseTime implementations with imports from src/utils/timeUtils.ts
+      2. Update files to use: import { parseTimeToSeconds } from '../utils/timeUtils'
+      3. Affected files needing updates:
+         - src/services/breakoutAnalytics.ts
+         - src/services/zoneTracking.ts
+         - src/services/momentumTracking.ts (use parseTimeToSeconds in convertToGameTime)
+         - src/services/winProbability.ts
+
+  # ============================================================================
+  # 4. GAME FILTERING CONSISTENCY - gameType === 2
+  # ============================================================================
+  - id: "GAME-001"
+    severity: "MEDIUM"
+    category: "Game Filtering"
+    title: "gameType === 2 Regular Season Filter Applied Consistently"
+    description: |
+      Game filtering for regular season games is consistently applied across all dashboard pages.
+      Uses the pattern: (g.gameState === 'OFF' || g.gameState === 'FINAL') && g.gameType === 2
+    findings:
+      - files_using_pattern:
+          - file: "src/pages/AttackDNAPage.tsx"
+            lines: [158, 160, 161]
+            code: "g.gameState === 'OFF' || g.gameState === 'FINAL') && g.gameType === 2"
+            status: "CORRECT"
+
+          - file: "src/pages/ManagementDashboard.tsx"
+            lines: [113]
+            code: "(g.gameState === 'OFF' || g.gameState === 'FINAL') && g.gameType === 2"
+            status: "CORRECT"
+
+          - file: "src/pages/CoachingDashboard.tsx"
+            lines: [140]
+            code: "(g.gameState === 'OFF' || g.gameState === 'FINAL') && g.gameType === 2"
+            status: "CORRECT"
+
+          - file: "src/services/teamStatsService.ts"
+            lines: [207, 212]
+            code: ".filter((g: any) => g.gameType === 2) // Regular season only"
+            status: "CORRECT"
+
+    impact: "NONE - Correctly implemented everywhere"
+    recommendation: "No changes needed - this pattern is consistent across the codebase"
+
+  # ============================================================================
+  # 5. HIGH-DANGER DISTANCE DEFINITIONS
+  # ============================================================================
+  - id: "HD-001"
+    severity: "MEDIUM"
+    category: "High-Danger Zone Definition"
+    title: "High-Danger Distance Thresholds Inconsistent"
+    description: |
+      Multiple definitions of HIGH_DANGER_DISTANCE exist with different values.
+      Also, the definition in constants/rink.ts uses normalized coordinates.
+    findings:
+      - definition_1:
+          file: "src/constants/rink.ts"
+          lines: [113, 114, 115]
+          code: |
+            DANGER_ZONES: {
+              HIGH_DANGER: {
+                MAX_DISTANCE: 20,  // Within 20 feet
+          status: "Uses NHL feet, not coordinates"
+
+      - definition_2:
+          file: "src/services/decisionAnalytics.ts"
+          lines: [86, 87]
+          code: |
+            const HIGH_DANGER_DISTANCE = 25; // feet
+            const HIGH_DANGER_Y_THRESHOLD = 20; // feet from center (slot width)
+          purpose: "For shot selection analysis"
+
+      - definition_3:
+          file: "src/services/playStyleAnalytics.ts"
+          lines: [941]
+          code: "const HIGH_DANGER_DISTANCE = 25;"
+          purpose: "For shot location classification"
+
+      - definition_4:
+          file: "src/services/chemistryAnalytics.ts"
+          lines: [84]
+          code: "const HIGH_DANGER_DISTANCE = 25;"
+          purpose: "For chemistry metrics"
+
+      - definition_5:
+          file: "src/components/charts/NHLRink.tsx"
+          lines: [251]
+          code: "// High danger: within 20 feet of net, in slot"
+          value: 20
+
+    inconsistency: "20 feet (rink.ts) vs 25 feet (other services)"
+
+    impact: "MEDIUM - Different services use different thresholds for 'high-danger'"
+
+    files_affected:
+      - src/constants/rink.ts
+      - src/services/decisionAnalytics.ts
+      - src/services/playStyleAnalytics.ts
+      - src/services/chemistryAnalytics.ts
+      - src/components/charts/NHLRink.tsx
+
+    recommendation: |
+      Choose one authoritative HIGH_DANGER_DISTANCE value and export from constants/rink.ts
+      Typical NHL high-danger: 20-25 feet
+      Recommended: Use 20 feet (more conservative, widely accepted)
+      Then import { HIGH_DANGER_DISTANCE } from '../constants/rink' in all services
+
+  # ============================================================================
+  # 6. SLOT DEFINITION COORDINATE MISMATCH
+  # ============================================================================
+  - id: "SLOT-001"
+    severity: "HIGH"
+    category: "Shot Zone Definitions"
+    title: "SLOT Constants Use Mixed Coordinate Systems"
+    description: |
+      SLOT constants in rink.ts define boundaries in NHL coordinates (positive X offensive zone),
+      but the normalization formulas and usage may create confusion.
+    findings:
+      - slot_definition:
+          file: "src/constants/rink.ts"
+          lines: [76, 77, 78, 79, 80, 81, 82]
+          code: |
+            SLOT: {
+              MIN_X: 69,  // ~20 feet from goal
+              MAX_X: 89,  // At goal line
+              MIN_Y: -10,
+              MAX_Y: 10,
+              NORMALIZED: {
+                MIN_X: 0.69,
+                MAX_X: 0.89,
+          issue: "NORMALIZED values look like percentages but are actually NHL/100"
+
+      - usage_problem:
+          file: "src/constants/rink.ts"
+          lines: [240, 241, 242, 243]
+          code: |
+            export function isInSlot(x: number, y: number): boolean {
+              const normalizedX = (x + 100) / 2; // Convert -100..100 to 0..100
+              return normalizedX >= SLOT.MIN_X && normalizedX <= SLOT.MAX_X &&
+          explanation: "Compares normalized (0-100) value against NHL coords (69-89)"
+          result: "BROKEN - Will never be true"
+
+    impact: "CRITICAL - isInSlot function is completely broken"
+
+    recommendation: |
+      Fix isInSlot to use NHL coordinates:
+        export function isInSlot(x: number, y: number): boolean {
+          const absX = Math.abs(x);  // Normalize to positive X for offensive zone
+          return absX >= SLOT.MIN_X && absX <= SLOT.MAX_X &&
+                 y >= SLOT.MIN_Y && y <= SLOT.MAX_Y;
+        }
+      Or alternatively, use the NORMALIZED values:
+        export function isInSlot(x: number, y: number): boolean {
+          const normalizedX = (Math.abs(x) + 100) / 200;  // 0-100 scale
+          return normalizedX >= SLOT.NORMALIZED.MIN_X &&
+                 normalizedX <= SLOT.NORMALIZED.MAX_X &&
+                 y >= SLOT.MIN_Y && y <= SLOT.MAX_Y;
+        }
+
+  # ============================================================================
+  # 7. BOARDS DETECTION INCONSISTENCY
+  # ============================================================================
+  - id: "ZONE-001"
+    severity: "LOW"
+    category: "Zone Classification"
+    title: "Boards Classification Uses Inconsistent Y Thresholds"
+    description: |
+      Zone classification for 'left-boards' vs 'right-boards' uses Y coordinate sign.
+      Comment mentions Y-based, but implementation only checks Y sign.
+    findings:
+      - implementation:
+          file: "src/services/playStyleAnalytics.ts"
+          lines: [970, 971]
+          code: "return y > 0 ? 'left-boards' : 'right-boards';"
+          issue: "No distance check - treats entire half-rink as boards if on correct Y side"
+
+      - definition_from_rink:
+          file: "src/constants/rink.ts"
+          lines: [166, 167, 168]
+          code: |
+            RIM: {
+              MIN_HORIZONTAL: 20,    // Along boards
+              BOARD_Y_THRESHOLD: 35, // Near boards
+
+    context: |
+      In NHL coordinates: Y = ±42.5 (center to edges)
+      Boards are at Y ≈ 42.5 (edges)
+      But playStyleAnalytics doesn't check actual distance to boards
+
+    impact: "LOW - Zone classification still works, just less precise"
+
+    recommendation: |
+      Clarify the zones classification in playStyleAnalytics.ts:
+      function classifyShotZone(x: number, y: number): ShotZone {
+        const absX = Math.abs(x);
+        const absY = Math.abs(y);
+        const nearBoards = absY > BOARD_Y_THRESHOLD;  // Use constant from rink.ts
+
+        if (absX > 89) return 'behind-net';
+        if (absX < 55) return 'point';
+        if (absX >= 55 && absY < 15) {
+          return absX >= 75 ? 'high-slot' : 'low-slot';
+        }
+        return nearBoards ? (y > 0 ? 'left-boards' : 'right-boards') : 'perimeter';
+      }
+
+  # ============================================================================
+  # 8. CALCULATION FORMULAS VALIDATION
+  # ============================================================================
+  - id: "CALC-001"
+    severity: "LOW"
+    category: "Calculation Formulas"
+    title: "All Calculation Formulas Are Mathematically Consistent"
+    description: |
+      Reviewed all major calculation formulas across the codebase.
+      No mathematical inconsistencies found.
+    findings:
+      - distance_calculation:
+          formula: "sqrt((x - goalX)² + y²)"
+          status: "CORRECT - Standard Euclidean distance"
+          used_in:
+            - src/constants/rink.ts:246
+            - src/services/playStyleAnalytics.ts:84
+            - src/services/decisionAnalytics.ts:106
+
+      - angle_calculation:
+          formula: "atan2(lateralDistance, distanceFromGoalLine) * (180/π)"
+          status: "CORRECT"
+          used_in:
+            - src/services/playByPlayService.ts:505-506
+
+      - normalization_formula:
+          formula: "(value - MIN) / (MAX - MIN) * 100"
+          status: "CORRECT"
+          used_in:
+            - src/constants/rink.ts:261-262
+
+    impact: "NONE - All formulas are correct"
+    recommendation: "Continue using these established formulas"
+
+summary_statistics:
+  total_issues_found: 8
+  critical_issues: 3
+  high_severity_issues: 3
+  medium_severity_issues: 1
+  low_severity_issues: 1
+
+critical_actions_required:
+  - action_1:
+      id: "FUNC-001"
+      priority: "HIGHEST"
+      task: "Fix isInSlot function coordinate system mismatch"
+      effort: "1 hour"
+
+  - action_2:
+      id: "FUNC-001"
+      priority: "HIGH"
+      task: "Consolidate normalizeCoordinates implementations"
+      effort: "2 hours"
+
+  - action_3:
+      id: "TIME-001"
+      priority: "HIGH"
+      task: "Replace all local time parsing with parseTimeToSeconds imports"
+      effort: "1 hour"
+
+  - action_4:
+      id: "HD-001"
+      priority: "MEDIUM"
+      task: "Standardize HIGH_DANGER_DISTANCE definition"
+      effort: "1 hour"
+
+files_requiring_updates:
+  highest_priority:
+    - src/constants/rink.ts (lines 240-244)
+    - src/services/playByPlayService.ts (lines 463-474)
+
+  high_priority:
+    - src/services/breakoutAnalytics.ts (lines 263-266)
+    - src/services/zoneTracking.ts (lines 336-340)
+    - src/services/momentumTracking.ts (lines 55-62)
+    - src/services/winProbability.ts (lines 183-185)
+    - src/services/decisionAnalytics.ts (add import from utils)
+    - src/services/playStyleAnalytics.ts (add import from constants)
+    - src/services/chemistryAnalytics.ts (add import from constants)
+    - src/components/charts/NHLRink.tsx (add constants import)
+
+conclusion: |
+  The codebase is generally well-structured with consistent NHL coordinate system usage.
+  However, critical bugs exist in:
+  1. The isInSlot function (uses mixed coordinate systems)
+  2. Duplicate normalizeCoordinates implementations
+  3. Redundant local time parsing functions
+
+  These should be fixed to improve maintainability and prevent future bugs.
+  The game filtering and calculation formulas are correctly implemented.

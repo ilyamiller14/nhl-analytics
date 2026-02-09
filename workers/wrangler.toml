@@ -1,0 +1,25 @@
+name = "nhl-api-proxy"
+main = "src/index.ts"
+compatibility_date = "2026-02-08"
+
+# Development settings
+[dev]
+port = 8787
+
+# Production environment
+[env.production]
+name = "nhl-api-proxy"
+routes = [
+  { pattern = "api.deepdivenhl.com/*", zone_name = "deepdivenhl.com" }
+]
+
+# Scheduled cache warming - runs hourly
+# Processes 8 teams per run (cycles through all 32 teams every 4 hours)
+# Only fetches NEW games - existing games stay cached
+[triggers]
+crons = ["0 * * * *"]
+
+# KV namespace for persistent play-by-play cache
+[[kv_namespaces]]
+binding = "NHL_CACHE"
+id = "8ff07aec89bc4bc08a17cfec41cb9102"

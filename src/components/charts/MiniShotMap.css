@@ -1,0 +1,97 @@
+/* Mini Shot Map Styles */
+
+.mini-shot-map {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.map-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.map-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.map-stat {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #10b981;
+}
+
+.mini-rink-svg {
+  display: block;
+  margin: 0 auto;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.shot-marker {
+  transition: r 0.15s ease, opacity 0.15s ease;
+}
+
+.shot-marker:hover {
+  opacity: 1 !important;
+}
+
+.map-legend {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #334155;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6rem;
+  color: #94a3b8;
+}
+
+.legend-item .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.legend-item .dot.goal {
+  background: #10b981;
+}
+
+.legend-item .dot.shot {
+  background: #3b82f6;
+}
+
+.legend-item .dot.miss {
+  background: #f59e0b;
+}
+
+.map-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.xg-label {
+  font-size: 0.65rem;
+  color: #64748b;
+}
+
+.xg-value {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #f59e0b;
+}

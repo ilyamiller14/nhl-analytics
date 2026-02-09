@@ -1,0 +1,362 @@
+/* Shot Velocity Chart Styles */
+
+.shot-velocity-chart {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.shot-velocity-chart .chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.shot-velocity-chart .chart-title-section {
+  flex: 1;
+  min-width: 200px;
+}
+
+.shot-velocity-chart .chart-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 0.25rem 0;
+}
+
+.shot-velocity-chart .chart-subtitle {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+.shot-velocity-chart .chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.view-toggle {
+  display: flex;
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.toggle-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.toggle-btn:hover {
+  color: #374151;
+}
+
+.toggle-btn.active {
+  background: white;
+  color: #1f2937;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Key Metrics */
+.velocity-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.shot-velocity-chart .metric-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.shot-velocity-chart .metric-card.highlight {
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  border-color: #ef4444;
+}
+
+.shot-velocity-chart .metric-label {
+  font-size: 0.75rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.5rem;
+}
+
+.shot-velocity-chart .metric-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.metric-detail {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-top: 0.25rem;
+}
+
+/* Chart Section */
+.shot-velocity-chart .chart-section {
+  margin-bottom: 1.5rem;
+}
+
+.shot-velocity-chart .section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.shot-velocity-chart .chart-container {
+  margin: 1rem 0;
+}
+
+.chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: #6b7280;
+  font-size: 0.95rem;
+}
+
+/* Shot Type Grid */
+.shot-type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.shot-type-card {
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border-left: 4px solid;
+}
+
+.type-name {
+  display: block;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 0.5rem;
+}
+
+.type-count {
+  display: block;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.type-avg {
+  display: block;
+  font-size: 0.8rem;
+  color: #9ca3af;
+  margin-top: 0.25rem;
+}
+
+/* Type Filter */
+.type-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.filter-btn {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid #d1d5db;
+  background: white;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-btn:hover {
+  border-color: #9ca3af;
+  color: #374151;
+}
+
+.filter-btn.active {
+  background: #f3f4f6;
+  font-weight: 600;
+}
+
+/* Rink Container */
+.rink-container {
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0;
+  padding: 1rem;
+  background: #fafafa;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.rink-svg {
+  max-width: 500px;
+  height: auto;
+}
+
+.shots-layer {
+  pointer-events: all;
+}
+
+.shot-marker {
+  transition: opacity 0.15s, r 0.15s;
+  cursor: pointer;
+}
+
+.shot-marker:hover {
+  opacity: 1;
+}
+
+.hardest-shot-ring {
+  animation: pulse-ring 1.5s infinite;
+}
+
+@keyframes pulse-ring {
+  0%, 100% {
+    opacity: 1;
+    r: 4;
+  }
+  50% {
+    opacity: 0.5;
+    r: 5;
+  }
+}
+
+/* Velocity Legend */
+.velocity-legend {
+  margin-top: 1rem;
+  text-align: center;
+}
+
+.velocity-legend .legend-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 0.5rem;
+}
+
+.velocity-legend .legend-gradient {
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+.gradient-bar.velocity {
+  height: 16px;
+  background: linear-gradient(to right, #60a5fa 0%, #34d399 25%, #fbbf24 50%, #f97316 75%, #ef4444 100%);
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.gradient-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+/* Type Legend */
+.type-legend {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.type-legend .legend-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.shot-velocity-chart .legend-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.shot-velocity-chart .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.shot-velocity-chart .legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .shot-velocity-chart .chart-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .shot-velocity-chart .chart-controls {
+    justify-content: flex-start;
+  }
+
+  .velocity-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .shot-type-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .shot-velocity-chart .legend-items {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .shot-velocity-chart {
+    padding: 1rem;
+  }
+
+  .shot-velocity-chart .metric-value {
+    font-size: 1.25rem;
+  }
+
+  .type-filter {
+    gap: 0.25rem;
+  }
+
+  .filter-btn {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.75rem;
+  }
+}

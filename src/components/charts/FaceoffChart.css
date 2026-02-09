@@ -1,0 +1,139 @@
+.faceoff-chart-container {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px 0;
+}
+
+.faceoff-chart-title {
+  margin: 0 0 16px 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+}
+
+.faceoff-stats {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-bottom: 20px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  flex-wrap: wrap;
+}
+
+.faceoff-chart-wrapper {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  margin: 20px 0;
+}
+
+.faceoff-chart-svg {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.faceoff-dots-layer {
+  pointer-events: all;
+}
+
+.faceoff-dot-marker {
+  transition: all 0.2s;
+  stroke: rgba(0, 0, 0, 0.3);
+  stroke-width: 0.5;
+}
+
+.faceoff-dot-marker:hover {
+  opacity: 1 !important;
+  stroke: #000;
+  stroke-width: 1.5;
+  transform: scale(1.2);
+}
+
+/* Tooltip */
+.faceoff-tooltip {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 150px;
+}
+
+/* Legend */
+.faceoff-legend {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.legend-note {
+  font-size: 0.875rem;
+  color: #666;
+  margin-bottom: 12px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.legend-colors {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.legend-marker {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+}
+
+.legend-marker.excellent {
+  background: #00aa00;
+}
+
+.legend-marker.good {
+  background: #88cc00;
+}
+
+.legend-marker.average {
+  background: #ffaa00;
+}
+
+.legend-marker.poor {
+  background: #ff4444;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .faceoff-stats {
+    gap: 12px;
+  }
+
+  .legend-colors {
+    gap: 8px;
+  }
+
+  .faceoff-chart-svg {
+    max-width: 100%;
+    height: auto;
+  }
+}

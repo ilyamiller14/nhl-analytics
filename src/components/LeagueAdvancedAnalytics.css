@@ -1,0 +1,254 @@
+.league-advanced-analytics {
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.analytics-intro {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.analytics-intro h2 {
+  font-size: 32px;
+  color: #2c3e50;
+  margin-bottom: 8px;
+}
+
+.analytics-intro p {
+  color: #657786;
+  font-size: 16px;
+}
+
+/* Computation Section */
+.computation-section {
+  background: white;
+  border-radius: 12px;
+  margin-bottom: 32px;
+  border: 2px solid #e1e8ed;
+  overflow: hidden;
+}
+
+.computation-toggle {
+  width: 100%;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: background 0.2s;
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.computation-toggle:hover {
+  background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+}
+
+.toggle-icon {
+  font-size: 14px;
+  color: #003087;
+  transition: transform 0.2s;
+}
+
+.toggle-text {
+  flex: 1;
+  text-align: left;
+}
+
+.computation-content {
+  padding: 32px 24px;
+  background: white;
+  border-top: 2px solid #e1e8ed;
+}
+
+.computation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.computation-item {
+  background: #f8fafb;
+  padding: 20px;
+  border-radius: 8px;
+  border-left: 4px solid #003087;
+}
+
+.computation-item h4 {
+  font-size: 16px;
+  color: #003087;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.computation-item p {
+  font-size: 13px;
+  color: #2c3e50;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.computation-item strong {
+  color: #003087;
+  font-weight: 600;
+}
+
+.computation-item em {
+  display: block;
+  margin-top: 8px;
+  color: #657786;
+  font-size: 12px;
+}
+
+/* League Table Section */
+.league-table-section {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-top: 32px;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 3px solid #003087;
+}
+
+.table-header h3 {
+  font-size: 20px;
+  color: #2c3e50;
+  margin: 0;
+  font-weight: 600;
+}
+
+.table-meta {
+  font-size: 14px;
+  color: #657786;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+.league-analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  min-width: 1200px;
+}
+
+.league-analytics-table thead {
+  background: #f5f8fa;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.league-analytics-table th {
+  padding: 14px 16px;
+  text-align: left;
+  font-weight: 600;
+  color: #2c3e50;
+  border-bottom: 2px solid #e1e8ed;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.league-analytics-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.league-analytics-table th.sortable:hover {
+  background: #e8f0f7;
+}
+
+.league-analytics-table td {
+  padding: 16px;
+  border-bottom: 1px solid #f0f3f5;
+  color: #2c3e50;
+}
+
+.league-analytics-table tbody tr:hover {
+  background: #f8fafb;
+}
+
+.league-analytics-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.player-row {
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.player-name-link {
+  color: #003087;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.player-name-link:hover {
+  color: #0055A4;
+  text-decoration: underline;
+}
+
+.highlight-cell {
+  background: #e8f0f7;
+  font-weight: 700;
+  color: #003087;
+}
+
+.positive {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.negative {
+  color: #dc3545;
+  font-weight: 600;
+}
+
+.table-note {
+  text-align: center;
+  margin-top: 24px;
+  padding: 16px;
+  background: #e8f0f7;
+  border-radius: 8px;
+  color: #657786;
+  font-size: 14px;
+  font-style: italic;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .computation-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .table-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .league-analytics-table {
+    font-size: 12px;
+  }
+
+  .league-analytics-table th,
+  .league-analytics-table td {
+    padding: 10px 8px;
+  }
+}

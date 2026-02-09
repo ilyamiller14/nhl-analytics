@@ -1,0 +1,361 @@
+.momentum-tracker-container {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 24px;
+  margin: 20px 0;
+}
+
+.momentum-tracker-title {
+  margin: 0 0 20px 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+}
+
+/* Period Selector */
+.period-selector {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.period-button {
+  padding: 8px 20px;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  color: #666;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.period-button:hover:not(:disabled) {
+  border-color: #0066cc;
+  color: #0066cc;
+  background: #f0f7ff;
+}
+
+.period-button.active {
+  border-color: #0066cc;
+  background: #0066cc;
+  color: white;
+}
+
+.period-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Momentum Chart */
+.momentum-chart-wrapper {
+  margin: 24px 0;
+  padding: 16px;
+  background: #fafafa;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+}
+
+/* Custom Tooltip */
+.momentum-tooltip {
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 12px 16px;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 200px;
+}
+
+.tooltip-header {
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.tooltip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 0.85rem;
+}
+
+.tooltip-label {
+  color: #ccc;
+}
+
+.tooltip-value {
+  font-weight: 600;
+  color: white;
+}
+
+/* Momentum Swings */
+.momentum-swings {
+  margin: 24px 0;
+  padding: 16px;
+  background: #fff8f0;
+  border: 1px solid #ffe0b2;
+  border-radius: 6px;
+}
+
+.swings-title {
+  margin: 0 0 12px 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #ff6600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.swings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.swing-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  background: white;
+  border-radius: 4px;
+  border-left: 3px solid #ff6600;
+}
+
+.swing-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ff6600;
+  border: 2px solid white;
+  box-shadow: 0 0 0 1px #ff6600;
+  flex-shrink: 0;
+}
+
+.swing-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.swing-time {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #ff6600;
+}
+
+.swing-description {
+  font-size: 0.875rem;
+  color: #666;
+}
+
+/* Period Breakdown */
+.period-breakdown {
+  margin: 24px 0 0 0;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+}
+
+.breakdown-title {
+  margin: 0 0 16px 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.period-card {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.period-header {
+  background: linear-gradient(135deg, #0066cc, #0052a3);
+  color: white;
+  padding: 10px 16px;
+  font-weight: 700;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.period-stats {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.875rem;
+}
+
+.stat-label {
+  color: #666;
+  font-weight: 500;
+}
+
+.stat-value {
+  font-weight: 700;
+  color: #333;
+}
+
+.stat-value.positive {
+  color: #00aa00;
+}
+
+.stat-value.negative {
+  color: #cc0000;
+}
+
+/* Chart Legend */
+.chart-legend {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+  flex-wrap: wrap;
+}
+
+.legend-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.legend-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.legend-icon.positive {
+  background: #0066cc;
+}
+
+.legend-icon.negative {
+  background: #cc0000;
+}
+
+.legend-icon.swing {
+  background: #ff6600;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 0 0 1px #ff6600;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .momentum-tracker-container {
+    padding: 16px;
+  }
+
+  .momentum-tracker-title {
+    font-size: 1.25rem;
+  }
+
+  .period-selector {
+    gap: 8px;
+  }
+
+  .period-button {
+    padding: 6px 14px;
+    font-size: 0.8rem;
+  }
+
+  .momentum-chart-wrapper {
+    padding: 8px;
+  }
+
+  .breakdown-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chart-legend {
+    gap: 16px;
+  }
+
+  .legend-note {
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .period-selector {
+    flex-direction: column;
+  }
+
+  .period-button {
+    width: 100%;
+  }
+
+  .tooltip-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .swing-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* Recharts custom styling */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #e0e0e0;
+}
+
+.recharts-legend-item-text {
+  font-size: 0.875rem;
+  color: #666;
+  font-weight: 600;
+}
+
+.recharts-tooltip-cursor {
+  stroke: rgba(0, 0, 0, 0.1);
+}
+
+/* Reference line styling */
+.recharts-reference-line-line {
+  stroke-dasharray: 3 3;
+}
+
+.recharts-reference-dot {
+  cursor: pointer;
+}
+
+.recharts-reference-dot:hover {
+  filter: brightness(1.2);
+  transform: scale(1.2);
+}

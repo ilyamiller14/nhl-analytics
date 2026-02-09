@@ -1,0 +1,106 @@
+.ice-rink-chart {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.rink-chart-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--gray-900);
+  margin: 0 0 1rem 0;
+  text-align: center;
+}
+
+.rink-canvas-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.rink-canvas {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.rink-legend {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--gray-700);
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid white;
+}
+
+.legend-dot.goal {
+  background: #10b981;
+}
+
+.legend-dot.shot {
+  background: #003087;
+}
+
+.legend-dot.miss {
+  background: #f59e0b;
+}
+
+.legend-gradient {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--gray-700);
+}
+
+.gradient-bar {
+  width: 120px;
+  height: 16px;
+  border-radius: 8px;
+  background: linear-gradient(
+    to right,
+    rgba(255, 255, 0, 0.3),
+    rgba(255, 140, 0, 0.5),
+    rgba(255, 0, 0, 0.7)
+  );
+  border: 1px solid var(--gray-300);
+}
+
+@media (max-width: 768px) {
+  .ice-rink-chart {
+    padding: 1rem;
+  }
+
+  .rink-chart-title {
+    font-size: 1.125rem;
+  }
+
+  .rink-legend {
+    gap: 1rem;
+  }
+
+  .legend-item {
+    font-size: 0.8rem;
+  }
+
+  .gradient-bar {
+    width: 80px;
+    height: 12px;
+  }
+}

@@ -1,0 +1,64 @@
+.nhl-rink {
+  display: block;
+  margin: 0 auto;
+}
+
+.rink-ice {
+  fill: #f8fafc;
+}
+
+.rink-boards {
+  stroke: #475569;
+  stroke-width: 0.8;
+  fill: none;
+}
+
+.blue-line {
+  stroke: #1e40af;
+  stroke-width: 1.2;
+}
+
+.red-line {
+  stroke: #dc2626;
+  stroke-width: 1.5;
+}
+
+.faceoff-circle {
+  fill: none;
+  stroke: #dc2626;
+  stroke-width: 0.4;
+}
+
+.faceoff-dot {
+  fill: #dc2626;
+}
+
+.goal-crease {
+  fill: #bfdbfe;
+  stroke: #dc2626;
+}
+
+/* Danger zone colors */
+.high-danger-zone {
+  fill: #ef4444;
+  opacity: 0.25;
+}
+
+.medium-danger-zone {
+  fill: #f97316;
+  opacity: 0.18;
+}
+
+.low-danger-zone {
+  fill: #eab308;
+  opacity: 0.12;
+}
+
+.zone-labels text {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-weight: 600;
+  fill: #94a3b8;
+  text-transform: uppercase;
+  font-size: 6px;
+  letter-spacing: 0.5px;
+}

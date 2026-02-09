@@ -1,0 +1,558 @@
+/* Player Analytics Card - Shareable Design */
+
+.player-analytics-card {
+  --gauge-elite: #10b981;
+  --gauge-good: #3b82f6;
+  --gauge-average: #6b7280;
+  --gauge-below: #f59e0b;
+  --gauge-poor: #ef4444;
+  --gauge-neutral: #6b7280;
+  --gauge-warning: #f59e0b;
+  --gauge-cool: #3b82f6;
+
+  width: 400px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  border-radius: 16px;
+  padding: 1.5rem;
+  color: white;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  position: relative;
+  overflow: hidden;
+}
+
+.player-analytics-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899);
+}
+
+/* Header */
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.player-identity {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.player-headshot {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.player-headshot-placeholder {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.player-info {
+  flex: 1;
+}
+
+.player-name {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1.2;
+  color: white;
+}
+
+.player-meta {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.player-number {
+  font-weight: 600;
+  color: #60a5fa;
+}
+
+.player-position {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.player-team {
+  font-weight: 600;
+}
+
+.team-logo-badge {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  opacity: 0.9;
+}
+
+/* Season Badge */
+.season-badge {
+  display: inline-block;
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #93c5fd;
+  margin-bottom: 1rem;
+}
+
+/* Core Stats Grid */
+.core-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 1rem;
+  border-radius: 12px;
+  margin-bottom: 1rem;
+}
+
+.stat-block {
+  text-align: center;
+}
+
+.stat-block-value {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: white;
+}
+
+.stat-block.highlight .stat-block-value {
+  color: #60a5fa;
+}
+
+.stat-block-label {
+  display: block;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 0.125rem;
+}
+
+/* Rate Stats */
+.rate-stats {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: rgba(139, 92, 246, 0.1);
+  border-radius: 8px;
+}
+
+.rate-stat {
+  text-align: center;
+}
+
+.rate-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #a78bfa;
+}
+
+.rate-label {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Advanced Section */
+.advanced-section {
+  margin-top: 1rem;
+}
+
+.advanced-section .section-title {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 0 0 0.75rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Gauges Grid */
+.gauges-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.metric-gauge {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0.75rem;
+  border-radius: 8px;
+}
+
+.gauge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+}
+
+.gauge-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.gauge-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: white;
+}
+
+.gauge-bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+}
+
+.gauge-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.gauge-marker {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 10px;
+  background: white;
+  border-radius: 1px;
+  transform: translateX(-50%);
+}
+
+.gauge-percentile {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 0.25rem;
+  text-align: right;
+}
+
+/* xG Summary */
+.xg-summary {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.xg-item {
+  text-align: center;
+}
+
+.xg-value {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: white;
+}
+
+.xg-value.positive {
+  color: #10b981;
+}
+
+.xg-value.negative {
+  color: #ef4444;
+}
+
+.xg-label {
+  display: block;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 0.125rem;
+}
+
+.xg-diff {
+  padding: 0.25rem 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+/* xG Sections */
+.xg-section {
+  margin-bottom: 1rem;
+}
+
+.xg-section-header {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.individual-xg {
+  background: rgba(139, 92, 246, 0.1);
+  border-radius: 8px;
+  padding: 0.75rem;
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.individual-xg .xg-section-header {
+  color: #c4b5fd;
+}
+
+.individual-xg .xg-summary {
+  margin-top: 0.5rem;
+  padding-top: 0;
+  border-top: none;
+}
+
+.on-ice-xg {
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 8px;
+  padding: 0.75rem;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.on-ice-xg .xg-section-header {
+  color: #93c5fd;
+}
+
+.on-ice-xg .xg-summary {
+  margin-top: 0.5rem;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Footer */
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.branding {
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.data-note {
+  font-style: italic;
+}
+
+/* Responsive */
+@media (max-width: 440px) {
+  .player-analytics-card {
+    width: 100%;
+    max-width: 400px;
+    padding: 1rem;
+  }
+
+  .core-stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .gauges-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Print/Export Styles */
+@media print {
+  .player-analytics-card {
+    box-shadow: none;
+    border: 1px solid #333;
+  }
+}
+
+/* Games Summary */
+.games-summary {
+  margin-top: 0.75rem;
+  text-align: center;
+}
+
+.games-info {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.3px;
+}
+
+/* Rolling Metrics Section */
+.rolling-section {
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 10px;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.rolling-section .section-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #c4b5fd;
+  margin: 0 0 0.75rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.rolling-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+
+.rolling-metric {
+  text-align: center;
+  position: relative;
+}
+
+.rolling-value {
+  display: block;
+  font-size: 1rem;
+  font-weight: 700;
+  color: white;
+}
+
+.rolling-value.hot {
+  color: #f97316;
+}
+
+.rolling-value.cold {
+  color: #60a5fa;
+}
+
+.rolling-value.positive {
+  color: #10b981;
+}
+
+.rolling-value.negative {
+  color: #ef4444;
+}
+
+.rolling-label {
+  display: block;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 0.125rem;
+}
+
+.rolling-trend {
+  font-size: 0.7rem;
+  position: absolute;
+  top: -0.25rem;
+  right: 0;
+}
+
+/* Zone & Rush Stats Row */
+.zone-rush-row {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+}
+
+.mini-stat-group {
+  text-align: center;
+}
+
+.mini-stat-value {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #93c5fd;
+}
+
+.mini-stat-label {
+  display: block;
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 0.125rem;
+}
+
+/* Visualizations Row */
+.visualizations-row {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  justify-content: center;
+}
+
+.viz-container {
+  flex: 1;
+  max-width: 180px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+
+.viz-title {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 0 0 0.5rem 0;
+  text-align: center;
+}
+
+@media (max-width: 440px) {
+  .visualizations-row {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .viz-container {
+    max-width: 100%;
+    width: 100%;
+  }
+}

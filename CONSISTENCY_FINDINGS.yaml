@@ -1,0 +1,213 @@
+findings:
+  - type: aggregation
+    severity: critical
+    entity: shot
+    field: lateGame.totalShots vs byGameState aggregation
+    locations:
+      - file: "/Users/ilyamillwe/nhl-analytics/src/services/decisionAnalytics.ts:403-406"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/services/decisionAnalytics.ts:430-434"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/CoachingDashboard.tsx:245-260"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/CoachingDashboard.tsx:490-507"
+    message: |
+      Late game shots (period >= 3 AND last 5 minutes) are filtered independently from
+      game state shots (tied/leading/trailing). These filters are orthogonal, creating
+      a double-counting scenario where late game shots are counted in both their game state
+      category AND the late game category.
+
+      The UI displays them as separate sections implying mutual exclusivity, but they overlap.
+      Verification: (tied + leading + trailing) shots DOES NOT equal overall shots because
+      late game shots are included in both sets.
+    suggestion: |
+      Option 1: Clarify that late game is a SUBSET of game states - modify display to show
+      "X of Y leading shots were late game" instead of separate section.
+
+      Option 2: If late game should be independent, add validation:
+      late_game_only = lateGameShots that are NOT in any game_state
+      Then verify: tied + leading + trailing + late_game_only = overall
+
+      Option 3: Add warning logs to DecisionQualityMetrics when aggregation doesn't verify.
+
+  - type: cross-page
+    severity: critical
+    entity: game
+    field: gamesAnalyzed count and selection order
+    locations:
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/AttackDNAPage.tsx:158-162"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/AttackDNAPage.tsx:197"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/AttackDNAPage.tsx:211-213"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/CoachingDashboard.tsx:139-141"
+    message: |
+      AttackDNAPage and CoachingDashboard load the same team schedule but apply different
+      filtering/ordering logic, resulting in inconsistent game selections:
+
+      AttackDNAPage: reverse() then slice(0, N) = most recent N games
+      CoachingDashboard: slice(-N) = most recent N games in original order
+
+      If the schedule API returns non-chronological data, these could select different games.
+      Users see different game counts on AttackDNA page vs Coaching Dashboard for same team.
+    suggestion: |
+      1. Standardize: both pages should use slice(-N) on chronologically sorted games
+      2. Before filtering, explicitly sort by gameDate:
+         sortedGames = completedGames.sort((a, b) => new Date(a.gameDate) - new Date(b.gameDate))
+      3. Change display from count to date range: "Games from 2025-02-01 to 2025-02-15"
+      4. Create utility function getRecentCompletedGames(schedule, count) for reuse
+
+  - type: cross-page
+    severity: high
+    entity: game
+    field: gameState filtering consistency
+    locations:
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/AttackDNAPage.tsx:159-161"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/CoachingDashboard.tsx:140"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/ManagementDashboard.tsx:102"
+    message: |
+      Different pages filter for completed games using different predicates:
+
+      AttackDNAPage: (g.gameState === 'OFF' || g.gameState === 'FINAL') && g.gameType === 2
+      CoachingDashboard: (g.gameState === 'OFF' || g.gameState === 'FINAL')
+      ManagementDashboard: (g.gameState === 'OFF' || g.gameState === 'FINAL')
+
+      AttackDNAPage additionally filters g.gameType === 2 to exclude preseason/playoffs,
+      but Coaching/Management dashboards may include non-regular-season games.
+    suggestion: |
+      Standardize across all pages to only use regular season:
+      (g.gameState === 'OFF' || g.gameState === 'FINAL') && g.gameType === 2
+
+      Create utility: isCompletedRegularSeasonGame(game) in shared module
+
+  - type: calculation
+    severity: high
+    entity: shot
+    field: isHighDanger coordinate assumptions
+    locations:
+      - file: "/Users/ilyamillwe/nhl-analytics/src/services/decisionAnalytics.ts:114-127"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/services/decisionAnalytics.ts:85-94"
+    message: |
+      High-danger shot definition assumes goal is always at X=89 using absolute value normalization.
+      This is incorrect for the full NHL coordinate system where:
+      - Home team attacks towards X=89
+      - Away team attacks towards X=-89
+
+      The code uses Math.abs(x) which places goal at X=89 for both directions.
+      For away team shots from X=-30, the distance calculation is wrong:
+      actual distance to X=-89 != distance to X=89 (normalized via abs)
+    suggestion: |
+      Update to respect attacking direction:
+
+      function calculateDistanceFromGoal(x: number, y: number, teamId: number, homeTeamId: number): number {
+        const goalX = teamId === homeTeamId ? 89 : -89;
+        return Math.sqrt(Math.pow(x - goalX, 2) + Math.pow(y, 2));
+      }
+
+      Then update isHighDangerShot to pass these parameters.
+      Note: Check if ShotEvent/ShotWithContext have teamId already - may already be team-normalized.
+
+  - type: calculation
+    severity: high
+    entity: shot
+    field: shootingPct denominator ambiguity
+    locations:
+      - file: "/Users/ilyamillwe/nhl-analytics/src/services/decisionAnalytics.ts:270-280"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/services/decisionAnalytics.ts:417-418"
+    message: |
+      Shooting percentage uses shots.length as denominator without clarifying whether
+      this includes blocked shots. The formula is:
+      shootingPct = (goals / shots.length) * 100
+
+      If shots array includes 'blocked-shot' results, this is technically "all attempts".
+      If it should only be "shots that reached goalie", blocked shots should be excluded.
+      Current code provides no distinction or documentation.
+    suggestion: |
+      Option 1: Add filtering - exclude blocked shots if not intended:
+      const shotsThatReachedGoalie = shots.filter(s => s.result !== 'blocked-shot');
+      shootingPct = (goals / shotsThatReachedGoalie.length) * 100;
+
+      Option 2: Document in JSDoc exactly what's included:
+      /**
+       * Shooting percentage: (goals / all_shot_attempts)
+       * Includes blocked shots in denominator
+       */
+
+      Recommendation: Use option 2 (document) unless NHL stats define it differently
+
+  - type: state
+    severity: high
+    entity: game
+    field: DecisionQualityMetrics aggregation validation missing
+    locations:
+      - file: "/Users/ilyamillwe/nhl-analytics/src/services/decisionAnalytics.ts:424-442"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/services/decisionAnalytics.ts:403-406"
+    message: |
+      DecisionQualityMetrics object has no validation method to ensure internal consistency.
+      Specifically: tied.totalShots + leading.totalShots + trailing.totalShots should
+      equal overall.totalShots, but there's no assertion or warning if they diverge.
+
+      A coding error (e.g., shot with undefined gameState) could silently drop data
+      without any indication to caller.
+    suggestion: |
+      Add validation method to DecisionQualityMetrics:
+
+      function validateAggregation(metrics: DecisionQualityMetrics): { valid: boolean, errors: string[] } {
+        const errors: string[] = [];
+        const stateTotal = metrics.byGameState.tied.totalShots +
+                          metrics.byGameState.leading.totalShots +
+                          metrics.byGameState.trailing.totalShots;
+
+        if (stateTotal !== metrics.overall.totalShots) {
+          errors.push(`State totals (${stateTotal}) ≠ overall (${metrics.overall.totalShots})`);
+        }
+
+        // Check that goals are <= shots
+        if (metrics.overall.totalShots > 0) {
+          const totalGoals = metrics.byGameState.tied.goals +
+                            metrics.byGameState.leading.goals +
+                            metrics.byGameState.trailing.goals;
+          if (totalGoals !== Math.round(metrics.overall.totalShots * metrics.overall.shootingPct / 100)) {
+            errors.push('Goal counts don\'t aggregate correctly');
+          }
+        }
+
+        return { valid: errors.length === 0, errors };
+      }
+
+      Call this after creating metrics and log warnings if invalid.
+
+  - type: cross-page
+    severity: medium
+    entity: game
+    field: gamesAnalyzed in CoachingDashboard vs AttackDNAPage
+    locations:
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/CoachingDashboard.tsx:381"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/AttackDNAPage.tsx:440"
+    message: |
+      CoachingDashboard subtitle displays "Based on {decisionMetrics.gamesAnalyzed} games"
+      but the actual count depends on how many games had shots - if a completed game had
+      no team shots, it's not in the play-by-play analysis but may be in the schedule.
+
+      AttackDNAPage also shows gamesAnalyzed which is computed differently depending on
+      whether it's team or player mode.
+    suggestion: |
+      Display actual date range instead of just count:
+      "Based on 10 games (Feb 1-15, 2025)"
+
+      This prevents confusion about what "gamesAnalyzed" means.
+
+  - type: aggregation
+    severity: medium
+    entity: shot
+    field: rushPct + cyclePct + otherPct aggregation
+    locations:
+      - file: "/Users/ilyamillwe/nhl-analytics/src/services/decisionAnalytics.ts:435-441"
+      - file: "/Users/ilyamillwe/nhl-analytics/src/pages/CoachingDashboard.tsx:265-272"
+    message: |
+      Attack style percentages (rush/cycle/other) should sum to 100%, but the code doesn't
+      validate this. If totalStyleShots = 0, division by zero returns 0 for both percentages,
+      hiding the empty dataset condition.
+    suggestion: |
+      Verify in attacking style section:
+      rushPct + cyclePct = 100% (or close, accounting for rounding)
+
+      Also handle empty case explicitly:
+      if (totalStyleShots === 0) {
+        return { rushPct: 0, cyclePct: 0, otherShots: 0, ... }  // with flag for empty data
+      }

@@ -1,0 +1,177 @@
+/* Speed Profile Chart Styles */
+
+.speed-profile-chart {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.speed-profile-chart .chart-header {
+  margin-bottom: 1.5rem;
+}
+
+.speed-profile-chart .chart-title-section {
+  flex: 1;
+}
+
+.speed-profile-chart .chart-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 0.25rem 0;
+}
+
+.speed-profile-chart .chart-subtitle {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Key Metrics */
+.speed-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.metric-card.highlight {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-color: #f59e0b;
+}
+
+.metric-label {
+  font-size: 0.75rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.5rem;
+}
+
+.metric-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin-bottom: 0.25rem;
+}
+
+.metric-diff {
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.metric-diff.positive {
+  color: #10b981;
+}
+
+.metric-diff.negative {
+  color: #ef4444;
+}
+
+.metric-diff.neutral {
+  color: #6b7280;
+}
+
+.metric-percentile {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  margin-top: 0.25rem;
+}
+
+/* Chart Sections */
+.chart-section {
+  margin-bottom: 1.5rem;
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.chart-container {
+  margin: 1rem 0;
+}
+
+.chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: #6b7280;
+  font-size: 0.95rem;
+}
+
+/* Burst Legend */
+.burst-legend {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.burst-legend .legend-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.legend-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .speed-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .legend-items {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .speed-profile-chart {
+    padding: 1rem;
+  }
+
+  .metric-value {
+    font-size: 1.25rem;
+  }
+}

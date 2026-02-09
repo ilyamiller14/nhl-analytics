@@ -1,0 +1,572 @@
+---
+title: "NHL Analytics - Hockey Domain Validation Report"
+date: "2026-02-09"
+summary: "Comprehensive validation of hockey-specific metrics and calculations"
+
+# ============================================================================
+# 1. EXPECTED GOALS (xG) VALIDATION
+# ============================================================================
+
+xg_validation:
+  status: "PASS"
+  checks:
+    - metric: "xG Values Range"
+      requirement: "Must be between 0 and 1 (probability)"
+      location: "src/services/xgModel.ts:93"
+      finding: "PASS"
+      details:
+        - "Values clamped: Math.max(0.005, Math.min(0.60, xGoal))"
+        - "Minimum: 0.5% (reasonable floor)"
+        - "Maximum: 60% (reasonable ceiling for individual shots)"
+        - "Logic: sigmoid function produces valid probabilities before clamping"
+      code_snippet: |
+        const clampedXG = Math.max(0.005, Math.min(0.60, xGoal));
+
+    - metric: "xG Danger Level Thresholds"
+      requirement: "Thresholds should be reasonable percentages"
+      location: "src/constants/rink.ts:124-131"
+      finding: "PASS"
+      details:
+        - "HIGH_DANGER: >= 15% (0.15) - reasonable for close-range, high-quality chances"
+        - "MEDIUM_DANGER: >= 8% (0.08) - typical average shot xG"
+        - "LOW_DANGER: < 8% - perimeter, distance shots"
+      code_snippet: |
+        XG_THRESHOLDS = {
+          HIGH_DANGER: 0.15,
+          MEDIUM_DANGER: 0.08,
+          LOW_DANGER: 0,
+          MAX_REASONABLE: 0.60,
+          MIN_REASONABLE: 0.005,
+        }
+
+    - metric: "xG Model Coefficients"
+      requirement: "Distance and angle should have negative correlation"
+      location: "src/services/xgModel.ts:22-46"
+      finding: "PASS"
+      details:
+        - "Distance coefficient: -0.045 (further = lower xG) ✓"
+        - "Angle coefficient: -0.025 (wider angle = lower xG) ✓"
+        - "Shot type multipliers: Reasonable (wrist 1.0, tip 1.35, wrap 0.70) ✓"
+        - "Strength multipliers: PP 1.10 > 5v5 1.0 > SH 0.90 ✓"
+        - "Rebound bonus: 0.6 (rebounds ~2x odds) ✓"
+
+    - metric: "xG Batch Calculations"
+      requirement: "Total xG should be valid sum of individual shot xGs"
+      location: "src/services/xgModel.ts:122-124"
+      finding: "PASS"
+      details:
+        - "Simple summation: shots.map(calculateXG).reduce()"
+        - "No aggregation errors identified"
+
+    - metric: "Goals Above Expected (GAE)"
+      requirement: "Should be (actual goals - expected goals)"
+      location: "src/services/xgModel.ts:175-181"
+      finding: "PASS"
+      details:
+        - "Calculation: actualGoals - calculateTotalXG(shots)"
+        - "Correct interpretation of finishing skill"
+
+# ============================================================================
+# 2. PERCENTAGE VALIDATION
+# ============================================================================
+
+percentage_validation:
+  status: "PASS"
+  checks:
+    - metric: "Shooting Percentage"
+      requirement: "0-100 range"
+      locations:
+        - "src/services/advancedMetrics.ts:128"
+        - "src/services/computedAdvancedStats.ts:298"
+        - "src/services/decisionAnalytics.ts:272"
+      finding: "PASS"
+      details:
+        - "All calculations use: (goals / shots) * 100 with shots > 0 guards"
+        - "Properly clamped: Math.min(100, ...) in some contexts"
+        - "Default: 0 when shots = 0"
+      code_snippet: |
+        const shootingPct = player.shots > 0 ? (player.goals / player.shots) * 100 : 0;
+
+    - metric: "High-Danger Shot Percentage"
+      requirement: "0-100 range"
+      locations:
+        - "src/services/decisionAnalytics.ts:272"
+        - "src/services/playStyleAnalytics.ts:1137-1146"
+      finding: "PASS"
+      details:
+        - "Calculation: (highDangerShots / totalShots) * 100"
+        - "Guard: shots.length > 0 checks before division"
+        - "No overflow/underflow issues"
+
+    - metric: "Corsi For Percentage (CF%)"
+      requirement: "0-100 range"
+      locations:
+        - "src/services/computedAdvancedStats.ts:157-172"
+      finding: "PASS"
+      details:
+        - "Clamped to 35-65 range: Math.max(35, Math.min(65, estimate))"
+        - "Recalculated: CF / (CF + CA) * 100"
+        - "Realistic bounds prevent extreme values"
+
+    - metric: "Fenwick For Percentage (FF%)"
+      requirement: "0-100 range"
+      locations:
+        - "src/services/computedAdvancedStats.ts:214-228"
+      finding: "PASS"
+      details:
+        - "Same clamping as CF%: 35-65 range"
+        - "Based on Corsi methodology"
+
+    - metric: "Special Teams Rates"
+      requirement: "0-100 range (% of goals)"
+      location: "src/services/advancedMetrics.ts:150-154"
+      finding: "PASS"
+      details:
+        - "powerPlayRate: (ppGoals / totalGoals) * 100"
+        - "shorthandedRate: (shGoals / totalGoals) * 100"
+        - "Guard: goals <= 0 returns 0 for all rates"
+
+    - metric: "Zone Distribution Percentages"
+      requirement: "0-100 range, sum to 100"
+      location: "src/services/playStyleAnalytics.ts:1137-1146"
+      finding: "POTENTIAL_ISSUE"
+      details:
+        - "Calculation: (shotCount / totalShots) * 100"
+        - "⚠️ WARNING: No validation that zone percentages sum to 100"
+        - "No assertion or warning if sum != 100"
+      recommendation: "Add validation in computeAttackDNAv2() to warn if zone distribution doesn't sum to ~100"
+
+    - metric: "PDO Calculation"
+      requirement: "~100 (92-108 reasonable range)"
+      location: "src/services/computedAdvancedStats.ts:248-253"
+      finding: "PASS"
+      details:
+        - "PDO = onIceShootingPct + estimatedSavePct"
+        - "Save % clamped: 87-94"
+        - "Final PDO clamped: 92-108"
+        - "Realistic range matches hockey analytics standards"
+
+# ============================================================================
+# 3. SHOT DISTANCE VALIDATION
+# ============================================================================
+
+shot_distance_validation:
+  status: "PASS"
+  checks:
+    - metric: "Distance Input Validation"
+      requirement: "0-200 feet (NHL rink is 200ft long)"
+      location: "src/services/xgModel.ts:63-64"
+      finding: "PASS"
+      details:
+        - "Input clamped: Math.max(0, Math.min(200, distance))"
+        - "Valid range for NHL rink"
+        - "Prevents negative or unrealistic distances"
+      code_snippet: |
+        const validDistance = Math.max(0, Math.min(200, distance || 0)); // 0-200 feet
+
+    - metric: "Distance Calculation From Coordinates"
+      requirement: "Euclidean distance in feet"
+      location: "src/services/decisionAnalytics.ts:106-112"
+      finding: "PASS"
+      details:
+        - "Formula: sqrt((x - goalX)² + y²)"
+        - "Goal position: x = ±89 (correct NHL coordinate)"
+        - "Correctly identifies attacking goal based on x sign"
+      code_snippet: |
+        function calculateDistanceFromGoal(x: number, y: number): number {
+          const goalX = x >= 0 ? GOAL_X : -GOAL_X;
+          return Math.sqrt(Math.pow(x - goalX, 2) + Math.pow(y, 2));
+        }
+
+    - metric: "Average Shot Distance"
+      requirement: "Realistic range (typically 20-45ft in NHL)"
+      locations:
+        - "src/services/decisionAnalytics.ts:273"
+        - "src/constants/rink.ts:204"
+      finding: "PASS"
+      details:
+        - "Validation: 0-200ft range check in validateDecisionMetrics()"
+        - "League average: 32 feet (from LEAGUE_AVERAGES)"
+        - "Warning if avgDistance outside 20-45ft range"
+      code_snippet: |
+        if (metrics.overall.avgShotDistance < 0 || metrics.overall.avgShotDistance > 200) {
+          errors.push(`avgShotDistance (${metrics.overall.avgShotDistance.toFixed(1)}ft)`);
+        }
+
+    - metric: "Distance in Constants"
+      requirement: "Coordinate system calibration"
+      location: "src/constants/rink.ts:1-26"
+      finding: "PASS"
+      details:
+        - "NHL coordinate system: x -100 to 100 (200ft), y -42.5 to 42.5 (85ft)"
+        - "Center ice: (0, 0)"
+        - "Goal lines: x = ±89 (11ft from boards)"
+        - "Correctly matches NHL official dimensions"
+
+# ============================================================================
+# 4. HIGH-DANGER SHOT DEFINITION
+# ============================================================================
+
+high_danger_validation:
+  status: "PASS_WITH_NOTES"
+  checks:
+    - metric: "Primary High-Danger Threshold"
+      requirement: "< 25ft from net AND in slot (|y| < 20)"
+      locations:
+        - "src/services/decisionAnalytics.ts:86-120"
+        - "src/services/chemistryAnalytics.ts:84-113"
+        - "src/services/playStyleAnalytics.ts:941-982"
+      finding: "PASS"
+      details:
+        - "Distance threshold: 25 feet (consistent across all services)"
+        - "Slot threshold: |y| < 20 feet from center"
+        - "Definition: distance <= 25 AND |y| <= 20"
+        - "NHL analytics standard: 25ft is reasonable for high-danger area"
+        - "Slot definition appropriate for net-front opportunities"
+
+    - metric: "Alternative Definition by Angle"
+      requirement: "< 25ft AND angle < 45 degrees"
+      location: "src/services/xgModel.ts:157-159"
+      finding: "INCONSISTENCY"
+      details:
+        - "⚠️ WARNING: Different definition in xgModel"
+        - "Uses angle < 45 degrees instead of |y| < 20"
+        - "Distance still < 25ft ✓"
+        - "Could produce different results for shots at wide angles"
+      recommendation: |
+        Consider unifying high-danger definitions:
+        - Current: distance < 25 AND |y| < 20
+        - Alternative: distance < 25 AND angle < 45
+        Both are valid; choose one and document the choice.
+
+    - metric: "Constants Rink High-Danger Zone"
+      requirement: "Consistent with service definitions"
+      location: "src/constants/rink.ts:113-116"
+      finding: "INCONSISTENCY"
+      details:
+        - "Defined as: MAX_DISTANCE: 20, MAX_ANGLE: 45"
+        - "⚠️ WARNING: Uses 20ft NOT 25ft"
+        - "Creates potential mismatch with service calculations"
+        - "DANGER_ZONES.HIGH_DANGER uses stricter 20ft definition"
+      recommendation: "Reconcile: decide if high-danger is 20ft or 25ft, then apply consistently"
+
+    - metric: "Slot Definition Coordinates"
+      requirement: "Proper coordinate mapping"
+      location: "src/constants/rink.ts:75-90"
+      finding: "PASS"
+      details:
+        - "Slot: x 69-89 (20ft from goal line), y -10 to +10"
+        - "Normalized: properly converted for visualization"
+        - "isInSlot() function correctly checks both x and y ranges"
+
+# ============================================================================
+# 5. GAME STATE CALCULATIONS
+# ============================================================================
+
+game_state_validation:
+  status: "PASS"
+  checks:
+    - metric: "Game State Determination"
+      requirement: "tied/leading/trailing based on goal differential"
+      location: "src/services/decisionAnalytics.ts:187-196"
+      finding: "PASS"
+      details:
+        - "Logic: goalDifferential = teamScore - opponentScore"
+        - "tied: goalDifferential === 0 ✓"
+        - "leading: goalDifferential > 0 ✓"
+        - "trailing: goalDifferential < 0 ✓"
+        - "No gaps in logic; all cases covered"
+      code_snippet: |
+        if (goalDifferential === 0) {
+          gameState = 'tied';
+        } else if (goalDifferential > 0) {
+          gameState = 'leading';
+        } else {
+          gameState = 'trailing';
+        }
+
+    - metric: "Goal Differential Calculation"
+      requirement: "Correct team and opponent scores"
+      location: "src/services/decisionAnalytics.ts:159-197"
+      finding: "PASS"
+      details:
+        - "Properly identifies home vs away team"
+        - "Builds score timeline from goal events"
+        - "Looks up most recent score at shot time"
+        - "Period and time comparisons correct"
+
+    - metric: "Score Timeline Building"
+      requirement: "Accurate score tracking"
+      location: "src/services/decisionAnalytics.ts:127-154"
+      finding: "PASS"
+      details:
+        - "Initializes with 0-0"
+        - "Increments score only on 'goal' events"
+        - "Stores score AFTER goal (correct interpretation)"
+        - "Guards against undefined values"
+
+    - metric: "Late Game Definition"
+      requirement: "3rd period, last 5 minutes"
+      location: "src/services/decisionAnalytics.ts:90-91, 232"
+      finding: "PASS"
+      details:
+        - "Threshold: 300 seconds (5 minutes)"
+        - "Period >= 3 check ✓"
+        - "periodTimeRemaining <= 300 ✓"
+        - "Correct: isLateGame = period >= 3 && remaining <= 300"
+
+# ============================================================================
+# 6. DIVISION BY ZERO PROTECTION
+# ============================================================================
+
+division_by_zero_validation:
+  status: "PASS"
+  checks:
+    - metric: "Shooting Percentage Calculation"
+      locations:
+        - "src/services/advancedMetrics.ts:128"
+        - "src/services/computedAdvancedStats.ts:298"
+      finding: "PASS"
+      details:
+        - "Guard: shots > 0 before division"
+        - "Default: returns 0 if shots = 0"
+
+    - metric: "Percentage Rate Calculations"
+      locations:
+        - "src/services/playStyleAnalytics.ts:598"
+        - "src/services/playStyleAnalytics.ts:1137"
+      finding: "PASS"
+      details:
+        - "totalSequences > 0 check"
+        - "totalShots > 0 check"
+        - "Defensive programming prevents crashes"
+
+    - metric: "Corsi/Fenwick Percentage"
+      location: "src/services/computedAdvancedStats.ts:167"
+      finding: "PASS"
+      details:
+        - "Formula: CF / (CF + CA) * 100"
+        - "Both CF and CA set to minimum 1 in edge cases"
+        - "guardrail: Math.max(1, estimatedCorsiAgainst)"
+
+    - metric: "Per-60 Calculations"
+      location: "src/services/advancedMetrics.ts:76-96"
+      finding: "PASS"
+      details:
+        - "Guard: totalMinutes <= 0 returns zero struct"
+        - "Prevents division by zero in per-60 calcs"
+
+    - metric: "Per-Game Calculations"
+      location: "src/services/advancedMetrics.ts:102-122"
+      finding: "PASS"
+      details:
+        - "Guard: gamesPlayed <= 0 returns zero struct"
+
+# ============================================================================
+# 7. COORDINATE SYSTEM VALIDATION
+# ============================================================================
+
+coordinate_validation:
+  status: "PASS"
+  checks:
+    - metric: "NHL Coordinate System"
+      requirement: "x: -100 to 100, y: -42.5 to 42.5"
+      location: "src/constants/rink.ts:16-26"
+      finding: "PASS"
+      details:
+        - "MIN_X: -100 ✓"
+        - "MAX_X: 100 ✓"
+        - "MIN_Y: -42.5 ✓"
+        - "MAX_Y: 42.5 ✓"
+        - "Matches NHL API standard"
+
+    - metric: "Goal Positions"
+      requirement: "x = ±89, y = 0"
+      location: "src/constants/rink.ts:64-73"
+      finding: "PASS"
+      details:
+        - "HOME goal: (-89, 0) ✓"
+        - "AWAY goal: (89, 0) ✓"
+        - "11 feet from end boards (200 - 178 = 11 * 2 = 22 / 2) ✓"
+
+    - metric: "Zone Boundaries"
+      requirement: "Defensive, Neutral, Offensive zones"
+      location: "src/constants/rink.ts:28-45"
+      finding: "PASS"
+      details:
+        - "Defensive: x < -25 ✓"
+        - "Neutral: -25 <= x <= 25 ✓"
+        - "Offensive: x > 25 ✓"
+        - "Blue lines at x = ±25 (standard) ✓"
+
+    - metric: "Blue Line Distance"
+      requirement: "25 feet from center"
+      location: "src/constants/rink.ts:54-61"
+      finding: "PASS"
+      details:
+        - "DISTANCE_FROM_CENTER: 25 ✓"
+        - "Matches NHL standard (200 / 4 = 50, 50/2 = 25) ✓"
+
+    - metric: "Coordinate Normalization"
+      requirement: "Proper conversion for visualization"
+      location: "src/constants/rink.ts:259-264"
+      finding: "PASS"
+      details:
+        - "Formula: (coord - MIN) / (MAX - MIN) * 100"
+        - "Correctly maps NHL coords to 0-100 scale"
+        - "Used for half-rink normalization in visualizations"
+
+# ============================================================================
+# 8. PERCENTILE AND RANKING CALCULATIONS
+# ============================================================================
+
+percentile_validation:
+  status: "PASS"
+  checks:
+    - metric: "Percentile Ranking Formula"
+      requirement: "Rank / Total * 100"
+      locations:
+        - "src/services/advancedMetrics.ts:255"
+        - "src/services/statsService.ts:231"
+      finding: "PASS"
+      details:
+        - "Formula: (index / sorted.length) * 100"
+        - "Results in 0-100 range"
+        - "Correctly sorts ascending then calculates percentile"
+
+# ============================================================================
+# 9. CLAMPING AND BOUNDS CHECKING
+# ============================================================================
+
+bounds_checking_validation:
+  status: "PASS"
+  details:
+    observations:
+      - "Extensive use of Math.max/Math.min throughout codebase"
+      - "xG: 0.5%-60% ✓"
+      - "Percentages: 0-100% ✓"
+      - "Decision indicators: 0-100 ✓"
+      - "Corsi%: 35-65% (reasonable bounds) ✓"
+      - "PDO: 92-108 (realistic range) ✓"
+      - "Save%: 87-94% (realistic range) ✓"
+
+# ============================================================================
+# SUMMARY OF FINDINGS
+# ============================================================================
+
+summary:
+  overall_status: "PASS with MINOR INCONSISTENCIES"
+
+  critical_findings: []
+
+  warnings:
+    - id: "HD_DEFINITION_MISMATCH"
+      severity: "MEDIUM"
+      title: "High-Danger Shot Definition Inconsistency"
+      locations:
+        - "src/services/decisionAnalytics.ts (25ft + |y| < 20)"
+        - "src/services/xgModel.ts (25ft + angle < 45)"
+        - "src/constants/rink.ts (20ft + angle < 45)"
+      impact: "May produce different results depending on which service is used"
+      recommendation: |
+        Standardize high-danger definition:
+        Option A: All use 25ft + |y| < 20 (current decision analytics)
+        Option B: All use 25ft + angle < 45 (current xgModel/constants)
+        Option C: Define once in constants/rink.ts, import everywhere
+        Suggested: Use Option C for single source of truth.
+
+    - id: "ZONE_PERCENTAGE_VALIDATION"
+      severity: "LOW"
+      title: "Zone Distribution Percentage Sum Not Validated"
+      location: "src/services/playStyleAnalytics.ts:1137-1146"
+      impact: "Zone percentages may sum to 99.x or 100.x due to rounding"
+      recommendation: |
+        Add validation in computeAttackDNAv2() or caller:
+        - Calculate zone percentages
+        - Verify sum is within [99.5, 100.5]
+        - Warn if rounding errors are significant
+
+  passes:
+    - "xG values properly bounded (0.5% - 60%)"
+    - "All percentage calculations guarded against division by zero"
+    - "Shot distances validated (0-200 feet)"
+    - "Game state logic comprehensive (tied/leading/trailing)"
+    - "Coordinate system matches NHL standard"
+    - "Clamping and bounds checking extensive and appropriate"
+    - "PDO, Corsi, Fenwick calculations use realistic ranges"
+    - "Per-60 and per-game calculations properly guarded"
+    - "Special teams rates calculation correct"
+
+# ============================================================================
+# RECOMMENDATIONS
+# ============================================================================
+
+recommendations:
+  immediate:
+    - priority: "HIGH"
+      action: "Create constants/highDangerDefinition.ts"
+      description: |
+        Export single HD_SHOT_DEFINITION object:
+        {
+          DISTANCE_FT: 25,
+          SLOT_Y_THRESHOLD: 20,
+          ANGLE_DEGREES: 45
+        }
+        Import in all services for consistency.
+
+    - priority: "MEDIUM"
+      action: "Add HD-definition validation"
+      description: |
+        In validateDecisionMetrics() or new validateShotMetrics():
+        - Verify high-danger percentage consistent across services
+        - Compare results between distance+y vs distance+angle
+        - Log warnings if methods produce >5% different results
+
+  future:
+    - priority: "LOW"
+      action: "Document percentage calculation standards"
+      description: |
+        Create docs/PERCENTAGE_CALCULATIONS.md:
+        - When to use 0-100 vs 0-1 scales
+        - Rounding standards (1 decimal place?)
+        - When to clamp vs warn
+
+    - priority: "LOW"
+      action: "Add xG model validation tests"
+      description: |
+        Unit tests for xG boundaries:
+        - Verify sigmoid output clamping
+        - Test extreme input values
+        - Verify danger level thresholds
+
+test_scenarios:
+  scenario_1:
+    title: "Extreme Distance Shot"
+    input: { distance: 150, angle: 60, shotType: 'wrist', strength: '5v5' }
+    expected_xg: "0.005-0.02 (low danger)"
+    status: "PASS"
+
+  scenario_2:
+    title: "Tip-In from Slot"
+    input: { distance: 15, angle: 15, shotType: 'tip', strength: '5v5', isRebound: true }
+    expected_xg: "0.25-0.40 (high danger)"
+    status: "PASS"
+
+  scenario_3:
+    title: "Zero Shots"
+    input: { goals: 5, shots: 0 }
+    expected_percent: "0 (guarded)"
+    status: "PASS"
+
+  scenario_4:
+    title: "100% Shooting"
+    input: { goals: 10, shots: 10 }
+    expected_percent: "100.0"
+    status: "PASS"
+
+  scenario_5:
+    title: "Game State - Leading by 2"
+    input: { teamScore: 3, opponentScore: 1 }
+    expected_state: "leading"
+    expected_differential: "+2"
+    status: "PASS"

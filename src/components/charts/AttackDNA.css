@@ -1,0 +1,942 @@
+/**
+ * Attack DNA Visualization Styles
+ *
+ * Three-layer visualization:
+ * 1. Flow Field - Vector arrows
+ * 2. Attack Ribbons - Sankey-style paths
+ * 3. Fingerprint Radar - Hexagonal chart
+ */
+
+/* CSS Variables for theming */
+:root {
+  --attack-dna-bg: #ffffff;
+  --attack-dna-border: #e5e7eb;
+  --attack-dna-text: #1f2937;
+  --attack-dna-text-secondary: #6b7280;
+  --attack-dna-text-muted: #9ca3af;
+  --attack-dna-surface: #f9fafb;
+  --attack-dna-surface-alt: #f3f4f6;
+  --attack-dna-primary: #3b82f6;
+}
+
+/* Container */
+.attack-dna-container {
+  background: var(--attack-dna-bg);
+  border: 1px solid var(--attack-dna-border);
+  border-radius: 12px;
+  padding: 24px;
+  margin: 20px 0;
+}
+
+.attack-dna-title {
+  margin: 0 0 20px 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--attack-dna-text);
+  text-align: center;
+  border-bottom: 2px solid var(--attack-dna-border);
+  padding-bottom: 12px;
+}
+
+/* Rink Visualization */
+.attack-dna-rink-wrapper {
+  position: relative;
+  margin: 0 auto 24px;
+  max-width: 100%;
+}
+
+.attack-dna-rink {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--attack-dna-border);
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+/* Flow Field Layer */
+.flow-field-layer {
+  pointer-events: all;
+}
+
+.flow-arrow {
+  transition: opacity 0.2s ease;
+  cursor: pointer;
+}
+
+.flow-arrow:hover line {
+  stroke-width: 3 !important;
+}
+
+/* Attack Ribbons Layer */
+.ribbons-layer {
+  pointer-events: all;
+}
+
+.attack-ribbon {
+  transition: all 0.2s ease;
+}
+
+.ribbon-path {
+  transition: all 0.2s ease;
+}
+
+.attack-ribbon:hover .ribbon-path {
+  stroke-width: 12 !important;
+  opacity: 0.95 !important;
+}
+
+/* Danger Zone Overlay */
+.danger-zone-layer {
+  pointer-events: none;
+}
+
+.danger-zone-overlay {
+  mix-blend-mode: multiply;
+}
+
+/* Origin Zone Indicators */
+.origin-indicator {
+  transition: all 0.2s ease;
+}
+
+.origin-zone-legend {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--attack-dna-surface);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.origin-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--attack-dna-text-secondary);
+}
+
+.origin-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Goal Markers */
+.goal-markers-layer {
+  pointer-events: none;
+}
+
+.goal-marker {
+  animation: goal-pulse 2s ease-in-out infinite;
+}
+
+@keyframes goal-pulse {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 1; }
+}
+
+/* Ribbon Tooltip */
+.ribbon-tooltip {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.95);
+  color: white;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  min-width: 180px;
+  overflow: hidden;
+}
+
+.ribbon-tooltip .tooltip-header {
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.1);
+  border-left: 4px solid;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.ribbon-tooltip .tooltip-stats {
+  padding: 10px 14px;
+}
+
+.ribbon-tooltip .tooltip-stat {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px 0;
+}
+
+.ribbon-tooltip .stat-label {
+  color: #9ca3af;
+  font-size: 0.8rem;
+}
+
+.ribbon-tooltip .stat-value {
+  font-weight: 600;
+  color: white;
+}
+
+/* Archetype Distribution Bar */
+.archetype-bar-section {
+  margin-bottom: 24px;
+}
+
+.archetype-bar-section .section-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--attack-dna-text);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.archetype-distribution-bar {
+  display: flex;
+  height: 32px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--attack-dna-surface);
+}
+
+.archetype-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  position: relative;
+}
+
+.archetype-segment:hover {
+  filter: brightness(1.1);
+  transform: scaleY(1.1);
+}
+
+.archetype-segment.inactive {
+  filter: grayscale(0.5);
+}
+
+.segment-label {
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+}
+
+/* Archetype Legend */
+.archetype-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.archetype-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.8rem;
+  color: var(--attack-dna-text-secondary);
+}
+
+.archetype-legend .legend-item:hover {
+  background: var(--attack-dna-surface);
+}
+
+.archetype-legend .legend-item.active {
+  background: var(--attack-dna-surface-alt);
+  font-weight: 600;
+}
+
+.archetype-legend .legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.archetype-legend .legend-label {
+  flex: 1;
+}
+
+.archetype-legend .legend-value {
+  font-weight: 600;
+  color: var(--attack-dna-text);
+}
+
+/* Panels Grid */
+.attack-dna-panels {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+/* Fingerprint Panel */
+.fingerprint-panel {
+  background: var(--attack-dna-surface);
+  border: 1px solid var(--attack-dna-border);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.fingerprint-panel .panel-header {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--attack-dna-text);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.radar-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.fingerprint-radar {
+  display: block;
+}
+
+.primary-style {
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.primary-style .style-label {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--attack-dna-primary);
+}
+
+.primary-style .secondary-style {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--attack-dna-text-secondary);
+}
+
+.style-strength {
+  font-size: 0.8rem;
+  color: var(--attack-dna-text-muted);
+  text-align: center;
+}
+
+.comparison-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--attack-dna-border);
+}
+
+.comparison-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--attack-dna-text-secondary);
+}
+
+.comparison-legend .color-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.comparison-legend .color-indicator.primary {
+  background: #3b82f6;
+}
+
+.comparison-legend .color-indicator.comparison {
+  background: #9ca3af;
+  border: 1px dashed #6b7280;
+}
+
+/* Stats Panel */
+.stats-panel {
+  background: var(--attack-dna-surface);
+  border: 1px solid var(--attack-dna-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.stats-panel .panel-header {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--attack-dna-text);
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  background: white;
+  border: 1px solid var(--attack-dna-border);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.stat-card .stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--attack-dna-text);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.stat-card .stat-label {
+  font-size: 0.75rem;
+  color: var(--attack-dna-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Period Breakdown */
+.period-breakdown-section {
+  margin-bottom: 20px;
+}
+
+.period-breakdown-section .section-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--attack-dna-text);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.period-cards {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.period-card {
+  flex: 0 0 auto;
+  min-width: 140px;
+  background: var(--attack-dna-surface);
+  border: 1px solid var(--attack-dna-border);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+
+.period-number {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--attack-dna-primary);
+  margin-bottom: 8px;
+}
+
+.period-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.period-stat {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+}
+
+.period-stat .label {
+  color: var(--attack-dna-text-secondary);
+}
+
+.period-stat .value {
+  font-weight: 600;
+  color: var(--attack-dna-text);
+}
+
+.period-archetype {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Flow Field Legend */
+.flow-field-legend {
+  background: var(--attack-dna-surface);
+  border: 1px solid var(--attack-dna-border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 16px;
+}
+
+.flow-field-legend .legend-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--attack-dna-text);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.flow-field-legend .legend-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.flow-field-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--attack-dna-text-secondary);
+}
+
+.flow-field-legend .arrow-indicator {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: var(--attack-dna-primary);
+}
+
+.flow-field-legend .size-indicator {
+  width: 20px;
+  height: 4px;
+  background: linear-gradient(to right, #d1d5db, var(--attack-dna-primary));
+  border-radius: 2px;
+}
+
+.flow-field-legend .color-gradient {
+  display: flex;
+  width: 40px;
+  height: 8px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.flow-field-legend .color-gradient .low {
+  flex: 1;
+  background: #ef4444;
+}
+
+.flow-field-legend .color-gradient .high {
+  flex: 1;
+  background: #22c55e;
+}
+
+/* Responsive Design */
+@media (max-width: 900px) {
+  .attack-dna-panels {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .attack-dna-container {
+    padding: 16px;
+  }
+
+  .attack-dna-title {
+    font-size: 1.25rem;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .stat-card {
+    padding: 10px;
+  }
+
+  .stat-card .stat-value {
+    font-size: 1.25rem;
+  }
+
+  .archetype-legend {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .period-cards {
+    flex-wrap: wrap;
+  }
+
+  .period-card {
+    min-width: calc(50% - 6px);
+  }
+
+  .flow-field-legend .legend-items {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 400px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .period-card {
+    min-width: 100%;
+  }
+}
+
+/* ============================================================================
+   V2: REDESIGNED ATTACK DNA STYLES
+   ============================================================================ */
+
+/* Shot Legend */
+.shot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: center;
+}
+
+.legend-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--attack-dna-surface);
+  border: 2px solid var(--attack-dna-border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--attack-dna-text, #1f2937);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.legend-button:hover {
+  background: var(--attack-dna-surface-alt);
+}
+
+.legend-button.active {
+  background: var(--attack-dna-primary);
+  border-color: var(--attack-dna-primary);
+  color: white;
+}
+
+.legend-button .legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.legend-button .legend-count {
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+/* Zone Distribution Chart */
+.zone-distribution-section {
+  margin-bottom: 24px;
+}
+
+.zone-distribution-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.zone-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  transition: background 0.15s ease;
+}
+
+.zone-bar-row.hovered {
+  background: var(--attack-dna-surface);
+  border-radius: 4px;
+  margin: 0 -8px;
+  padding: 6px 8px;
+}
+
+.zone-label {
+  width: 100px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--attack-dna-text-secondary);
+  text-align: right;
+}
+
+.zone-bar-container {
+  flex: 1;
+  height: 20px;
+  background: var(--attack-dna-surface);
+  border-radius: 4px;
+  position: relative;
+  overflow: visible;
+}
+
+.zone-bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.league-avg-marker {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: #1f2937;
+  border-radius: 1px;
+  z-index: 2;
+}
+
+.zone-value {
+  width: 100px;
+  display: flex;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.zone-value .pct {
+  font-weight: 600;
+  color: var(--attack-dna-text);
+  min-width: 45px;
+}
+
+.zone-value .deviation {
+  font-weight: 500;
+}
+
+.zone-value .deviation.positive {
+  color: #22c55e;
+}
+
+.zone-value .deviation.negative {
+  color: #ef4444;
+}
+
+.zone-legend-note {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--attack-dna-text-muted);
+  text-align: center;
+}
+
+.zone-legend-note .marker {
+  display: inline-block;
+  background: #1f2937;
+  width: 2px;
+  height: 14px;
+  vertical-align: middle;
+  margin-right: 6px;
+  border-radius: 1px;
+}
+
+/* Metrics Grid */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.metric-card {
+  background: white;
+  border: 1px solid var(--attack-dna-border);
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.metric-card .metric-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--attack-dna-text);
+  line-height: 1.2;
+}
+
+.metric-card .metric-label {
+  font-size: 0.75rem;
+  color: var(--attack-dna-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin: 4px 0;
+}
+
+.metric-card .metric-deviation {
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.metric-card .metric-deviation.positive {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.metric-card .metric-deviation.negative {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.games-analyzed {
+  margin-top: 16px;
+  font-size: 0.8rem;
+  color: var(--attack-dna-text-muted);
+  text-align: center;
+}
+
+/* Density Layer */
+.density-layer rect {
+  transition: opacity 0.2s ease;
+}
+
+/* Shots Layer */
+.shots-layer circle,
+.shots-layer polygon {
+  transition: all 0.2s ease;
+}
+
+.shots-layer circle:hover,
+.shots-layer polygon:hover {
+  transform: scale(1.5);
+  opacity: 1 !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 700px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .zone-label {
+    width: 80px;
+    font-size: 0.75rem;
+  }
+
+  .zone-value {
+    width: 80px;
+  }
+
+  .shot-legend {
+    gap: 6px;
+  }
+
+  .legend-button {
+    padding: 4px 8px;
+    font-size: 0.75rem;
+  }
+}
+
+@media (max-width: 500px) {
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .zone-bar-row {
+    flex-wrap: wrap;
+  }
+
+  .zone-label {
+    width: 100%;
+    text-align: left;
+    margin-bottom: 4px;
+  }
+
+  .zone-bar-container {
+    order: 1;
+  }
+
+  .zone-value {
+    order: 2;
+    width: auto;
+    margin-left: auto;
+  }
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+  .attack-dna-container {
+    --attack-dna-bg: #1f2937;
+    --attack-dna-border: #374151;
+    --attack-dna-text: #f9fafb;
+    --attack-dna-text-secondary: #9ca3af;
+    --attack-dna-text-muted: #6b7280;
+    --attack-dna-surface: #111827;
+    --attack-dna-surface-alt: #1f2937;
+    --attack-dna-primary: #60a5fa;
+  }
+
+  .attack-dna-rink {
+    background: #111827;
+  }
+
+  .attack-dna-container .stat-card,
+  .attack-dna-container .metric-card {
+    background: #1f2937;
+    color: #f9fafb;
+  }
+
+  .ribbon-tooltip {
+    background: rgba(17, 24, 39, 0.98);
+  }
+
+  .league-avg-marker {
+    background: #9ca3af;
+  }
+
+  .zone-legend-note .marker {
+    background: #9ca3af;
+  }
+
+  .legend-button {
+    color: var(--attack-dna-text);
+  }
+
+  .legend-button.active {
+    color: white;
+  }
+}

@@ -1,0 +1,183 @@
+.shot-chart-container {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px 0;
+}
+
+.shot-chart-title {
+  margin: 0 0 16px 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+}
+
+.shot-stats {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-bottom: 20px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #333;
+}
+
+.stat-value.goal {
+  color: #00aa00;
+}
+
+.shot-chart-wrapper {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  margin: 20px 0;
+  overflow: hidden;
+}
+
+.shot-chart-svg {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fafafa;
+  max-width: 100%;
+  height: auto;
+}
+
+.shots-layer {
+  pointer-events: all;
+}
+
+.shot-marker {
+  transition: stroke 0.15s, stroke-width 0.15s, opacity 0.15s;
+  stroke: rgba(0, 0, 0, 0.3);
+  stroke-width: 0.5;
+}
+
+.shot-marker:hover {
+  opacity: 1 !important;
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+.shot-goal {
+  fill: #00ff00;
+}
+
+.shot-save {
+  fill: #4169e1;
+}
+
+.shot-miss {
+  fill: #ff8800;
+}
+
+.shot-block {
+  fill: #888888;
+}
+
+/* Tooltip */
+.shot-tooltip {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 150px;
+}
+
+.tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0;
+  text-transform: capitalize;
+}
+
+.tooltip-row strong {
+  color: #aaa;
+  font-weight: 600;
+}
+
+/* Legend */
+.shot-legend {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.legend-marker {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+}
+
+.legend-marker.goal {
+  background: #00ff00;
+}
+
+.legend-marker.save {
+  background: #4169e1;
+}
+
+.legend-marker.miss {
+  background: #ff8800;
+}
+
+.legend-marker.block {
+  background: #888888;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .shot-stats {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .shot-legend {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .shot-chart-svg {
+    max-width: 100%;
+    height: auto;
+  }
+}

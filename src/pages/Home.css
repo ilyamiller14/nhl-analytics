@@ -1,0 +1,262 @@
+.home {
+  min-height: calc(100vh - 70px);
+}
+
+/* Hero Section */
+.hero {
+  background: linear-gradient(135deg, #003087 0%, #0055A4 50%, #C8102E 100%);
+  color: white;
+  padding: 4rem 2rem;
+  text-align: center;
+}
+
+.hero-content {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.hero-title {
+  font-size: 3.5rem;
+  font-weight: 800;
+  margin: 0 0 1rem 0;
+  text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3);
+  letter-spacing: -0.5px;
+}
+
+.hero-subtitle {
+  font-size: 1.35rem;
+  margin: 0 0 2.5rem 0;
+  opacity: 0.95;
+  line-height: 1.6;
+  font-weight: 400;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* Buttons */
+.btn {
+  padding: 0.875rem 2rem;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 1.05rem;
+  transition: all 0.2s;
+  display: inline-block;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.btn-primary {
+  background: white;
+  color: #003087;
+}
+
+.btn-primary:hover {
+  background: #f0f0f0;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 2px solid white;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.btn-large {
+  padding: 1.125rem 2.5rem;
+  font-size: 1.15rem;
+}
+
+/* Features Section */
+.features {
+  padding: 5rem 2rem;
+  background: #f8f9fa;
+}
+
+.features-container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.features-title {
+  text-align: center;
+  font-size: 2.5rem;
+  margin: 0 0 3rem 0;
+  color: #1a1a1a;
+  font-weight: 700;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2rem;
+}
+
+.feature-card {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s;
+}
+
+.feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.feature-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.feature-card h3 {
+  font-size: 1.5rem;
+  margin: 0 0 0.75rem 0;
+  color: #003087;
+}
+
+.feature-card p {
+  color: #666;
+  line-height: 1.6;
+  margin: 0 0 1rem 0;
+}
+
+.feature-link {
+  color: #003087;
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.2s;
+}
+
+.feature-link:hover {
+  color: #C8102E;
+}
+
+/* Metrics Section */
+.metrics {
+  padding: 5rem 2rem;
+  background: white;
+}
+
+.metrics-container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.metrics-title {
+  text-align: center;
+  font-size: 2.5rem;
+  margin: 0 0 3rem 0;
+  color: #1a1a1a;
+  font-weight: 700;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 2rem;
+}
+
+.metric-category {
+  background: #f8f9fa;
+  padding: 2rem;
+  border-radius: 12px;
+  border-left: 4px solid #003087;
+}
+
+.metric-category h3 {
+  font-size: 1.35rem;
+  margin: 0 0 1rem 0;
+  color: #003087;
+}
+
+.metric-category ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.metric-category li {
+  padding: 0.5rem 0;
+  color: #444;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.metric-category li:last-child {
+  border-bottom: none;
+}
+
+/* CTA Section */
+.cta {
+  background: linear-gradient(135deg, #003087 0%, #C8102E 100%);
+  color: white;
+  padding: 4rem 2rem;
+  text-align: center;
+}
+
+.cta-content {
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.cta h2 {
+  font-size: 2.5rem;
+  margin: 0 0 1rem 0;
+  font-weight: 700;
+}
+
+.cta p {
+  font-size: 1.25rem;
+  margin: 0 0 2rem 0;
+  opacity: 0.95;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .hero-title {
+    font-size: 2.5rem;
+  }
+
+  .hero-subtitle {
+    font-size: 1.1rem;
+  }
+
+  .features,
+  .metrics,
+  .cta {
+    padding: 3rem 1rem;
+  }
+
+  .features-title,
+  .metrics-title {
+    font-size: 2rem;
+  }
+
+  .feature-grid,
+  .metrics-grid {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .cta h2 {
+    font-size: 2rem;
+  }
+
+  .cta p {
+    font-size: 1.1rem;
+  }
+}

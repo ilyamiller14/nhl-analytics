@@ -1,0 +1,390 @@
+/**
+ * Advanced Player Analytics Hook
+ *
+ * Calculates comprehensive analytics from play-by-play data:
+ * - xG metrics
+ * - Royal road passes
+ * - Zone entries/exits
+ * - Rush attacks
+ * - Defensive coverage
+ */
+
+import { useState, useEffect } from 'react';
+import {
+  fetchGamePlayByPlay,
+  fetchPlayerSeasonGames,
+  filterPlayerShots,
+  type ShotEvent,
+} from '../services/playByPlayService';
+import { calculateRoyalRoadAnalytics, detectRoyalRoadPasses } from '../services/advancedPassAnalytics';
+import { detectZoneEntries, detectZoneExits, calculateZoneAnalytics } from '../services/zoneTracking';
+import { detectRushAttacks, calculateRushAnalytics } from '../services/rushAnalytics';
+import { analyzeDefensiveCoverage } from '../services/defensiveAnalytics';
+import { calculateXGDifferential } from '../services/xgModel';
+import { calculateRollingMetrics, type GameMetrics, type RollingMetrics } from '../services/rollingAnalytics';
+
+export interface AdvancedPlayerAnalytics {
+  // On-Ice xG Metrics (team performance when player is on ice)
+  // This measures the player's IMPACT on team shot quality differential
+  onIceXG: {
+    xGF: number;      // Team's xG FOR when player on ice
+    xGA: number;      // Team's xG AGAINST when player on ice
+    xGDiff: number;   // Net on-ice xG impact
+    xGPercent: number; // xGF / (xGF + xGA) - on-ice shot quality share
+  };
+
+  // Individual xG Metrics (player's personal shot quality)
+  // This measures the player's OWN offensive production
+  individualXG: {
+    ixG: number;           // Individual expected goals (sum of xG from player's own shots)
+    goalsAboveExpected: number; // Actual goals - ixG (finishing talent)
+    ixGPerGame: number;    // ixG per game played
+    ixGPer60: number;      // ixG per 60 minutes (estimated)
+  };
+
+  // Shot data for visualizations
+  playerShots: Array<{
+    x: number;
+    y: number;
+    result: 'goal' | 'shot' | 'miss' | 'block';
+    xGoal: number;
+  }>;
+
+  // Rolling metrics for time series visualization
+  rollingMetrics: RollingMetrics[];
+
+  // Royal Road Passes
+  royalRoadPasses: ReturnType<typeof calculateRoyalRoadAnalytics>;
+
+  // Zone Entries/Exits
+  zoneAnalytics: ReturnType<typeof calculateZoneAnalytics>;
+
+  // Rush Attacks
+  rushAnalytics: ReturnType<typeof calculateRushAnalytics>;
+
+  // Defensive Coverage
+  defensiveAnalytics: ReturnType<typeof analyzeDefensiveCoverage>;
+
+  // Summary Stats
+  totalGames: number;
+  totalShots: number;
+  totalGoals: number;
+
+  // Legacy compatibility - will be removed
+  xGMetrics: {
+    xGF: number;
+    xGA: number;
+    xGDiff: number;
+    xGPercent: number;
+  };
+}
+
+/**
+ * Hook to calculate advanced analytics for a player
+ */
+export function useAdvancedPlayerAnalytics(
+  playerId: number | null,
+  teamId: number | null,
+  season: string = '20252026'
+) {
+  const [analytics, setAnalytics] = useState<AdvancedPlayerAnalytics | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!playerId || !teamId) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function calculateAnalytics() {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        // Get player's games
+        const gameIds = await fetchPlayerSeasonGames(playerId!, season);
+
+        if (isCancelled) return;
+
+        if (gameIds.length === 0) {
+          setIsLoading(false);
+          return;
+        }
+
+        // Collect all events and shots across all games
+        let allEvents: any[] = [];
+        let allShots: ShotEvent[] = [];
+        let allPasses: any[] = [];
+        let playerOnIceShotsFor: ShotEvent[] = [];
+        let playerOnIceShotsAgainst: ShotEvent[] = [];
+
+        // Per-game data for rolling metrics
+        const perGameMetrics: GameMetrics[] = [];
+
+        // Fetch all games
+        for (const gameId of gameIds) {
+          if (isCancelled) break;
+
+          try {
+            const playByPlay = await fetchGamePlayByPlay(gameId);
+
+            allEvents.push(...playByPlay.allEvents);
+            allShots.push(...playByPlay.shots);
+            allPasses.push(...playByPlay.passes);
+
+            // Filter shots using actual on-ice data
+            // This uses homePlayersOnIce/awayPlayersOnIce from the NHL API
+            const isHomeTeam = playByPlay.homeTeamId === teamId;
+            const { shotsFor, shotsAgainst } = filterPlayerShots(
+              playByPlay,
+              playerId!,
+              teamId!,
+              isHomeTeam
+            );
+            playerOnIceShotsFor.push(...shotsFor);
+            playerOnIceShotsAgainst.push(...shotsAgainst);
+
+            // Compute per-game metrics for rolling analytics
+            const gamePlayerShots = playByPlay.shots.filter(
+              (s) => s.shootingPlayerId === playerId
+            );
+            const gamePlayerGoals = gamePlayerShots.filter((s) => s.result === 'goal').length;
+
+            // Get date from game ID (format: YYYYMMDD in first 8 digits conceptually)
+            // NHL game IDs are like 2024020123, extract season year
+            const gameDate = new Date().toISOString().split('T')[0]; // Placeholder
+
+            perGameMetrics.push({
+              gameId,
+              date: gameDate,
+              goals: gamePlayerGoals,
+              assists: 0, // Would need event parsing to get assists
+              points: gamePlayerGoals, // Simplified - just goals
+              shotsFor: shotsFor.filter((s) => s.result === 'goal' || s.result === 'shot-on-goal').length,
+              shotsAgainst: shotsAgainst.filter((s) => s.result === 'goal' || s.result === 'shot-on-goal').length,
+              shotAttemptsFor: shotsFor.length,
+              shotAttemptsAgainst: shotsAgainst.length,
+              unblockedFor: shotsFor.filter((s) => s.result !== 'blocked-shot').length,
+              unblockedAgainst: shotsAgainst.filter((s) => s.result !== 'blocked-shot').length,
+              xGFor: shotsFor.reduce((sum, s) => {
+                const netX = s.xCoord >= 0 ? 89 : -89;
+                const dist = Math.sqrt(Math.pow(s.xCoord - netX, 2) + Math.pow(s.yCoord, 2));
+                const angle = Math.abs(netX - s.xCoord) > 0
+                  ? Math.atan(Math.abs(s.yCoord) / Math.abs(netX - s.xCoord)) * (180 / Math.PI)
+                  : 90;
+                const xg = 1 / (1 + Math.exp(0.5 + 0.045 * dist + 0.025 * angle));
+                return sum + Math.max(0.005, Math.min(0.60, xg));
+              }, 0),
+              xGAgainst: shotsAgainst.reduce((sum, s) => {
+                const netX = s.xCoord >= 0 ? 89 : -89;
+                const dist = Math.sqrt(Math.pow(s.xCoord - netX, 2) + Math.pow(s.yCoord, 2));
+                const angle = Math.abs(netX - s.xCoord) > 0
+                  ? Math.atan(Math.abs(s.yCoord) / Math.abs(netX - s.xCoord)) * (180 / Math.PI)
+                  : 90;
+                const xg = 1 / (1 + Math.exp(0.5 + 0.045 * dist + 0.025 * angle));
+                return sum + Math.max(0.005, Math.min(0.60, xg));
+              }, 0),
+              goalsFor: shotsFor.filter((s) => s.result === 'goal').length,
+              goalsAgainst: shotsAgainst.filter((s) => s.result === 'goal').length,
+              toi: 0, // Would need shift data
+            });
+          } catch (err) {
+            console.warn(`Failed to fetch game ${gameId}:`, err);
+          }
+        }
+
+        // Calculate rolling metrics from per-game data
+        const rollingMetricsData = calculateRollingMetrics(perGameMetrics, 5);
+
+        if (isCancelled) return;
+
+        // Calculate xG metrics using corrected angle formula
+        const calculateShotAngle = (xCoord: number, yCoord: number) => {
+          // Net is at x=89 or x=-89 depending on zone
+          const netX = xCoord >= 0 ? 89 : -89;
+          const distanceFromGoalLine = Math.abs(netX - xCoord);
+          const lateralDistance = Math.abs(yCoord);
+          // Angle 0 = center, higher = more to the side
+          return distanceFromGoalLine > 0
+            ? Math.atan(lateralDistance / distanceFromGoalLine) * (180 / Math.PI)
+            : 90;
+        };
+
+        const calculateDistance = (xCoord: number, yCoord: number) => {
+          const netX = xCoord >= 0 ? 89 : -89;
+          return Math.sqrt(Math.pow(xCoord - netX, 2) + Math.pow(yCoord, 2));
+        };
+
+        // Convert on-ice shots FOR to xG features
+        // These are shots by player's team when player was actually on the ice
+        const shotsForFeatures = playerOnIceShotsFor.map((shot) => ({
+          distance: calculateDistance(shot.xCoord, shot.yCoord),
+          angle: calculateShotAngle(shot.xCoord, shot.yCoord),
+          shotType: mapShotType(shot.shotType),
+          strength: '5v5' as const,
+          isRebound: false,
+          isRushShot: false,
+        }));
+
+        // Convert on-ice shots AGAINST to xG features
+        // These are shots by opposing team when player was actually on the ice
+        const shotsAgainstFeatures = playerOnIceShotsAgainst.map((shot) => ({
+          distance: calculateDistance(shot.xCoord, shot.yCoord),
+          angle: calculateShotAngle(shot.xCoord, shot.yCoord),
+          shotType: mapShotType(shot.shotType),
+          strength: '5v5' as const,
+          isRebound: false,
+          isRushShot: false,
+        }));
+
+        // Calculate player on-ice xG metrics using actual on-ice data
+        const xGMetrics = calculateXGDifferential(shotsForFeatures, shotsAgainstFeatures);
+
+        // Filter passes for player involvement (either passer or receiver)
+        const playerPasses = allPasses.filter(
+          (pass: any) => pass.fromPlayerId === playerId || pass.toPlayerId === playerId
+        );
+
+        // Filter shots for player's personal shots (not on-ice, but actually taken by player)
+        const playerPersonalShots = allShots.filter(
+          (shot) => shot.shootingPlayerId === playerId
+        );
+
+        // Calculate Individual xG (ixG) - sum of xG from player's OWN shots
+        const calculateSingleShotXG = (xCoord: number, yCoord: number, shotType: string) => {
+          const distance = calculateDistance(xCoord, yCoord);
+          const angle = calculateShotAngle(xCoord, yCoord);
+          const typeMultiplier = {
+            'wrist': 1.0, 'slap': 0.85, 'snap': 1.05,
+            'backhand': 0.80, 'tip': 1.35, 'wrap': 0.70
+          }[mapShotType(shotType)] || 1.0;
+
+          const logit = -0.5 + distance * -0.045 + angle * -0.025 + Math.log(typeMultiplier);
+          const xg = 1 / (1 + Math.exp(-logit));
+          return Math.max(0.005, Math.min(0.60, xg));
+        };
+
+        // Calculate ixG for each of player's personal shots
+        const playerShotsWithXG = playerPersonalShots.map((shot) => {
+          const xg = calculateSingleShotXG(shot.xCoord, shot.yCoord, shot.shotType);
+          return {
+            x: shot.xCoord,
+            y: shot.yCoord,
+            result: shot.result === 'goal' ? 'goal' as const :
+                    shot.result === 'shot-on-goal' ? 'shot' as const :
+                    shot.result === 'missed-shot' ? 'miss' as const : 'block' as const,
+            xGoal: xg,
+          };
+        });
+
+        const totalIxG = playerShotsWithXG.reduce((sum, shot) => sum + shot.xGoal, 0);
+        const personalGoals = playerPersonalShots.filter((s) => s.result === 'goal').length;
+        const goalsAboveExpected = personalGoals - totalIxG;
+
+        // Royal road passes - only those involving the player
+        const royalRoadPassesData = detectRoyalRoadPasses(allEvents, playerPersonalShots, playerPasses);
+        const royalRoadAnalytics = calculateRoyalRoadAnalytics(royalRoadPassesData);
+
+        // Zone entries/exits - filter for player involvement
+        const allZoneEntries = detectZoneEntries(allEvents);
+        const allZoneExits = detectZoneExits(allEvents);
+
+        // Filter zone entries where the player was the one entering
+        const playerZoneEntries = allZoneEntries.filter(
+          (entry) => entry.playerId === playerId
+        );
+        const playerZoneExits = allZoneExits.filter(
+          (exit) => exit.playerId === playerId
+        );
+        const zoneAnalytics = calculateZoneAnalytics(playerZoneEntries, playerZoneExits);
+
+        // Rush attacks - filter for player's rushes only
+        const allRushAttacks = detectRushAttacks(allEvents, allShots);
+        const playerRushAttacks = allRushAttacks.filter(
+          (rush) => rush.playerId === playerId
+        );
+        const rushAnalytics = calculateRushAnalytics(playerRushAttacks);
+
+        // Defensive coverage (using actual on-ice shots against)
+        const defensiveAnalytics = analyzeDefensiveCoverage(playerOnIceShotsAgainst);
+
+        // Estimate ice time per game (rough estimate based on shot share)
+        const avgToiMinutes = 18; // Average forward/defenseman TOI
+        const totalMinutes = avgToiMinutes * gameIds.length;
+
+        setAnalytics({
+          // On-Ice xG metrics (team performance when player is on ice)
+          onIceXG: {
+            xGF: xGMetrics.xGF,
+            xGA: xGMetrics.xGA,
+            xGDiff: xGMetrics.xGDiff,
+            xGPercent: xGMetrics.xGPercent,
+          },
+
+          // Individual xG metrics (player's own shot production)
+          individualXG: {
+            ixG: parseFloat(totalIxG.toFixed(2)),
+            goalsAboveExpected: parseFloat(goalsAboveExpected.toFixed(2)),
+            ixGPerGame: parseFloat((totalIxG / gameIds.length).toFixed(3)),
+            ixGPer60: parseFloat((totalIxG / totalMinutes * 60).toFixed(2)),
+          },
+
+          // Shot data for visualizations
+          playerShots: playerShotsWithXG,
+
+          // Rolling metrics for time series
+          rollingMetrics: rollingMetricsData,
+
+          // Legacy compatibility
+          xGMetrics: {
+            xGF: xGMetrics.xGF,
+            xGA: xGMetrics.xGA,
+            xGDiff: xGMetrics.xGDiff,
+            xGPercent: xGMetrics.xGPercent,
+          },
+
+          royalRoadPasses: royalRoadAnalytics,
+          zoneAnalytics,
+          rushAnalytics,
+          defensiveAnalytics,
+          totalGames: gameIds.length,
+          totalShots: playerPersonalShots.length,
+          totalGoals: personalGoals,
+        });
+      } catch (err) {
+        if (!isCancelled) {
+          setError(err as Error);
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    calculateAnalytics();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [playerId, teamId, season]);
+
+  return { analytics, isLoading, error };
+}
+
+/**
+ * Map NHL API shot type to our model's shot type
+ */
+function mapShotType(
+  shotType: string
+): 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap' {
+  const lowerType = shotType?.toLowerCase() || '';
+  if (lowerType.includes('slap')) return 'slap';
+  if (lowerType.includes('snap')) return 'snap';
+  if (lowerType.includes('backhand')) return 'backhand';
+  if (lowerType.includes('tip') || lowerType.includes('deflect')) return 'tip';
+  if (lowerType.includes('wrap')) return 'wrap';
+  return 'wrist';
+}

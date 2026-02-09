@@ -1,0 +1,293 @@
+/* Zone Time Chart Styles */
+
+.zone-time-chart {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.zone-time-chart .chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.zone-time-chart .chart-title-section {
+  flex: 1;
+  min-width: 200px;
+}
+
+.zone-time-chart .chart-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 0.25rem 0;
+}
+
+.zone-time-chart .chart-subtitle {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+.zone-balance-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 2px solid;
+}
+
+.balance-label {
+  font-size: 0.75rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.balance-value {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+/* Main Content Layout */
+.zone-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-bottom: 1.5rem;
+}
+
+/* Donut Section */
+.donut-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.donut-container {
+  position: relative;
+  width: 100%;
+  max-width: 280px;
+}
+
+.donut-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+.center-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.center-label {
+  display: block;
+  font-size: 0.75rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Zone Breakdown */
+.zone-breakdown {
+  width: 100%;
+  max-width: 280px;
+  margin-top: 1rem;
+}
+
+.zone-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 6px;
+  transition: background-color 0.15s;
+}
+
+.zone-item:hover {
+  background: #f8fafc;
+}
+
+.zone-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.zone-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.zone-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.zone-time {
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+.zone-pct {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+/* Efficiency Section */
+.efficiency-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.zone-time-chart .section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.efficiency-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.efficiency-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.efficiency-card.highlight {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-color: #f59e0b;
+}
+
+.eff-label {
+  font-size: 0.7rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.5rem;
+}
+
+.eff-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+/* Chart Section */
+.zone-time-chart .chart-section {
+  margin-bottom: 1.5rem;
+}
+
+.zone-time-chart .chart-container {
+  margin: 1rem 0;
+}
+
+.chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: #6b7280;
+  font-size: 0.95rem;
+}
+
+/* Zone Legend */
+.zone-legend {
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.zone-time-chart .legend-items {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.zone-time-chart .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.zone-time-chart .legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .zone-content {
+    grid-template-columns: 1fr;
+  }
+
+  .efficiency-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .zone-time-chart .legend-items {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .zone-time-chart {
+    padding: 1rem;
+  }
+
+  .zone-time-chart .chart-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .zone-balance-badge {
+    justify-content: center;
+  }
+
+  .efficiency-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .efficiency-card {
+    padding: 0.75rem;
+  }
+
+  .eff-value {
+    font-size: 1rem;
+  }
+}

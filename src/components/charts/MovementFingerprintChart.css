@@ -1,0 +1,160 @@
+/**
+ * Movement Fingerprint Chart Styles
+ */
+
+.movement-fingerprint-container {
+  background: var(--card-bg, #ffffff);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.fingerprint-title {
+  margin: 0 0 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary, #1f2937);
+  text-align: center;
+}
+
+/* Chart container */
+.fingerprint-chart {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.fingerprint-svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Interactive spokes */
+.interactive-spoke {
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.interactive-spoke:hover {
+  opacity: 1 !important;
+  filter: brightness(1.1);
+}
+
+/* Dominant direction arrow */
+.dominant-direction {
+  pointer-events: none;
+}
+
+/* Legend */
+.fingerprint-legend {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-secondary, #f8fafc);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.legend-section {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.legend-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary, #6b7280);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.legend-dot.primary {
+  background: #3b82f6;
+}
+
+.legend-dot.comparison {
+  background: #9ca3af;
+  opacity: 0.5;
+}
+
+.legend-item span:last-child {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #6b7280);
+}
+
+/* Speed gradient */
+.speed-gradient {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.gradient-bar {
+  width: 80px;
+  height: 10px;
+  background: linear-gradient(to right, #3b82f6, #fbbf24, #ef4444);
+  border-radius: 2px;
+}
+
+.gradient-label {
+  font-size: 0.65rem;
+  color: var(--text-secondary, #9ca3af);
+}
+
+/* Stats */
+.fingerprint-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.fingerprint-stats .stat-item {
+  text-align: center;
+  padding: 0.75rem 0.5rem;
+  background: var(--bg-secondary, #f8fafc);
+  border-radius: 8px;
+}
+
+.fingerprint-stats .stat-value {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary, #1f2937);
+  line-height: 1.2;
+}
+
+.fingerprint-stats .stat-label {
+  display: block;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #6b7280);
+  margin-top: 0.25rem;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .fingerprint-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .fingerprint-legend {
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: center;
+  }
+}
