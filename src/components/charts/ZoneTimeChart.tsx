@@ -184,7 +184,7 @@ export default function ZoneTimeChart({
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value: number) => formatTime(value)}
+                  formatter={(value: number | undefined) => formatTime(value ?? 0)}
                   contentStyle={{
                     background: 'white',
                     border: '1px solid #e5e7eb',
@@ -275,18 +275,20 @@ export default function ZoneTimeChart({
                   width={40}
                 />
                 <Tooltip
-                  formatter={(value: number, name: string, props: any) => {
+                  formatter={(value: number | undefined, name: string | undefined, props: any) => {
                     const payload = props.payload;
-                    if (name === 'Offensive Zone') {
-                      return [`${value.toFixed(1)}% (${formatTime(payload.ozTime)})`, name];
+                    const val = value ?? 0;
+                    const n = name ?? '';
+                    if (n === 'Offensive Zone') {
+                      return [`${val.toFixed(1)}% (${formatTime(payload.ozTime)})`, n];
                     }
-                    if (name === 'Neutral Zone') {
-                      return [`${value.toFixed(1)}% (${formatTime(payload.nzTime)})`, name];
+                    if (n === 'Neutral Zone') {
+                      return [`${val.toFixed(1)}% (${formatTime(payload.nzTime)})`, n];
                     }
-                    if (name === 'Defensive Zone') {
-                      return [`${value.toFixed(1)}% (${formatTime(payload.dzTime)})`, name];
+                    if (n === 'Defensive Zone') {
+                      return [`${val.toFixed(1)}% (${formatTime(payload.dzTime)})`, n];
                     }
-                    return [value, name];
+                    return [val, n];
                   }}
                   contentStyle={{
                     background: 'white',

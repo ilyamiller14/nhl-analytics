@@ -154,108 +154,88 @@ npm run build
 
 ---
 
-## NHL EDGE Integration (NEW)
+## NHL EDGE Integration (IMPLEMENTED)
 
 ### Overview
 
-NHL EDGE is the league's player and puck tracking system using optical tracking cameras in every arena. It captures granular movement data at 60 frames per second, providing skating speed, acceleration, distance traveled, and movement patterns.
+NHL EDGE is the league's player and puck tracking system. We've integrated EDGE tracking data into the dashboard with comprehensive visualizations for coaching, management, and scouting analytics.
 
-**Current Focus**: Implementing and refining EDGE tracking visualizations and analytics for coaches, scouts, and management decision-making.
+### Edge API Service (`src/services/edgeTrackingService.ts`)
 
-### Edge API Service (`src/services/edgeApiService.ts`)
+Primary service for fetching EDGE tracking data. Uses same proxy as main API.
 
-Primary service for fetching EDGE tracking data.
-
-**Key Endpoints:**
+**API Endpoints:**
 | Endpoint | Purpose |
 |----------|---------|
-| `/edge/player/{id}/skating` | Player skating metrics (speed, acceleration) |
-| `/edge/player/{id}/movement/{gameId}` | Per-game movement patterns |
-| `/edge/game/{gameId}/tracking` | Full game tracking data |
-| `/edge/team/{abbrev}/skating-leaders` | Team skating leaderboards |
+| `/web/edge/skater-detail/{id}/{season}/2` | Player skating overview |
+| `/web/edge/skater-skating-speed-detail/{id}/{season}/2` | Speed metrics (bursts, top speed) |
+| `/web/edge/skater-skating-distance-detail/{id}/{season}/2` | Distance traveled |
+| `/web/edge/skater-zone-time/{id}/{season}/2` | Zone time breakdown |
+| `/web/edge/skater-comparison/{id}/{season}/2` | League percentile comparisons |
 
-**Key Data Types:**
+### EDGE Types (`src/types/edge.ts`)
+
 ```typescript
-interface EdgeSkatingMetrics {
-  playerId: number;
-  topSpeed: number;           // mph
-  avgSpeed: number;           // mph
-  topAcceleration: number;    // mph/s
-  distanceTraveled: number;   // miles per game
-  speedBursts: number;        // sprints > 20mph
-  timeOnIce: number;          // seconds
-}
-
-interface MovementPattern {
-  playerId: number;
-  gameId: number;
-  positions: TrackingPosition[];
-  heatmap: ZoneHeatmap;
-  corridors: MovementCorridor[];
-}
-
-interface TrackingPosition {
-  x: number;
-  y: number;
-  timestamp: number;
-  speed: number;
-  acceleration: number;
-}
+interface SkaterDetail { avgSpeed, topSpeed, gamesPlayed, ... }
+interface SkaterSpeedDetail { topSpeed, bursts18To20, bursts20To22, bursts22Plus, ... }
+interface SkaterDistanceDetail { distancePerGame, distancePerShift, totalDistance, ... }
+interface SkaterZoneTime { offensiveZoneTime, neutralZoneTime, defensiveZoneTime }
+interface SkaterComparison { percentiles: { topSpeed, avgSpeed, distancePerGame } }
 ```
 
-### Movement Flow Visualization System
+### EDGE Tracking Visualizations (`src/components/charts/`)
 
-Visual representation of player movement patterns on ice.
+| Component | Purpose |
+|-----------|---------|
+| `SpeedProfileChart.tsx` | Speed distribution histogram + burst tiers |
+| `ShotVelocityChart.tsx` | Shot speed by type and location |
+| `ZoneTimeChart.tsx` | OZ/NZ/DZ time donut chart + period breakdown |
+| `DistanceFatigueChart.tsx` | Distance trends + fatigue correlation |
+| `TrackingRadarChart.tsx` | Multi-axis radar (speed, distance, zone control) |
 
-**Components:**
-| Component | Purpose | Location |
-|-----------|---------|----------|
-| `EdgeDashboard.tsx` | Main EDGE analytics dashboard | `src/pages/` |
-| `MovementFlowChart.tsx` | SVG movement visualization with skating corridors | `src/components/edge/` |
-| `SpeedHeatmap.tsx` | Speed intensity heat map (blue=slow, red=fast) | `src/components/edge/` |
-| `SkatingMetricsCard.tsx` | Key metrics summary card | `src/components/edge/` |
-| `MovementComparison.tsx` | Player-to-player movement comparison | `src/components/edge/` |
-| `SkatingLeaderboard.tsx` | Team/league skating leaders | `src/components/edge/` |
+### Movement Flow System ("Ice Flow")
 
-**Key Features:**
-- Animated movement trails showing skating paths
-- Color-coded speed intensity (blue = slow, red = fast)
-- Zone coverage analysis
-- Acceleration burst markers
-- Directional flow arrows
+Coaching/management analytics for movement pattern intelligence.
 
-### New Routes
+| Component | Purpose |
+|-----------|---------|
+| `MovementRiverChart.tsx` | Animated SVG skating trails with playback controls |
+| `MovementFingerprintChart.tsx` | Player movement signature (radial histogram) |
+| `FormationGhostChart.tsx` | Expected vs actual position deviation overlay |
+| `TeamFlowFieldChart.tsx` | Team-wide movement vector field |
+| `ShiftIntensityChart.tsx` | Shift-by-shift intensity timeline |
+
+### Routes
 
 | Route | Component | Purpose |
 |-------|-----------|---------|
-| `/edge` | EdgeDashboard | Main EDGE analytics hub |
-| `/edge/player/:id` | EdgePlayerDetail | Individual player tracking |
-| `/edge/game/:gameId` | EdgeGameDetail | Game movement analysis |
-| `/edge/compare` | EdgeComparison | Compare player movements |
+| `/movement/:playerId` | MovementAnalysis | Full player movement analysis |
+| `/movement/team/:teamAbbrev` | MovementAnalysis | Team movement analysis |
 
-### EDGE Integration Constraints
+### Dashboard Integration
 
-- **Rate Limiting**: EDGE API has stricter rate limits (30 req/min vs 100 for standard API)
-- **Data Availability**: EDGE data only available for games from 2021-22 season onward
-- **Processing Time**: Movement pattern calculations are computationally intensive; use memoization
-- **AHL Data**: Limited or no EDGE tracking for AHL/minor league games (affects prospect analysis)
+**PlayerProfile.tsx** - EDGE Tracking tab with:
+- Speed profile chart
+- Zone time chart
+- Tracking stats summary
+- Link to full movement analysis
 
-### Integration with Existing Systems
+**CoachingDashboard.tsx** - Movement Analysis link
+**ManagementDashboard.tsx** - Movement Intelligence link
+**TeamProfile.tsx** - Movement link for team analysis
 
-**Attack DNA + EDGE:**
-- EDGE movement data enhances Attack DNA by showing how players get to shooting positions
-- Skating speed correlates with rush chances and transition offense
-- Combine shot locations with movement corridors for complete picture
+### Caching (`src/utils/cacheUtils.ts`)
 
-**Season Trends + EDGE:**
-- Track skating metrics over time (fatigue, conditioning)
-- Identify speed decline/improvement patterns
-- Compare pre/post injury skating performance
+```typescript
+EDGE_CACHE = {
+  EDGE_PLAYER_DETAIL: 24 hours,
+  EDGE_SPEED_DATA: 24 hours,
+  EDGE_TEAM_DATA: 24 hours,
+}
+```
 
-### EDGE Development Next Steps
+### EDGE Data Constraints
 
-1. Refine movement corridor algorithms
-2. Add prospect comparison with limited AHL data handling
-3. Implement skating fatigue analysis (per-period breakdown)
-4. Build coach-focused dashboards with line combinations
-5. Add export functionality for scouting reports
+- **Data Availability**: 2023-24 season onwards
+- **Goalie Exclusion**: EDGE charts disabled for goalies (position === 'G')
+- **Mock Data**: Movement Flow charts use mock data until real tracking APIs available

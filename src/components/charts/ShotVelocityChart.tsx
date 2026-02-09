@@ -220,10 +220,12 @@ export default function ShotVelocityChart({
                     width={90}
                   />
                   <Tooltip
-                    formatter={(value: number, name: string) => {
-                      if (name === 'avgVelocity') return [`${value.toFixed(1)} mph`, 'Avg Velocity'];
-                      if (name === 'maxVelocity') return [`${value.toFixed(1)} mph`, 'Max Velocity'];
-                      return [value, name];
+                    formatter={(value: number | undefined, name: string | undefined) => {
+                      const val = value ?? 0;
+                      const n = name ?? '';
+                      if (n === 'avgVelocity') return [`${val.toFixed(1)} mph`, 'Avg Velocity'];
+                      if (n === 'maxVelocity') return [`${val.toFixed(1)} mph`, 'Max Velocity'];
+                      return [val, n];
                     }}
                     contentStyle={{
                       background: 'white',

@@ -245,6 +245,12 @@ function TeamProfile() {
               Attack DNA
               <span className="new-badge">NEW</span>
             </Link>
+            <Link
+              to={`/movement/team/${teamAbbrev}`}
+              className="team-tab movement-link"
+            >
+              Movement
+            </Link>
           </div>
 
           {/* Overview Tab */}

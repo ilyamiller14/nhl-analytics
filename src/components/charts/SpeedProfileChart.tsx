@@ -252,7 +252,7 @@ export default function SpeedProfileChart({
                 label={{ value: 'Frequency (%)', angle: -90, position: 'insideLeft' }}
               />
               <Tooltip
-                formatter={(value: number) => [`${value.toFixed(1)}%`, 'Frequency']}
+                formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(1)}%`, 'Frequency']}
                 contentStyle={{
                   background: 'white',
                   border: '1px solid #e5e7eb',

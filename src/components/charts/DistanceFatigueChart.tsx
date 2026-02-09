@@ -252,7 +252,7 @@ export default function DistanceFatigueChart({
                   domain={['auto', 'auto']}
                 />
                 <Tooltip
-                  formatter={(value: number) => [`${value.toFixed(2)} mi`, 'Distance']}
+                  formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(2)} mi`, 'Distance']}
                   labelFormatter={(label) => `Game ${label}`}
                   contentStyle={{
                     background: 'white',
@@ -320,9 +320,10 @@ export default function DistanceFatigueChart({
                   domain={[0, 'auto']}
                 />
                 <Tooltip
-                  formatter={(value: number, name: string) => {
-                    if (name === 'Distance') return [`${value.toFixed(2)} mi`, name];
-                    return [value, name];
+                  formatter={(value: number | undefined, name: string | undefined) => {
+                    const n = name ?? '';
+                    if (n === 'Distance') return [`${(value ?? 0).toFixed(2)} mi`, n];
+                    return [value ?? 0, n];
                   }}
                   contentStyle={{
                     background: 'white',
@@ -382,9 +383,10 @@ export default function DistanceFatigueChart({
                   label={{ value: 'Number of Shifts', angle: -90, position: 'insideLeft' }}
                 />
                 <Tooltip
-                  formatter={(value: number, name: string) => {
-                    if (name === 'Avg Distance') return [`${value.toFixed(3)} mi`, name];
-                    return [value, name];
+                  formatter={(value: number | undefined, name: string | undefined) => {
+                    const n = name ?? '';
+                    if (n === 'Avg Distance') return [`${(value ?? 0).toFixed(3)} mi`, n];
+                    return [value ?? 0, n];
                   }}
                   contentStyle={{
                     background: 'white',

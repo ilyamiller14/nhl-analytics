@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import NHLRink, { convertToSVGCoords } from './NHLRink';
-import type { SkatingTrail, MovementPoint } from '../../services/movementAnalytics';
+import type { SkatingTrail } from '../../services/movementAnalytics';
 import './MovementRiverChart.css';
 
 // ============================================================================
@@ -165,7 +165,7 @@ export default function MovementRiverChart({
   };
 
   // Render a single trail
-  const renderTrail = (trail: SkatingTrail, index: number) => {
+  const renderTrail = (trail: SkatingTrail, _index: number) => {
     const isSelected = selectedPlayer === null || selectedPlayer === trail.playerId;
     const baseOpacity = isSelected ? 1 : 0.2;
 
@@ -175,7 +175,7 @@ export default function MovementRiverChart({
     if (visiblePoints.length < 2) return null;
 
     // Build path segments with varying widths and colors
-    const segments: JSX.Element[] = [];
+    const segments: React.ReactElement[] = [];
 
     for (let i = 1; i < visiblePoints.length && i < maxTrailLength; i++) {
       const prevPoint = visiblePoints[i - 1];

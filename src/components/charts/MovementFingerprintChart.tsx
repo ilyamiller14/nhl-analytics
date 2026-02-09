@@ -48,11 +48,11 @@ const DIRECTION_LABELS_16 = [
   'W', 'WSW', 'SW', 'SSW', 'S', 'SSE', 'SE', 'ESE'
 ];
 
-// Hockey-specific direction labels
-const HOCKEY_LABELS_8 = [
-  'Forecheck', 'Right Lane', 'Boards R', 'Backcheck R',
-  'Backcheck', 'Backcheck L', 'Boards L', 'Left Lane'
-];
+// Hockey-specific direction labels (available for future use)
+// const HOCKEY_LABELS_8 = [
+//   'Forecheck', 'Right Lane', 'Boards R', 'Backcheck R',
+//   'Backcheck', 'Backcheck L', 'Boards L', 'Left Lane'
+// ];
 
 // Speed color gradient (slower = blue, faster = red)
 const getSpeedColor = (normalizedSpeed: number): string => {

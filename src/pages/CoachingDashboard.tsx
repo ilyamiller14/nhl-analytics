@@ -13,7 +13,7 @@
  */
 
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   RadarChart,
   PolarGrid,
@@ -378,6 +378,12 @@ export default function CoachingDashboard() {
             >
               Player View
             </button>
+            <Link
+              to={`/movement/team/${teamAbbrev}`}
+              className="toggle-btn movement-link"
+            >
+              Movement Analysis
+            </Link>
           </div>
         </div>
       </div>

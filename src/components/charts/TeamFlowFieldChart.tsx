@@ -189,7 +189,7 @@ export default function TeamFlowFieldChart({
 
   // Render grid overlay (optional, for debugging)
   const renderGridOverlay = () => {
-    const lines: JSX.Element[] = [];
+    const lines: React.ReactElement[] = [];
 
     // Vertical lines
     for (let x = 0; x <= flowFieldData.gridWidth; x++) {

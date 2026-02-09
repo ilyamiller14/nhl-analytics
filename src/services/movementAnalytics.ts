@@ -5,7 +5,7 @@
  * Calculates movement fingerprints, formation deviations, team flow fields, and shift intensity.
  */
 
-import { ZONES, COORDINATES, GOALS } from '../constants/rink';
+import { ZONES, COORDINATES } from '../constants/rink';
 
 // ============================================================================
 // TYPES
@@ -524,7 +524,7 @@ export function calculateTeamFormationScore(deviations: PositionDeviation[]): nu
  */
 export function detectFormationSituation(
   puckX: number,
-  puckY: number,
+  _puckY: number,
   strength: string = '5v5',
   possession: 'team' | 'opponent' | 'loose' = 'team'
 ): string {
@@ -709,7 +709,7 @@ export function filterFlowFieldBySituation(
 export function calculateShiftIntensity(
   distance: number,
   avgSpeed: number,
-  duration: number
+  _duration: number
 ): number {
   // Expected values for normalization
   // Top players: ~500ft per minute at ~15 ft/s

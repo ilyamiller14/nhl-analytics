@@ -338,6 +338,12 @@ export default function ManagementDashboard() {
             >
               Chemistry
             </button>
+            <Link
+              to={`/movement/team/${teamAbbrev}`}
+              className="toggle-btn movement-link"
+            >
+              Movement Intelligence
+            </Link>
           </div>
         </div>
         <div className="dashboard-links">

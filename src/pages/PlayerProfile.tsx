@@ -13,8 +13,8 @@ import IceChartsPanel from '../components/IceChartsPanel';
 import RollingAnalyticsChart from '../components/charts/RollingAnalyticsChart';
 import PlayerAnalyticsCard from '../components/PlayerAnalyticsCard';
 import PlayerSearch from '../components/PlayerSearch';
+// EDGE charts
 import SpeedProfileChart, { type SpeedData } from '../components/charts/SpeedProfileChart';
-import TrackingRadarChart, { type PlayerTrackingData, type TrackingMetrics } from '../components/charts/TrackingRadarChart';
 import ZoneTimeChart, { type ZoneData } from '../components/charts/ZoneTimeChart';
 import { edgeTrackingService } from '../services/edgeTrackingService';
 import { EDGE_CACHE } from '../utils/cacheUtils';
@@ -177,7 +177,6 @@ function PlayerProfile() {
   const {
     data: edgeData,
     isLoading: edgeLoading,
-    error: edgeError,
   } = useQuery({
     queryKey: ['edge-player-detail', player?.playerId],
     queryFn: async () => {
@@ -215,24 +214,6 @@ function PlayerProfile() {
       topSpeed: edgeData.speed.topSpeed,
     };
   }, [edgeData]);
-
-  const edgeTrackingMetrics: PlayerTrackingData | null = useMemo(() => {
-    if (!edgeData?.comparison || !player) return null;
-    const c = edgeData.comparison;
-    return {
-      playerId: player.playerId,
-      playerName: `${player.firstName.default} ${player.lastName.default}`,
-      position: (player.position === 'D' ? 'D' : 'F') as 'F' | 'D',
-      metrics: {
-        topSpeed: c.percentiles.topSpeed?.leaguePercentile || 50,
-        avgSpeed: c.percentiles.avgSpeed?.leaguePercentile || 50,
-        acceleration: 50, // Not directly available, use average
-        agility: 50, // Not directly available, use average
-        endurance: c.percentiles.distancePerGame?.leaguePercentile || 50,
-        distancePerGame: c.percentiles.distancePerGame?.leaguePercentile || 50,
-      } as TrackingMetrics,
-    };
-  }, [edgeData, player]);
 
   const edgeZoneData: ZoneData | null = useMemo(() => {
     if (!edgeData?.zoneTime) return null;
@@ -777,6 +758,109 @@ function PlayerProfile() {
                     windowSize={5}
                     playerName={`${player.firstName.default} ${player.lastName.default}`}
                   />
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* EDGE Tracking Tab */}
+          {activeTab === 'edge' && (
+            <section className="stats-section">
+              {edgeLoading && (
+                <div className="loading">
+                  <div className="loading-spinner"></div>
+                  <p>Loading EDGE tracking data...</p>
+                </div>
+              )}
+
+              {!edgeLoading && !edgeData && (
+                <div className="empty-state">
+                  <h3 className="empty-state-title">No EDGE Tracking Data</h3>
+                  <p className="empty-state-message">
+                    NHL EDGE tracking data is not available for this player.
+                    EDGE data requires games played in 2023-24 season or later.
+                  </p>
+                </div>
+              )}
+
+              {!edgeLoading && edgeData && (
+                <div className="edge-tracking-content">
+                  <h2 className="section-title">NHL EDGE Player Tracking</h2>
+                  <p className="section-description">
+                    Real-time puck and player tracking data from NHL EDGE technology.
+                  </p>
+
+                  {/* Speed Profile */}
+                  {edgeSpeedData && (
+                    <div className="edge-chart-section">
+                      <SpeedProfileChart
+                        speedData={edgeSpeedData}
+                        position={player.position === 'D' ? 'D' : 'F'}
+                        playerName={`${player.firstName.default} ${player.lastName.default}`}
+                      />
+                    </div>
+                  )}
+
+                  {/* Zone Time */}
+                  {edgeZoneData && (
+                    <div className="edge-chart-section" style={{ marginTop: '2rem' }}>
+                      <ZoneTimeChart
+                        zoneData={edgeZoneData}
+                        playerName={`${player.firstName.default} ${player.lastName.default}`}
+                      />
+                    </div>
+                  )}
+
+                  {/* EDGE Stats Summary */}
+                  <div className="edge-stats-summary" style={{ marginTop: '2rem' }}>
+                    <h3 className="subsection-title">Tracking Statistics</h3>
+                    <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+                      {edgeData.speed && (
+                        <>
+                          <div className="stat-card" style={{ padding: '1rem', background: '#f9fafb', borderRadius: '8px' }}>
+                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Top Speed</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{edgeData.speed.topSpeed.toFixed(1)} mph</div>
+                          </div>
+                          <div className="stat-card" style={{ padding: '1rem', background: '#f9fafb', borderRadius: '8px' }}>
+                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Bursts 22+ mph</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{edgeData.speed.bursts22Plus}</div>
+                          </div>
+                        </>
+                      )}
+                      {edgeData.distance && (
+                        <>
+                          <div className="stat-card" style={{ padding: '1rem', background: '#f9fafb', borderRadius: '8px' }}>
+                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Distance/Game</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{edgeData.distance.distancePerGame.toFixed(2)} mi</div>
+                          </div>
+                          <div className="stat-card" style={{ padding: '1rem', background: '#f9fafb', borderRadius: '8px' }}>
+                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Distance/Shift</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{edgeData.distance.distancePerShift.toFixed(0)} ft</div>
+                          </div>
+                        </>
+                      )}
+                      {edgeData.zoneTime && (
+                        <>
+                          <div className="stat-card" style={{ padding: '1rem', background: '#fef2f2', borderRadius: '8px' }}>
+                            <div style={{ fontSize: '0.875rem', color: '#991b1b' }}>Offensive Zone Time</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{Math.round(edgeData.zoneTime.offensiveZoneTime / 60)}m</div>
+                          </div>
+                          <div className="stat-card" style={{ padding: '1rem', background: '#eff6ff', borderRadius: '8px' }}>
+                            <div style={{ fontSize: '0.875rem', color: '#1e40af' }}>Defensive Zone Time</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{Math.round(edgeData.zoneTime.defensiveZoneTime / 60)}m</div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Link to Movement Analysis */}
+                  <div style={{ marginTop: '2rem', padding: '1rem', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                    <Link to={`/movement/${player.playerId}`} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#15803d', fontWeight: '500' }}>
+                      <span>View Full Movement Analysis</span>
+                      <span>→</span>
+                    </Link>
+                  </div>
                 </div>
               )}
             </section>
