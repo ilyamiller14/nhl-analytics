@@ -1,0 +1,254 @@
+================================================================================
+NHL ANALYTICS CODEBASE ANALYSIS - QUICK REFERENCE
+================================================================================
+
+GENERATED: 2026-02-09
+SCOPE: src/ directory analysis
+TOTAL FILES: 95 TypeScript/TSX files
+
+================================================================================
+CRITICAL FINDINGS
+================================================================================
+
+SEVERITY: HIGH
+  [1] Console statements in production code (5 found)
+      - CoachingDashboard.tsx:158,211
+      - ManagementDashboard.tsx:133,160,240
+      ACTION: Remove console.log, replace console.error with logging service
+
+SEVERITY: MEDIUM
+  [2] Inconsistent error handling strategy across services
+      - edgeTrackingService: Re-throws with context
+      - playByPlayService: Returns empty array with console.warn
+      - movementAnalytics: No error handling
+      ACTION: Standardize error handling approach
+
+  [3] Circular dependency risk
+      - edgeTrackingService imports from edge.ts types
+      ACTION: Add lint rule preventing types from importing services
+
+  [4] Unused EDGE service import
+      - Imported in PlayerProfile.tsx but not visibly used
+      ACTION: Verify integration or remove import
+
+SEVERITY: LOW
+  [5] Large service files need modularization
+      - playStyleAnalytics.ts: 1501 lines (split into 3-4 modules)
+      - movementAnalytics.ts: 1164 lines (split into 3-4 modules)
+      ACTION: Extract into focused modules
+
+  [6] Mock generators in production code
+      - 5 mock functions (300 lines) in movementAnalytics.ts
+      ACTION: Move to test utilities
+
+  [7] Potentially unused exports
+      - compareFingerprints() in movementAnalytics.ts
+      - filterFlowFieldBySituation() in movementAnalytics.ts
+      - getDirectionBucket() - unclear if public API
+      ACTION: Audit and document
+
+  [8] Deep nesting (4+ levels)
+      - playByPlayService.ts:67-100 (try-catch + if + forEach)
+      ACTION: Extract nested logic into helper function
+
+  [9] Limited cross-module usage
+      - movementAnalytics: 40+ exports but only used by 1 component
+      - edgeTrackingService: Only imported by PlayerProfile
+      ACTION: Expand usage or consolidate
+
+================================================================================
+STATISTICS
+================================================================================
+
+Total Issues Found:        11
+  Critical (0):            0
+  High (1):                1
+  Medium (3):              3
+  Low (7):                 7
+
+Code Quality:
+  Console statements:      5 (should be 0)
+  Empty catch blocks:      0 ✓
+  Circular dependencies:   0 ✓
+  Unused npm packages:     0 ✓
+
+Structure:
+  Largest services:        playStyleAnalytics (1501), movementAnalytics (1164)
+  Largest components:      PlayerProfile (861), TeamProfile (771)
+  Chart components:        27 (well-modularized) ✓
+  Services:                27+
+  Pages:                   11+
+  Hooks:                   7
+
+Dependencies:
+  Services with <2 imports: 15 (potential consolidation candidates)
+  Type files with no usage: 0 ✓
+  Circular imports:        0 ✓
+
+================================================================================
+NEW EDGE TRACKING INTEGRATION
+================================================================================
+
+Status: Well-implemented but minimally integrated
+
+edgeTrackingService.ts (363 lines):
+  ✓ Clean singleton pattern
+  ✓ Comprehensive API (skater, team, goalie endpoints)
+  ✓ Proper error handling
+  ✓ Batch fetching (getAllSkaterData, getAllTeamData)
+  ✗ No exponential backoff retry logic
+  ✗ No rate limiting (30 req/min needed per CLAUDE.md)
+  ✗ No built-in caching
+
+edge.ts types (532 lines):
+  ✓ Comprehensive type coverage
+  ✓ Well-documented
+  ✗ Only used by edgeTrackingService
+  ✗ Response wrapper types unused
+
+Integration status:
+  Used in: PlayerProfile.tsx (line 19 - import only)
+  Visualized in: 0 components (no EDGE charts)
+  Recommendation: Complete integration or move to separate page
+
+================================================================================
+MOVEMENT ANALYTICS INTEGRATION
+================================================================================
+
+Status: Comprehensive implementation, fully integrated
+
+movementAnalytics.ts (1164 lines):
+  ✓ 40+ utility functions exported
+  ✓ Comprehensive types (11 interfaces)
+  ✓ Good mathematical foundations
+  ✗ Too large (should be split)
+  ✗ Mock generators in production code
+  ✗ Only used by MovementAnalysis.tsx
+  ✗ Some exports appear unused
+
+MovementAnalysis.tsx (442 lines):
+  ✓ Good component composition
+  ✓ Multiple view modes (river, fingerprint, ghost, etc.)
+  ✓ React Query integration
+  ✗ Large component (442 lines)
+  ✗ Generates new mock data every render
+  ✗ Should be split into sub-components
+
+Recommended split:
+  movementAnalytics/ folder:
+    - movementAnalytics.ts (main API)
+    - formationAnalytics.ts (deviation calculations)
+    - flowFieldAnalytics.ts (flow field generation)
+    - shiftAnalytics.ts (shift intensity)
+
+  Test utilities:
+    - src/services/__mocks__/movementAnalytics.ts
+
+================================================================================
+QUICK FIXES (IMMEDIATE)
+================================================================================
+
+1. Remove console.log statements:
+   - src/pages/CoachingDashboard.tsx:158
+   - src/pages/ManagementDashboard.tsx:133
+
+2. Replace console.error with logging service:
+   - src/pages/CoachingDashboard.tsx:211
+   - src/pages/ManagementDashboard.tsx:160,240
+
+3. Verify edgeTrackingService integration:
+   - Check if actually used in PlayerProfile.tsx
+   - If not: remove the import
+   - If yes: verify it's being called and results rendered
+
+Time to fix: ~30 minutes
+
+================================================================================
+PRIORITY 1 (BEFORE NEXT RELEASE)
+================================================================================
+
+[ ] Remove 5 console statements (lines above)
+[ ] Verify EDGE service integration
+[ ] Create logging service
+[ ] Update CI/CD to lint against console.* calls
+
+Time estimate: 2-4 hours
+
+================================================================================
+PRIORITY 2 (NEXT SPRINT)
+================================================================================
+
+[ ] Split playStyleAnalytics.ts (4 files)
+[ ] Split movementAnalytics.ts (4 files)
+[ ] Move mock generators to test utilities
+[ ] Standardize error handling strategy
+[ ] Add exponential backoff to edgeTrackingService
+[ ] Add rate limiting to edgeTrackingService
+
+Time estimate: 12-16 hours
+
+================================================================================
+PRIORITY 3 (FUTURE)
+================================================================================
+
+[ ] Expand EDGE visualization to other components
+[ ] Add integration tests for new services
+[ ] Document public API vs internal utilities
+[ ] Consider merging overlapping analytics services
+[ ] Add end-to-end tests for Movement Analysis page
+
+Time estimate: Open-ended
+
+================================================================================
+POSITIVE FINDINGS
+================================================================================
+
+✓ No circular imports
+✓ No empty catch blocks
+✓ No unused npm dependencies
+✓ Good TypeScript usage throughout
+✓ Proper React Query integration
+✓ Well-modularized chart components (27 separate)
+✓ Clean service layer architecture
+✓ Good separation of concerns
+✓ Comprehensive type definitions
+✓ Well-documented new services
+
+================================================================================
+FILES TO REVIEW
+================================================================================
+
+FULL ANALYSIS:
+  → /Users/ilyamillwe/nhl-analytics/CODEBASE_ANALYSIS.yaml (detailed YAML report)
+  → /Users/ilyamillwe/nhl-analytics/ANALYSIS_SUMMARY.md (executive summary)
+
+KEY FILES ANALYZED:
+  1. src/services/edgeTrackingService.ts (363 lines) - API service
+  2. src/services/movementAnalytics.ts (1164 lines) - Movement types & logic
+  3. src/types/edge.ts (532 lines) - Type definitions
+  4. src/pages/MovementAnalysis.tsx (442 lines) - Movement visualization page
+  5. src/pages/PlayerProfile.tsx (861 lines) - Player profile page
+  6. src/pages/CoachingDashboard.tsx (761 lines) - Dashboard
+  7. src/pages/ManagementDashboard.tsx (623 lines) - Dashboard
+
+CONSOLE STATEMENTS:
+  → src/pages/CoachingDashboard.tsx:158,211
+  → src/pages/ManagementDashboard.tsx:133,160,240
+
+LARGE SERVICES (NEED SPLIT):
+  → src/services/playStyleAnalytics.ts (1501 lines)
+  → src/services/movementAnalytics.ts (1164 lines)
+
+================================================================================
+NOTES
+================================================================================
+
+- All analysis respects CLAUDE.md project guidelines
+- EDGE tracking follows NHL API patterns from documentation
+- Movement analytics designed for coaching dashboard use case
+- No breaking changes needed for recommendations
+- All fixes are backward-compatible
+
+================================================================================
+END OF QUICK REFERENCE
+================================================================================

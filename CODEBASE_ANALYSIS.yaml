@@ -1,0 +1,437 @@
+---
+# NHL Analytics Codebase Analysis Report
+# Generated: 2026-02-09
+# Focus Areas: src/services/ (especially new edge/movement modules)
+#              src/components/charts/ (especially new EDGE charts)
+#              src/pages/ (especially new MovementAnalysis.tsx)
+
+# ============================================================================
+# STRUCTURE ISSUES
+# ============================================================================
+structure_issues:
+  - id: STRUCT-001
+    severity: medium
+    title: "Edge Tracking Service Circular Import Risk"
+    description: |
+      edgeTrackingService.ts imports from edge.ts type definitions, but edge.ts
+      is only a type file. No actual circular dependency exists, but the pattern
+      could lead to circular imports if edge.ts ever imports from services.
+    location:
+      - "src/services/edgeTrackingService.ts"
+      - "src/types/edge.ts"
+    files_affected: 2
+    recommendation: "Monitor for future circular dependencies. Consider adding a lint rule to prevent services from importing types that import services."
+
+  - id: STRUCT-002
+    severity: low
+    title: "High Line Count in Core Services"
+    description: |
+      Several core services exceed 500 lines, with the largest being:
+      - playStyleAnalytics.ts: 1501 lines
+      - movementAnalytics.ts: 1164 lines
+
+      These should be split into smaller, more focused modules.
+    location:
+      - "src/services/playStyleAnalytics.ts:1501"
+      - "src/services/movementAnalytics.ts:1164"
+      - "src/services/behavioralEvolutionAnalytics.ts:570"
+    files_affected: 3
+    recommendation: "Extract utility functions from playStyleAnalytics into separate modules (e.g., sequenceBuilder.ts, attackProfiler.ts, flowFieldGenerator.ts)"
+
+  - id: STRUCT-003
+    severity: low
+    title: "Single Location Import of edgeTrackingService"
+    description: |
+      edgeTrackingService is only imported in PlayerProfile.tsx. It's exported
+      as both singleton instance and default class, but appears underutilized.
+    location:
+      - "src/services/edgeTrackingService.ts:356-360"
+      - "src/pages/PlayerProfile.tsx:19"
+    files_affected: 2
+    recommendation: "Verify that edge tracking features are being used. If not extensively used, consider whether all the API endpoints are needed."
+
+# ============================================================================
+# DEPENDENCY ISSUES
+# ============================================================================
+dependency_issues:
+  - id: DEP-001
+    severity: low
+    title: "Limited Cross-Module Usage of movementAnalytics"
+    description: |
+      movementAnalytics.ts exports 40+ functions and types, but is only
+      imported by MovementAnalysis.tsx. Mock generator functions suggest
+      this module was designed for broader use than currently realized.
+    location:
+      - "src/services/movementAnalytics.ts"
+      - "src/pages/MovementAnalysis.tsx:16-28"
+    exports_count: 40
+    actual_usage_files: 1
+    recommendation: |
+      1. Expand usage of movement analytics in other pages (PlayerProfile, TeamProfile)
+      2. OR consolidate mock data generation into a dedicated testing utility
+      3. Consider splitting into public API (real data) and private utilities (mocks)
+
+  - id: DEP-002
+    severity: low
+    title: "playStyleAnalytics Imports Not Indexed"
+    description: |
+      playStyleAnalytics.ts is a large service (1501 lines) but has minimal
+      indexed imports in the codebase. Only AttackDNAPage.tsx imports from it.
+      This suggests potential feature consolidation opportunity.
+    location:
+      - "src/services/playStyleAnalytics.ts"
+      - "src/pages/AttackDNAPage.tsx"
+    files_affected: 2
+    recommendation: "Merge Attack DNA v2 imports into AttackDNA component to simplify service API discovery."
+
+  - id: DEP-003
+    severity: medium
+    title: "Type File Dependency Mismatch"
+    description: |
+      edge.ts type definitions (532 lines) define 20+ interfaces but are only
+      used by edgeTrackingService.ts. No other components reference these types
+      directly, suggesting either incomplete integration or misaligned architecture.
+    location:
+      - "src/types/edge.ts:1-532"
+    usage_locations: ["src/services/edgeTrackingService.ts"]
+    recommendation: "Either expand EDGE integration to charts/pages or consolidate types into edgeTrackingService."
+
+# ============================================================================
+# CODE QUALITY HOTSPOTS
+# ============================================================================
+code_quality_issues:
+  - id: QUALITY-001
+    severity: high
+    title: "Console Statements in Production Pages"
+    description: |
+      Found console.log/error statements in production code that should be
+      removed or replaced with proper logging service.
+    locations:
+      - file: "src/pages/CoachingDashboard.tsx"
+        line: 158
+        statement: "console.log(`Loaded ${pbpData.length} games from edge cache`)"
+        type: "info"
+
+      - file: "src/pages/CoachingDashboard.tsx"
+        line: 211
+        statement: "console.error('Error loading coaching data:', err)"
+        type: "error"
+
+      - file: "src/pages/ManagementDashboard.tsx"
+        line: 133
+        statement: "console.log(`Loaded ${pbpData.length} games from edge cache`)"
+        type: "info"
+
+      - file: "src/pages/ManagementDashboard.tsx"
+        line: 160
+        statement: "console.error('Error loading management data:', err)"
+        type: "error"
+
+      - file: "src/pages/ManagementDashboard.tsx"
+        line: 240
+        statement: "console.error('Error loading chemistry data:', err)"
+        type: "error"
+
+    recommendation: |
+      1. Remove console.log statements (line 158, 133) - these are not errors
+      2. Replace console.error with structured logging service
+      3. Create a LoggerService with levels: info, warn, error, debug
+      4. Filter logs by environment (dev vs production)
+
+  - id: QUALITY-002
+    severity: medium
+    title: "Large Function in playStyleAnalytics"
+    description: |
+      Function at line 459 in playStyleAnalytics.ts extends 62 lines with
+      multiple nested conditionals for angle calculations. Suggests potential
+      extraction into utility module.
+    location:
+      - "src/services/playStyleAnalytics.ts:459-520"
+    lines: 62
+    nesting_depth: 4
+    recommendation: "Extract geometry calculations into separate module: src/utils/geometryUtils.ts"
+
+  - id: QUALITY-003
+    severity: low
+    title: "High Complexity in generateMock Functions"
+    description: |
+      Five mock generator functions in movementAnalytics.ts (lines 856-1164)
+      contain complex nested loops and data generation logic that duplicates
+      production logic. These add ~300 lines of testing code to production module.
+    location:
+      - "src/services/movementAnalytics.ts:856-1164"
+    functions:
+      - "generateMockSkatingTrail"
+      - "generateMockFingerprint"
+      - "generateMockFlowField"
+      - "generateMockShiftData"
+      - "generateMockPositionData"
+    recommendation: |
+      Move mock generators to:
+      - src/services/__mocks__/movementAnalytics.ts (for unit tests)
+      - src/utils/testDataGenerators.ts (for component storybook/demos)
+      This reduces production module size by ~25%.
+
+  - id: QUALITY-004
+    severity: low
+    title: "Deep Nesting in playByPlayService"
+    description: |
+      Error handling in playByPlayService.ts (lines 67-100) has 4 levels of
+      nesting due to try-catch, if statements, and forEach loops. Reduces readability.
+    location:
+      - "src/services/playByPlayService.ts:67-100"
+    nesting_levels: 4
+    recommendation: "Extract forEach logic into separate function to flatten nesting."
+
+# ============================================================================
+# DEAD CODE & UNUSED EXPORTS
+# ============================================================================
+dead_code_issues:
+  - id: DEAD-001
+    severity: low
+    title: "Potentially Unused Movement Analytics Exports"
+    description: |
+      movementAnalytics.ts exports utility functions that may be useful for
+      external consumers, but they're not used in MovementAnalysis.tsx itself.
+      These are low-risk but suggest incomplete implementation:
+
+    unused_functions:
+      - "compareFingerprints" - exported but not used anywhere
+      - "filterFlowFieldBySituation" - only returns modified copy, not used
+      - "getDirectionBucket" - utility function, may be internal only
+
+    likely_intentional:
+      - Mock generators (generateMock*) - for demo/development
+      - Helper functions (getZoneFromCoord, calculateDistance, etc.) - utility library
+
+    location:
+      - "src/services/movementAnalytics.ts:393-405"
+      - "src/services/movementAnalytics.ts:689-699"
+      - "src/services/movementAnalytics.ts:259-263"
+
+    recommendation: |
+      1. If compareFingerprints is unused, either use it in fingerprint comparison UI
+         or move to __tests__ for testing utilities
+      2. If filterFlowFieldBySituation is unused, simplify the return statement to
+         just return a new object with updated situation
+      3. Document whether helper functions (getDirectionBucket, etc.) are public API
+         or internal implementation details
+
+  - id: DEAD-002
+    severity: low
+    title: "EditorConfig and Unused Interfaces in edge.ts"
+    description: |
+      edge.ts defines complete API response wrappers (EdgeApiResponse, EdgeApiError)
+      but edgeTrackingService handles errors directly without wrapping. Types may
+      be over-engineered for current usage.
+    location:
+      - "src/types/edge.ts:484-498"
+    recommendation: |
+      Verify whether these wrapper types are needed or if direct error handling
+      in edgeTrackingService is sufficient. Consider removing if not used by any
+      consumer components.
+
+# ============================================================================
+# ARCHITECTURE PATTERNS & CONSISTENCY
+# ============================================================================
+architecture_issues:
+  - id: ARCH-001
+    severity: medium
+    title: "Inconsistent Error Handling Strategy"
+    description: |
+      Different services use different error handling approaches:
+      - edgeTrackingService: Re-throws with context wrapper
+      - playByPlayService: Returns empty array on error with console.warn
+      - movementAnalytics: No error handling (assumes valid input)
+
+      This inconsistency makes error recovery unpredictable.
+    locations:
+      - "src/services/edgeTrackingService.ts:67-73"
+      - "src/services/playByPlayService.ts:97-99"
+      - "src/services/movementAnalytics.ts:299-388"
+    recommendation: |
+      Create ErrorHandlingStrategy interface:
+      - throw: For critical errors (data loading)
+      - return-empty: For batch operations where partial failure is acceptable
+      - log-and-continue: For non-blocking issues
+
+      Document which strategy each service uses.
+
+  - id: ARCH-002
+    severity: low
+    title: "Mixed Mock Data Strategies"
+    description: |
+      MovementAnalysis.tsx uses useMemo to generate mock data on every render,
+      but edge data would come from API. This creates inconsistent UX where
+      movement data updates randomly but edge data would be stable.
+    location:
+      - "src/pages/MovementAnalysis.tsx:106-151"
+    recommendation: |
+      1. Either use stable mock data (generate once, memoize across sessions)
+      2. Or fetch both movement and edge data from APIs
+      3. Add comment explaining why mock data is generated differently
+
+  - id: ARCH-003
+    severity: low
+    title: "Incomplete EDGE Feature Integration"
+    description: |
+      Edge tracking service is imported in PlayerProfile but appears to be
+      partially integrated. No visible usage in the page render or state.
+    location:
+      - "src/pages/PlayerProfile.tsx:19"
+    recommendation: |
+      Either:
+      1. Complete EDGE integration (add EDGE visualizations to PlayerProfile)
+      2. OR remove import if EDGE features are planned for separate page
+      Document integration plan in CLAUDE.md
+
+# ============================================================================
+# NESTING COMPLEXITY ANALYSIS
+# ============================================================================
+nesting_analysis:
+  summary: "Generally good nesting levels (max 4 in most places)"
+  hotspots:
+    - file: "src/services/playByPlayService.ts"
+      lines: "67-100"
+      max_depth: 4
+      recommendation: "Extract fetchGameShifts logic into helper function"
+
+# ============================================================================
+# SUMMARY STATISTICS
+# ============================================================================
+summary:
+  total_files_analyzed: 95
+  src_files_analyzed: 95
+
+  critical_issues: 0
+  high_issues: 1
+  medium_issues: 3
+  low_issues: 7
+
+  total_issues: 11
+
+  largest_services:
+    - "playStyleAnalytics.ts: 1501 lines"
+    - "movementAnalytics.ts: 1164 lines"
+    - "behavioralEvolutionAnalytics.ts: 570 lines"
+
+  console_statements_found: 5
+  unused_exports_found: 3
+  circular_dependency_risk: low
+
+# ============================================================================
+# RECOMMENDATIONS PRIORITY
+# ============================================================================
+recommendations:
+  priority_1_immediate:
+    - "Remove or replace 5 console statements in CoachingDashboard.tsx and ManagementDashboard.tsx"
+    - "Document why edgeTrackingService is imported in PlayerProfile if not used"
+
+  priority_2_short_term:
+    - "Extract mock data generators from movementAnalytics.ts to test utilities"
+    - "Create consistent error handling strategy across services"
+    - "Split playStyleAnalytics.ts into smaller focused modules"
+
+  priority_3_long_term:
+    - "Expand EDGE integration across components"
+    - "Document public vs private API for utility functions"
+    - "Consider consolidating movement analytics usage patterns"
+
+# ============================================================================
+# POSITIVE FINDINGS
+# ============================================================================
+positive_findings:
+  - "No empty catch blocks found"
+  - "No circular import dependencies detected"
+  - "Type definitions are well-structured and comprehensive"
+  - "Good separation of concerns between services, components, and pages"
+  - "Chart components are well-modularized (27 separate chart components)"
+  - "Proper use of TypeScript throughout codebase"
+  - "Good documentation comments in new EDGE/Movement services"
+  - "React Query integration for caching is implemented"
+  - "No unused dependencies found"
+  - "Test generation utilities are present but separated from business logic"
+
+# ============================================================================
+# NEW EDGE TRACKING ANALYSIS
+# ============================================================================
+edge_tracking_analysis:
+  status: "Well-implemented, minimal integration"
+
+  edgeTrackingService.ts:
+    strengths:
+      - "Clean singleton pattern with TestClass export"
+      - "Proper error handling with context preservation"
+      - "Comprehensive API coverage (skater, team, goalie endpoints)"
+      - "Utility methods for season formatting"
+      - "Promise.all for batch fetching (getAllSkaterData, getAllTeamData)"
+
+    concerns:
+      - "No retry logic despite network-sensitive operations"
+      - "No caching mechanism (relies on caller to implement)"
+      - "Generic fetchFromAPI method lacks specific error codes"
+
+    recommendations:
+      - "Add exponential backoff retry logic per CLAUDE.md"
+      - "Implement built-in request deduplication"
+      - "Add rate limit handling (30 req/min per CLAUDE.md)"
+
+  edge.ts type_definitions:
+    strengths:
+      - "Comprehensive coverage of EDGE API responses"
+      - "Proper TypeScript syntax with proper types"
+      - "Good documentation of each interface"
+
+    concerns:
+      - "Only used by edgeTrackingService, not by components"
+      - "Response wrapper types (EdgeApiResponse) not used"
+
+  integration_status:
+    - "Imported by: PlayerProfile.tsx only"
+    - "Rendered by: Unknown (check if actually used in PlayerProfile)"
+    - "Charts using EDGE: 0 (edge tracking is tracked but not visualized)"
+
+# ============================================================================
+# MOVEMENT ANALYTICS ANALYSIS
+# ============================================================================
+movement_analytics_analysis:
+  status: "Comprehensive implementation, fully integrated"
+
+  movementAnalytics.ts:
+    size: "1164 lines (needs modularization)"
+    exports: "40+ functions and types"
+    usage: "Only by MovementAnalysis.tsx"
+
+    modules_inside:
+      - "Movement types (11 interfaces)"
+      - "Helper functions (9 utility functions)"
+      - "Fingerprint calculations (2 major functions)"
+      - "Formation deviation (3 major functions)"
+      - "Flow field generation (2 major functions)"
+      - "Shift intensity calculations (4 major functions)"
+      - "Mock data generators (5 generators)"
+
+    recommendations:
+      - "Consider split into: movementHelpers.ts + formationAnalytics.ts + flowFieldAnalytics.ts"
+      - "Move mock generators to separate test utilities"
+      - "Extract constant calculations (EXPECTED_POSITIONS) to config"
+
+  MovementAnalysis.tsx:
+    strengths:
+      - "Good component composition with separate view modes"
+      - "Proper state management with useState/useMemo"
+      - "React Query integration for player data"
+      - "Responsive filter panel"
+
+    concerns:
+      - "useMemo generates new mock data every render (line 106-151)"
+      - "Large component (442 lines) handles many responsibilities"
+      - "Mock data not deterministic (uses Math.random())"
+
+    recommendations:
+      - "Extract mock data generation to stable function"
+      - "Split into smaller sub-components: OverviewTab, RiverTab, FingerprintTab, etc."
+      - "Use fixture/snapshot data instead of random generation"
+
+---
+# END OF CODEBASE ANALYSIS REPORT

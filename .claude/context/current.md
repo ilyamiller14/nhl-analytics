@@ -143,12 +143,18 @@ workers/
 - Test scripts: `test:api`, `test:e2e`, `test:all`
 - API connectivity tests in `e2e/api-connectivity.spec.ts`
 
-## Deployment
+## Deployment (Cloudflare)
+
+Frontend and API proxy are both deployed via Cloudflare:
+
+- **Frontend**: Cloudflare Pages (auto-deploys on push to main)
+- **API Proxy**: Cloudflare Workers at `nhl-api-proxy.deepdivenhl.workers.dev`
+
 ```bash
-# Deploy Cloudflare Worker
+# Deploy API proxy (Cloudflare Worker)
 cd workers && npx wrangler deploy
 
-# Build frontend
+# Build frontend (Cloudflare Pages handles deployment)
 npm run build
 ```
 
