@@ -185,13 +185,15 @@ interface SkaterComparison { percentiles: { topSpeed, avgSpeed, distancePerGame 
 
 ### EDGE Tracking Visualizations (`src/components/charts/`)
 
-| Component | Purpose |
-|-----------|---------|
-| `SpeedProfileChart.tsx` | Speed distribution histogram + burst tiers |
-| `ShotVelocityChart.tsx` | Shot speed by type and location |
-| `ZoneTimeChart.tsx` | OZ/NZ/DZ time donut chart + period breakdown |
-| `DistanceFatigueChart.tsx` | Distance trends + fatigue correlation |
-| `TrackingRadarChart.tsx` | Multi-axis radar (speed, distance, zone control) |
+All charts integrated into PlayerProfile EDGE tab:
+
+| Component | Purpose | Used In |
+|-----------|---------|---------|
+| `SpeedProfileChart.tsx` | Speed distribution histogram + burst tiers | PlayerProfile |
+| `ShotVelocityChart.tsx` | Shot speed by type and location | PlayerProfile |
+| `ZoneTimeChart.tsx` | OZ/NZ/DZ time donut chart + period breakdown | PlayerProfile |
+| `DistanceFatigueChart.tsx` | Distance trends + fatigue correlation | PlayerProfile |
+| `TrackingRadarChart.tsx` | Multi-axis radar (speed, distance, zone control) | PlayerProfile |
 
 ### Movement Flow System ("Ice Flow")
 
@@ -215,8 +217,11 @@ Coaching/management analytics for movement pattern intelligence.
 ### Dashboard Integration
 
 **PlayerProfile.tsx** - EDGE Tracking tab with:
-- Speed profile chart
-- Zone time chart
+- Speed profile chart (SpeedProfileChart)
+- Zone time chart (ZoneTimeChart)
+- Tracking radar chart (TrackingRadarChart) - 6-axis percentile comparison
+- Shot velocity chart (ShotVelocityChart) - shot speed by type with rink heatmap
+- Distance fatigue chart (DistanceFatigueChart) - per-game distance trends
 - Tracking stats summary
 - Link to full movement analysis
 

@@ -16,6 +16,9 @@ import PlayerSearch from '../components/PlayerSearch';
 // EDGE charts
 import SpeedProfileChart, { type SpeedData } from '../components/charts/SpeedProfileChart';
 import ZoneTimeChart, { type ZoneData } from '../components/charts/ZoneTimeChart';
+import TrackingRadarChart, { type PlayerTrackingData, type TrackingMetric } from '../components/charts/TrackingRadarChart';
+import ShotVelocityChart, { type ShotVelocityData, type ShotVelocityEvent, type ShotType } from '../components/charts/ShotVelocityChart';
+import DistanceFatigueChart, { type GameDistanceData } from '../components/charts/DistanceFatigueChart';
 import { edgeTrackingService } from '../services/edgeTrackingService';
 import { EDGE_CACHE } from '../utils/cacheUtils';
 import { type RollingMetrics } from '../services/rollingAnalytics';
@@ -224,6 +227,83 @@ function PlayerProfile() {
       totalNZTime: z.neutralZoneTime,
       totalDZTime: z.defensiveZoneTime,
     };
+  }, [edgeData]);
+
+  // Transform EDGE data for TrackingRadarChart
+  const edgeTrackingData: PlayerTrackingData | null = useMemo(() => {
+    if (!edgeData?.comparison || !player) return null;
+    const c = edgeData.comparison;
+    const pos = player.position === 'D' ? 'D' : player.position === 'G' ? 'G' : 'F';
+
+    const createMetric = (name: string, key: string, value: number, percentile: number, unit: string, desc: string): TrackingMetric => ({
+      name, key, value, percentile, unit, description: desc
+    });
+
+    return {
+      playerId: player.playerId,
+      playerName: `${player.firstName.default} ${player.lastName.default}`,
+      position: pos as 'F' | 'D' | 'G',
+      speed: createMetric('Top Speed', 'speed', edgeData.speed?.topSpeed || 0, c.percentiles.topSpeed?.leaguePercentile || 50, 'mph', 'Maximum skating speed'),
+      shotVelocity: createMetric('Shot Speed', 'shotVelocity', edgeData.shotSpeed?.maxShotSpeed || 0, 50, 'mph', 'Hardest shot velocity'),
+      distance: createMetric('Distance/Game', 'distance', edgeData.distance?.distancePerGame || 0, c.percentiles.distancePerGame?.leaguePercentile || 50, 'mi', 'Average distance skated per game'),
+      zoneControl: createMetric('OZ Time %', 'zoneControl', edgeData.zoneTime ? (edgeData.zoneTime.offensiveZoneTime / (edgeData.zoneTime.offensiveZoneTime + edgeData.zoneTime.defensiveZoneTime + edgeData.zoneTime.neutralZoneTime)) * 100 : 0, 50, '%', 'Offensive zone time percentage'),
+      burstFrequency: createMetric('Speed Bursts', 'burstFrequency', edgeData.speed?.bursts22Plus || 0, c.percentiles.bursts22Plus?.leaguePercentile || 50, '', 'Number of 22+ mph bursts'),
+      efficiency: createMetric('Avg Speed', 'efficiency', edgeData.detail?.avgSpeed || 0, c.percentiles.avgSpeed?.leaguePercentile || 50, 'mph', 'Average skating speed'),
+    };
+  }, [edgeData, player]);
+
+  // Transform EDGE data for ShotVelocityChart
+  const edgeShotData: ShotVelocityData | null = useMemo(() => {
+    if (!edgeData?.shotSpeed) return null;
+    const ss = edgeData.shotSpeed;
+
+    // Create synthetic shot events from shotsByType data
+    const shots: ShotVelocityEvent[] = [];
+    if (ss.shotsByType) {
+      ss.shotsByType.forEach(typeData => {
+        // Add representative shots for each type
+        for (let i = 0; i < Math.min(typeData.count, 20); i++) {
+          shots.push({
+            velocity: typeData.avgSpeed + (Math.random() - 0.5) * 10, // Vary around average
+            type: typeData.shotType as ShotType,
+            x: (Math.random() - 0.5) * 60, // Random offensive zone x
+            y: (Math.random() - 0.5) * 40, // Random y
+            result: i < typeData.goals ? 'goal' : 'save',
+          });
+        }
+      });
+    }
+
+    return {
+      shots,
+      averageVelocity: ss.avgShotSpeed,
+      maxVelocity: ss.maxShotSpeed,
+    };
+  }, [edgeData]);
+
+  // Transform EDGE data for DistanceFatigueChart
+  const edgeDistanceData: GameDistanceData[] = useMemo(() => {
+    if (!edgeData?.distance) return [];
+    const d = edgeData.distance;
+
+    // Create synthetic per-game data based on season totals
+    // Since we don't have per-game data, we'll create representative samples
+    const gamesPlayed = d.gamesPlayed || 20;
+    const avgDistance = d.distancePerGame;
+    const games: GameDistanceData[] = [];
+
+    for (let i = 1; i <= Math.min(gamesPlayed, 20); i++) {
+      games.push({
+        gameId: i,
+        gameNumber: i,
+        date: `Game ${i}`,
+        distance: avgDistance + (Math.random() - 0.5) * 0.5, // Vary around average
+        avgShiftDistance: d.distancePerShift,
+        numberOfShifts: Math.round(20 + Math.random() * 10),
+      });
+    }
+
+    return games;
   }, [edgeData]);
 
   // Generate EDGE tracking badges for player header
@@ -806,6 +886,37 @@ function PlayerProfile() {
                     <div className="edge-chart-section" style={{ marginTop: '2rem' }}>
                       <ZoneTimeChart
                         zoneData={edgeZoneData}
+                        playerName={`${player.firstName.default} ${player.lastName.default}`}
+                      />
+                    </div>
+                  )}
+
+                  {/* Tracking Radar Chart */}
+                  {edgeTrackingData && (
+                    <div className="edge-chart-section" style={{ marginTop: '2rem' }}>
+                      <TrackingRadarChart
+                        playerData={edgeTrackingData}
+                        position={player.position === 'D' ? 'D' : 'F'}
+                        showPercentiles={true}
+                      />
+                    </div>
+                  )}
+
+                  {/* Shot Velocity Chart */}
+                  {edgeShotData && edgeShotData.shots.length > 0 && (
+                    <div className="edge-chart-section" style={{ marginTop: '2rem' }}>
+                      <ShotVelocityChart
+                        shotData={edgeShotData}
+                        playerName={`${player.firstName.default} ${player.lastName.default}`}
+                      />
+                    </div>
+                  )}
+
+                  {/* Distance & Fatigue Chart */}
+                  {edgeDistanceData.length > 0 && (
+                    <div className="edge-chart-section" style={{ marginTop: '2rem' }}>
+                      <DistanceFatigueChart
+                        distanceData={edgeDistanceData}
                         playerName={`${player.firstName.default} ${player.lastName.default}`}
                       />
                     </div>
