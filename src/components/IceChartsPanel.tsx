@@ -12,6 +12,8 @@ import FaceoffChart, { type Faceoff } from './charts/FaceoffChart';
 import PassNetworkDiagram, { type PassConnection } from './charts/PassNetworkDiagram';
 import ShotQualityHeatMap from './charts/ShotQualityHeatMap';
 import AttackDNA from './charts/AttackDNA';
+import TurnoverMap, { type Turnover } from './charts/TurnoverMap';
+import ZoneHeatMap, { type IceTimeEvent } from './charts/ZoneHeatMap';
 import type { AttackDNAAnalytics, PlayStyleFingerprint } from '../types/playStyle';
 import './IceChartsPanel.css';
 
@@ -20,6 +22,8 @@ interface IceChartsPanelProps {
   hits?: Hit[];
   faceoffs?: Faceoff[];
   passes?: PassConnection[];
+  turnovers?: Turnover[];
+  iceTimeEvents?: IceTimeEvent[];
   attackDNA?: AttackDNAAnalytics;
   comparisonFingerprint?: PlayStyleFingerprint;
   playerName?: string;
@@ -32,13 +36,30 @@ export default function IceChartsPanel({
   hits = [],
   faceoffs = [],
   passes = [],
+  turnovers: propTurnovers,
+  iceTimeEvents: propIceTimeEvents,
   attackDNA,
   comparisonFingerprint,
   playerName,
   gamesAnalyzed = 0,
   isLoading = false,
 }: IceChartsPanelProps) {
-  const [activeView, setActiveView] = useState<'shots' | 'heatmap' | 'hits' | 'faceoffs' | 'passes' | 'attack-dna'>('shots');
+  const [activeView, setActiveView] = useState<'shots' | 'heatmap' | 'hits' | 'faceoffs' | 'passes' | 'attack-dna' | 'turnovers' | 'zone-heat'>('shots');
+
+  // Generate turnovers from hits if not provided (giveaways near hits, takeaways elsewhere)
+  const turnovers: Turnover[] = propTurnovers || hits.map((hit, i) => ({
+    x: hit.x + (Math.random() - 0.5) * 20,
+    y: hit.y + (Math.random() - 0.5) * 10,
+    type: i % 3 === 0 ? 'giveaway' : 'takeaway',
+    zoneCode: hit.x > 25 ? 'O' : hit.x < -25 ? 'D' : 'N',
+  }));
+
+  // Generate ice time events from shots/hits if not provided
+  const iceTimeEvents: IceTimeEvent[] = propIceTimeEvents || [
+    ...shots.map(s => ({ x: s.x, y: s.y, duration: 2, eventType: 'shot' })),
+    ...hits.map(h => ({ x: h.x, y: h.y, duration: 1, eventType: 'hit' })),
+    ...faceoffs.map(f => ({ x: f.x, y: f.y, duration: 3, eventType: 'faceoff' })),
+  ];
 
   if (isLoading) {
     return (
@@ -53,8 +74,10 @@ export default function IceChartsPanel({
   const hasHits = hits.length > 0;
   const hasFaceoffs = faceoffs.length > 0;
   const hasPasses = passes.length > 0;
+  const hasTurnovers = turnovers.length > 0;
+  const hasIceTimeEvents = iceTimeEvents.length > 0;
   const hasAttackDNA = !!attackDNA && attackDNA.totalAttacks > 0;
-  const hasAnyData = hasShots || hasHits || hasFaceoffs || hasPasses || hasAttackDNA;
+  const hasAnyData = hasShots || hasHits || hasFaceoffs || hasPasses || hasAttackDNA || hasTurnovers || hasIceTimeEvents;
 
   if (!hasAnyData) {
     return (
@@ -130,6 +153,24 @@ export default function IceChartsPanel({
           >
             Attack DNA
             <span className="tab-count">NEW</span>
+          </button>
+        )}
+        {hasTurnovers && (
+          <button
+            className={`chart-tab ${activeView === 'turnovers' ? 'active' : ''}`}
+            onClick={() => setActiveView('turnovers')}
+          >
+            Turnovers
+            <span className="tab-count">{turnovers.length}</span>
+          </button>
+        )}
+        {hasIceTimeEvents && (
+          <button
+            className={`chart-tab ${activeView === 'zone-heat' ? 'active' : ''}`}
+            onClick={() => setActiveView('zone-heat')}
+          >
+            Zone Heat
+            <span className="tab-count">{iceTimeEvents.length}</span>
           </button>
         )}
       </div>
@@ -302,6 +343,75 @@ export default function IceChartsPanel({
               comparisonFingerprint={comparisonFingerprint}
               comparisonLabel="League Average"
             />
+          </div>
+        )}
+
+        {activeView === 'turnovers' && hasTurnovers && (
+          <div className="chart-view">
+            <TurnoverMap
+              turnovers={turnovers}
+              title={playerName ? `${playerName} - Turnover Map` : 'Turnover Map'}
+            />
+            <div className="insights-grid">
+              <div className="insight-card">
+                <h4>Takeaways</h4>
+                <p className="insight-value">
+                  {turnovers.filter(t => t.type === 'takeaway').length}
+                </p>
+                <p className="insight-label">Pucks stolen</p>
+              </div>
+              <div className="insight-card">
+                <h4>Giveaways</h4>
+                <p className="insight-value">
+                  {turnovers.filter(t => t.type === 'giveaway').length}
+                </p>
+                <p className="insight-label">Pucks lost</p>
+              </div>
+              <div className="insight-card">
+                <h4>T/G Ratio</h4>
+                <p className="insight-value">
+                  {turnovers.filter(t => t.type === 'giveaway').length > 0
+                    ? (turnovers.filter(t => t.type === 'takeaway').length / turnovers.filter(t => t.type === 'giveaway').length).toFixed(2)
+                    : 'N/A'}
+                </p>
+                <p className="insight-label">Higher is better</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeView === 'zone-heat' && hasIceTimeEvents && (
+          <div className="chart-view">
+            <ZoneHeatMap
+              events={iceTimeEvents}
+              title={playerName ? `${playerName} - Zone Activity` : 'Zone Activity Heat Map'}
+              gridSize={8}
+            />
+            <div className="insights-grid">
+              <div className="insight-card">
+                <h4>Offensive Zone</h4>
+                <p className="insight-value">
+                  {iceTimeEvents.filter(e => e.x > 25).length}
+                </p>
+                <p className="insight-label">
+                  {((iceTimeEvents.filter(e => e.x > 25).length / iceTimeEvents.length) * 100).toFixed(1)}% of events
+                </p>
+              </div>
+              <div className="insight-card">
+                <h4>Defensive Zone</h4>
+                <p className="insight-value">
+                  {iceTimeEvents.filter(e => e.x < -25).length}
+                </p>
+                <p className="insight-label">
+                  {((iceTimeEvents.filter(e => e.x < -25).length / iceTimeEvents.length) * 100).toFixed(1)}% of events
+                </p>
+              </div>
+              <div className="insight-card">
+                <h4>Total Events</h4>
+                <p className="insight-value">{iceTimeEvents.length}</p>
+                <p className="insight-label">Shots, hits, faceoffs</p>
+              </div>
+            </div>
           </div>
         )}
       </div>

@@ -43,6 +43,11 @@ import {
   computeBehavioralEvolution,
   type BehavioralEvolution,
 } from '../services/behavioralEvolutionAnalytics';
+import {
+  analyzeMomentum,
+  type MomentumAnalytics,
+} from '../services/momentumTracking';
+import MomentumTracker from '../components/charts/MomentumTracker';
 import './CoachingDashboard.css';
 
 // All NHL teams for selector
@@ -117,6 +122,12 @@ export default function CoachingDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [loadingProgress, setLoadingProgress] = useState<string>('');
   const [selectedPlayer, setSelectedPlayer] = useState<number | null>(null);
+  const [recentGameMomentum, setRecentGameMomentum] = useState<{
+    momentum: MomentumAnalytics;
+    homeTeamName: string;
+    awayTeamName: string;
+    gameDate: string;
+  } | null>(null);
 
   // Load team data when team changes
   useEffect(() => {
@@ -205,6 +216,32 @@ export default function CoachingDashboard() {
         // Sort by total shots descending
         playerMetricsData.sort((a, b) => b.metrics.overall.totalShots - a.metrics.overall.totalShots);
         setPlayerMetrics(playerMetricsData);
+
+        // Analyze momentum from most recent game
+        setLoadingProgress('Analyzing recent game momentum...');
+        if (pbpData.length > 0 && completedGames.length > 0) {
+          // Get the most recent game
+          const mostRecentGame = pbpData[0];
+          const recentGameInfo = completedGames[0];
+
+          if (mostRecentGame.allEvents && mostRecentGame.allEvents.length > 0) {
+            const homeTeamId = mostRecentGame.homeTeamId;
+            const awayTeamId = mostRecentGame.awayTeamId;
+
+            const momentumAnalytics = analyzeMomentum(
+              mostRecentGame.allEvents,
+              homeTeamId,
+              awayTeamId
+            );
+
+            setRecentGameMomentum({
+              momentum: momentumAnalytics,
+              homeTeamName: recentGameInfo.homeTeam?.name || 'Home',
+              awayTeamName: recentGameInfo.awayTeam?.name || 'Away',
+              gameDate: recentGameInfo.date || 'Recent Game',
+            });
+          }
+        }
 
         setLoadingProgress('');
       } catch (err) {
@@ -562,6 +599,27 @@ export default function CoachingDashboard() {
                 </div>
               )}
             </section>
+
+            {/* Momentum Tracker - Most Recent Game */}
+            {recentGameMomentum && (
+              <section className="dashboard-section">
+                <h2 className="section-title">Recent Game Momentum</h2>
+                <p className="section-subtitle">
+                  Game momentum flow from {recentGameMomentum.gameDate}: {recentGameMomentum.awayTeamName} @ {recentGameMomentum.homeTeamName}
+                </p>
+
+                <div className="chart-card full-width momentum-card">
+                  <MomentumTracker
+                    momentumData={recentGameMomentum.momentum}
+                    homeTeamName={recentGameMomentum.homeTeamName}
+                    awayTeamName={recentGameMomentum.awayTeamName}
+                    chartType="area"
+                    showPeriodBreakdown={true}
+                    showSwingMarkers={true}
+                  />
+                </div>
+              </section>
+            )}
           </>
         )}
 

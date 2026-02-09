@@ -13,6 +13,10 @@ import MovementFingerprintChart from '../components/charts/MovementFingerprintCh
 import FormationGhostChart from '../components/charts/FormationGhostChart';
 import TeamFlowFieldChart from '../components/charts/TeamFlowFieldChart';
 import ShiftIntensityChart from '../components/charts/ShiftIntensityChart';
+import RushAttackVisualization from '../components/charts/RushAttackVisualization';
+import ZoneEntryVisualization from '../components/charts/ZoneEntryVisualization';
+import type { RushAnalytics, RushAttack } from '../services/rushAnalytics';
+import type { ZoneAnalytics, ZoneEntry } from '../services/zoneTracking';
 import {
   generateMockSkatingTrail,
   generateMockFingerprint,
@@ -29,7 +33,71 @@ import './MovementAnalysis.css';
 // TYPES
 // ============================================================================
 
-type ViewMode = 'river' | 'fingerprint' | 'ghost' | 'flowfield' | 'intensity' | 'overview';
+type ViewMode = 'river' | 'fingerprint' | 'ghost' | 'flowfield' | 'intensity' | 'rush' | 'zone-entry' | 'overview';
+
+// Mock data generators for Rush and Zone analytics
+function generateMockRushAnalytics(playerId: number, playerName: string): RushAnalytics {
+  const rushes: RushAttack[] = [];
+  for (let i = 0; i < 15; i++) {
+    const rushType = i % 5 === 0 ? 'breakaway' : i % 3 === 0 ? 'odd-man' : 'standard';
+    rushes.push({
+      eventId: 1000 + i,
+      playerId,
+      playerName,
+      teamId: 1,
+      period: (i % 3) + 1,
+      timeInPeriod: `${10 + i}:${String(i * 3).padStart(2, '0')}`,
+      rushType,
+      transitionTime: 3 + Math.random() * 5,
+      startXCoord: -70 + Math.random() * 20,
+      endXCoord: 60 + Math.random() * 30,
+      shotXG: 0.05 + Math.random() * 0.2,
+      wasGoal: i % 7 === 0,
+      wasShotOnGoal: i % 3 !== 0,
+    });
+  }
+  return {
+    rushAttacks: rushes,
+    totalRushes: rushes.length,
+    rushGoals: rushes.filter(r => r.wasGoal).length,
+    rushConversionRate: rushes.filter(r => r.wasGoal).length / rushes.length,
+    rushShotRate: rushes.filter(r => r.wasShotOnGoal).length / rushes.length,
+    breakaways: rushes.filter(r => r.rushType === 'breakaway').length,
+    oddManRushes: rushes.filter(r => r.rushType === 'odd-man').length,
+    averageTransitionTime: rushes.reduce((s, r) => s + r.transitionTime, 0) / rushes.length,
+    totalRushXG: rushes.reduce((s, r) => s + (r.shotXG || 0), 0),
+  };
+}
+
+function generateMockZoneAnalytics(playerId: number): ZoneAnalytics {
+  const entries: ZoneEntry[] = [];
+  for (let i = 0; i < 20; i++) {
+    const entryType = i % 4 === 0 ? 'dump' : i % 5 === 0 ? 'pass' : 'controlled';
+    entries.push({
+      eventId: 2000 + i,
+      playerId,
+      teamId: 1,
+      period: (i % 3) + 1,
+      timeInPeriod: `${5 + i}:${String(i * 2).padStart(2, '0')}`,
+      entryType,
+      xCoord: 75 + Math.random() * 15,
+      yCoord: (Math.random() - 0.5) * 60,
+      success: i % 4 !== 0,
+      shotWithin5Seconds: i % 3 === 0,
+    });
+  }
+  return {
+    entries,
+    exits: [],
+    totalEntries: entries.length,
+    controlledEntries: entries.filter(e => e.entryType === 'controlled').length,
+    dumpIns: entries.filter(e => e.entryType === 'dump').length,
+    controlledEntryRate: entries.filter(e => e.entryType === 'controlled').length / entries.length,
+    successfulExits: 0,
+    totalExits: 0,
+    exitSuccessRate: 0,
+  };
+}
 
 interface PlayerInfo {
   playerId: number;
@@ -120,6 +188,8 @@ export default function MovementAnalysis() {
         flowField: generateMockFlowField(teamId, teamAbbrev || 'NHL', selectedSituation),
         shifts: [],
         positions: generateMockPositionData('5v5_offensive'),
+        rushAnalytics: generateMockRushAnalytics(teamId, teamAbbrev || 'Team'),
+        zoneAnalytics: generateMockZoneAnalytics(teamId),
       };
     }
 
@@ -143,6 +213,8 @@ export default function MovementAnalysis() {
       flowField: null,
       shifts: generateMockShiftData(2024020001, id, name, 20),
       positions: generateMockPositionData('5v5_neutral'),
+      rushAnalytics: generateMockRushAnalytics(id, name),
+      zoneAnalytics: generateMockZoneAnalytics(id),
     };
   }, [isTeamMode, teamAbbrev, playerIdNum, playerInfo, selectedSituation]);
 
@@ -254,6 +326,18 @@ export default function MovementAnalysis() {
             Shift Intensity
           </button>
         )}
+        <button
+          className={`tab ${activeView === 'rush' ? 'active' : ''}`}
+          onClick={() => setActiveView('rush')}
+        >
+          Rush Attacks
+        </button>
+        <button
+          className={`tab ${activeView === 'zone-entry' ? 'active' : ''}`}
+          onClick={() => setActiveView('zone-entry')}
+        >
+          Zone Entries
+        </button>
       </div>
 
       {/* Filters */}
@@ -386,6 +470,25 @@ export default function MovementAnalysis() {
               playerName={displayName}
               height={300}
               showEvents={true}
+            />
+          </div>
+        )}
+
+        {activeView === 'rush' && movementData.rushAnalytics && (
+          <div className="full-view">
+            <RushAttackVisualization
+              rushAnalytics={movementData.rushAnalytics}
+              title={`${displayName} - Rush Attack Analysis`}
+              showPaths={true}
+            />
+          </div>
+        )}
+
+        {activeView === 'zone-entry' && movementData.zoneAnalytics && (
+          <div className="full-view">
+            <ZoneEntryVisualization
+              analytics={movementData.zoneAnalytics}
+              title={`${displayName} - Zone Entry Analysis`}
             />
           </div>
         )}
