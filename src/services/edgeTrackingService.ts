@@ -24,6 +24,210 @@ const CURRENT_SEASON = '20252026';
 // Default game type (regular season)
 const DEFAULT_GAME_TYPE: EdgeGameType = 2;
 
+// ============================================================================
+// Raw API Response Types (what the NHL API actually returns)
+// ============================================================================
+
+interface RawSpeedResponse {
+  skatingSpeedDetails: {
+    maxSkatingSpeed: {
+      imperial: number;
+      metric: number;
+      percentile: number;
+      leagueAvg: { imperial: number; metric: number };
+    };
+    burstsOver22: { value: number; percentile: number; leagueAvg: number };
+    bursts20To22: { value: number; percentile: number; leagueAvg: number };
+    bursts18To20: { value: number; percentile: number; leagueAvg: number };
+  };
+  topSkatingSpeeds: unknown[];
+}
+
+interface RawZoneTimeResponse {
+  zoneTimeDetails: Array<{
+    strengthCode: string;
+    offensiveZonePctg: number;
+    offensiveZonePercentile: number;
+    offensiveZoneLeagueAvg: number;
+    neutralZonePctg: number;
+    neutralZonePercentile: number;
+    neutralZoneLeagueAvg: number;
+    defensiveZonePctg: number;
+    defensiveZonePercentile: number;
+    defensiveZoneLeagueAvg: number;
+  }>;
+  zoneStarts: unknown[];
+}
+
+interface RawDistanceResponse {
+  skatingDistanceDetails: {
+    totalDistance: { imperial: number; metric: number };
+    distancePerGame: { imperial: number; metric: number; percentile: number; leagueAvg: { imperial: number } };
+    distancePerShift: { imperial: number; metric: number };
+  };
+  skatingDistanceLast10: unknown[];
+}
+
+interface RawShotSpeedResponse {
+  shotSpeedDetails: {
+    maxShotSpeed?: { imperial: number; metric: number; percentile: number; leagueAvg: { imperial: number } };
+    avgShotSpeed?: { imperial: number; metric: number; percentile: number; leagueAvg: { imperial: number } };
+  };
+  hardestShots: unknown[];
+}
+
+interface RawComparisonResponse {
+  player: {
+    playerId: number;
+    firstName: { default: string };
+    lastName: { default: string };
+    teamAbbrev: string;
+    position: string;
+  };
+  skatingSpeedDetails: {
+    maxSkatingSpeed: { imperial: number; percentile: number; leagueAvg: { imperial: number } };
+    burstsOver22: { value: number; percentile: number; leagueAvg: number };
+  };
+  skatingDistanceDetails: {
+    distancePerGame: { imperial: number; percentile: number; leagueAvg: { imperial: number } };
+  };
+  zoneTimeDetails: Array<{
+    strengthCode: string;
+    offensiveZonePctg: number;
+    offensiveZonePercentile: number;
+  }>;
+}
+
+// ============================================================================
+// Transformation Functions
+// ============================================================================
+
+function transformSpeedResponse(raw: RawSpeedResponse): SkaterSpeedDetail {
+  const details = raw.skatingSpeedDetails;
+  return {
+    topSpeed: details.maxSkatingSpeed?.imperial || 0,
+    avgTopSpeed: details.maxSkatingSpeed?.imperial || 0, // API doesn't provide avg separately
+    bursts18To20: details.bursts18To20?.value || 0,
+    bursts20To22: details.bursts20To22?.value || 0,
+    bursts22Plus: details.burstsOver22?.value || 0,
+    burstsPerGame18To20: 0, // Would need games played to calculate
+    burstsPerGame20To22: 0,
+    burstsPerGame22Plus: 0,
+  } as unknown as SkaterSpeedDetail;
+}
+
+function transformZoneTimeResponse(raw: RawZoneTimeResponse): SkaterZoneTime {
+  // Find the 'all' strength entry for overall stats
+  const allStrength = raw.zoneTimeDetails?.find(z => z.strengthCode === 'all') || raw.zoneTimeDetails?.[0];
+  if (!allStrength) {
+    return {
+      offensiveZoneTime: 0,
+      defensiveZoneTime: 0,
+      neutralZoneTime: 0,
+      totalZoneTime: 0,
+      offensiveZonePct: 0,
+      defensiveZonePct: 0,
+      neutralZonePct: 0,
+    } as unknown as SkaterZoneTime;
+  }
+  return {
+    offensiveZoneTime: 0, // API returns percentages, not raw time
+    defensiveZoneTime: 0,
+    neutralZoneTime: 0,
+    totalZoneTime: 0,
+    offensiveZonePct: (allStrength.offensiveZonePctg || 0) * 100,
+    defensiveZonePct: (allStrength.defensiveZonePctg || 0) * 100,
+    neutralZonePct: (allStrength.neutralZonePctg || 0) * 100,
+  } as unknown as SkaterZoneTime;
+}
+
+function transformDistanceResponse(raw: RawDistanceResponse): SkaterDistanceDetail {
+  const details = raw.skatingDistanceDetails;
+  return {
+    totalDistance: details?.totalDistance?.imperial || 0,
+    totalDistanceMetric: details?.totalDistance?.metric || 0,
+    distancePerGame: details?.distancePerGame?.imperial || 0,
+    distancePerGameMetric: details?.distancePerGame?.metric || 0,
+    distancePerShift: details?.distancePerShift?.imperial || 0,
+    distancePerShiftMetric: details?.distancePerShift?.metric || 0,
+  } as unknown as SkaterDistanceDetail;
+}
+
+function transformShotSpeedResponse(raw: RawShotSpeedResponse): ShotSpeedDetail {
+  const details = raw.shotSpeedDetails;
+  return {
+    avgShotSpeed: details?.avgShotSpeed?.imperial || 0,
+    maxShotSpeed: details?.maxShotSpeed?.imperial || 0,
+    totalShots: 0,
+    shotsByType: [],
+    shotsByZone: [],
+  } as unknown as ShotSpeedDetail;
+}
+
+function transformComparisonResponse(raw: RawComparisonResponse): SkaterComparison {
+  const speedDetails = raw.skatingSpeedDetails;
+  const distanceDetails = raw.skatingDistanceDetails;
+  const zoneDetails = raw.zoneTimeDetails?.find(z => z.strengthCode === 'all') || raw.zoneTimeDetails?.[0];
+
+  const createRanking = (value: number, percentile: number, leagueAvg: number) => ({
+    value,
+    leaguePercentile: percentile || 50,
+    positionPercentile: percentile || 50,
+    leagueAvg,
+    positionAvg: leagueAvg,
+  });
+
+  return {
+    playerId: raw.player?.playerId || 0,
+    season: '',
+    gameType: 2,
+    firstName: raw.player?.firstName || { default: '' },
+    lastName: raw.player?.lastName || { default: '' },
+    teamAbbrev: raw.player?.teamAbbrev || '',
+    position: raw.player?.position || '',
+    percentiles: {
+      topSpeed: createRanking(
+        speedDetails?.maxSkatingSpeed?.imperial || 0,
+        speedDetails?.maxSkatingSpeed?.percentile || 50,
+        speedDetails?.maxSkatingSpeed?.leagueAvg?.imperial || 0
+      ),
+      avgSpeed: createRanking(
+        speedDetails?.maxSkatingSpeed?.imperial || 0,
+        speedDetails?.maxSkatingSpeed?.percentile || 50,
+        speedDetails?.maxSkatingSpeed?.leagueAvg?.imperial || 0
+      ),
+      bursts22Plus: createRanking(
+        speedDetails?.burstsOver22?.value || 0,
+        speedDetails?.burstsOver22?.percentile || 50,
+        speedDetails?.burstsOver22?.leagueAvg || 0
+      ),
+      distancePerGame: createRanking(
+        distanceDetails?.distancePerGame?.imperial || 0,
+        distanceDetails?.distancePerGame?.percentile || 50,
+        distanceDetails?.distancePerGame?.leagueAvg?.imperial || 0
+      ),
+      offensiveZonePct: createRanking(
+        (zoneDetails?.offensiveZonePctg || 0) * 100,
+        zoneDetails?.offensiveZonePercentile || 50,
+        50
+      ),
+      avgShiftLength: createRanking(0, 50, 0),
+    },
+    leagueRanks: {
+      topSpeed: 0,
+      avgSpeed: 0,
+      bursts22Plus: 0,
+      distancePerGame: 0,
+    },
+    positionRanks: {
+      topSpeed: 0,
+      avgSpeed: 0,
+      bursts22Plus: 0,
+      distancePerGame: 0,
+    },
+  } as unknown as SkaterComparison;
+}
+
 /**
  * Edge Tracking API Service
  *
@@ -75,7 +279,8 @@ class EdgeTrackingService {
 
   /**
    * Build the EDGE API endpoint path
-   * Pattern: /web/edge/{metric}/{entityId}/{season}/{gameType}
+   * Pattern: /edge/{metric}/{entityId}/{season}/{gameType}
+   * Note: /v1 is already in base URL from worker proxy
    */
   private buildEndpoint(
     metric: string,
@@ -104,7 +309,7 @@ class EdgeTrackingService {
     season: string = CURRENT_SEASON,
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<SkaterDetail> {
-    const endpoint = this.buildEndpoint('skater', playerId, season, gameType);
+    const endpoint = this.buildEndpoint('skater-detail', playerId, season, gameType);
     return this.fetchFromAPI<SkaterDetail>(endpoint);
   }
 
@@ -122,8 +327,9 @@ class EdgeTrackingService {
     season: string = CURRENT_SEASON,
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<SkaterSpeedDetail> {
-    const endpoint = this.buildEndpoint('skater-speed', playerId, season, gameType);
-    return this.fetchFromAPI<SkaterSpeedDetail>(endpoint);
+    const endpoint = this.buildEndpoint('skater-skating-speed-detail', playerId, season, gameType);
+    const raw = await this.fetchFromAPI<RawSpeedResponse>(endpoint);
+    return transformSpeedResponse(raw);
   }
 
   /**
@@ -140,8 +346,9 @@ class EdgeTrackingService {
     season: string = CURRENT_SEASON,
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<SkaterDistanceDetail> {
-    const endpoint = this.buildEndpoint('skater-distance', playerId, season, gameType);
-    return this.fetchFromAPI<SkaterDistanceDetail>(endpoint);
+    const endpoint = this.buildEndpoint('skater-skating-distance-detail', playerId, season, gameType);
+    const raw = await this.fetchFromAPI<RawDistanceResponse>(endpoint);
+    return transformDistanceResponse(raw);
   }
 
   /**
@@ -158,8 +365,9 @@ class EdgeTrackingService {
     season: string = CURRENT_SEASON,
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<SkaterZoneTime> {
-    const endpoint = this.buildEndpoint('skater-zone', playerId, season, gameType);
-    return this.fetchFromAPI<SkaterZoneTime>(endpoint);
+    const endpoint = this.buildEndpoint('skater-zone-time', playerId, season, gameType);
+    const raw = await this.fetchFromAPI<RawZoneTimeResponse>(endpoint);
+    return transformZoneTimeResponse(raw);
   }
 
   /**
@@ -177,7 +385,8 @@ class EdgeTrackingService {
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<SkaterComparison> {
     const endpoint = this.buildEndpoint('skater-comparison', playerId, season, gameType);
-    return this.fetchFromAPI<SkaterComparison>(endpoint);
+    const raw = await this.fetchFromAPI<RawComparisonResponse>(endpoint);
+    return transformComparisonResponse(raw);
   }
 
   // ============================================================================
@@ -198,8 +407,9 @@ class EdgeTrackingService {
     season: string = CURRENT_SEASON,
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<ShotSpeedDetail> {
-    const endpoint = this.buildEndpoint('shot-speed', playerId, season, gameType);
-    return this.fetchFromAPI<ShotSpeedDetail>(endpoint);
+    const endpoint = this.buildEndpoint('skater-shot-speed-detail', playerId, season, gameType);
+    const raw = await this.fetchFromAPI<RawShotSpeedResponse>(endpoint);
+    return transformShotSpeedResponse(raw);
   }
 
   // ============================================================================
@@ -219,7 +429,7 @@ class EdgeTrackingService {
     season: string = CURRENT_SEASON,
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<TeamEdgeDetail> {
-    const endpoint = this.buildEndpoint('team', teamId, season, gameType);
+    const endpoint = this.buildEndpoint('team-detail', teamId, season, gameType);
     return this.fetchFromAPI<TeamEdgeDetail>(endpoint);
   }
 
@@ -237,7 +447,7 @@ class EdgeTrackingService {
     season: string = CURRENT_SEASON,
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<TeamSpeedDetail> {
-    const endpoint = this.buildEndpoint('team-speed', teamId, season, gameType);
+    const endpoint = this.buildEndpoint('team-skating-speed-detail', teamId, season, gameType);
     return this.fetchFromAPI<TeamSpeedDetail>(endpoint);
   }
 
@@ -259,7 +469,7 @@ class EdgeTrackingService {
     season: string = CURRENT_SEASON,
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<GoalieEdgeDetail> {
-    const endpoint = this.buildEndpoint('goalie', playerId, season, gameType);
+    const endpoint = this.buildEndpoint('goalie-detail', playerId, season, gameType);
     return this.fetchFromAPI<GoalieEdgeDetail>(endpoint);
   }
 

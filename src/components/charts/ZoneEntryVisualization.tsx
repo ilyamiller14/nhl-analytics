@@ -48,15 +48,20 @@ export default function ZoneEntryVisualization({
     : analytics.entries;
 
   /**
-   * Convert zone tracking coordinates (0-100 scale) to SVG coordinates (0-200 scale)
-   * Zone tracking uses: 0-100 for x (length), 0-85 for y (width)
-   * SVG rink uses: 0-200 for x, 0-85 for y
+   * Convert zone tracking coordinates to SVG coordinates
+   * NHL coordinates: x from -100 to 100 (center ice = 0), y from -42.5 to 42.5
+   * SVG rink uses: x from 0-200, y from 0-85
    */
   const convertCoordinates = (entry: ZoneEntry): { x: number; y: number } => {
-    // Zone entries typically occur at x > 75 (offensive zone)
-    // Scale from 0-100 to 0-200
-    const x = entry.xCoord * 2;
-    const y = entry.yCoord;
+    // Convert from NHL coordinate system to SVG
+    // NHL: x = -100 to 100, center = 0
+    // SVG: x = 0 to 200, center = 100
+    const x = entry.xCoord + 100;
+
+    // NHL: y = -42.5 to 42.5, center = 0
+    // SVG: y = 0 to 85, center = 42.5
+    const y = 42.5 - entry.yCoord;
+
     return { x, y };
   };
 

@@ -88,7 +88,7 @@ export default function RushAttackVisualization({
 
         <div className="rush-stat-card conversion">
           <div className="stat-content">
-            <div className="stat-value">{rushAnalytics.rushConversionRate}%</div>
+            <div className="stat-value">{rushAnalytics.rushConversionRate.toFixed(1)}%</div>
             <div className="stat-label">Conversion Rate</div>
             <div className="stat-sublabel">{rushAnalytics.rushGoals} goals</div>
           </div>
@@ -96,7 +96,7 @@ export default function RushAttackVisualization({
 
         <div className="rush-stat-card transition">
           <div className="stat-content">
-            <div className="stat-value">{rushAnalytics.averageTransitionTime}s</div>
+            <div className="stat-value">{rushAnalytics.averageTransitionTime.toFixed(1)}s</div>
             <div className="stat-label">Avg Transition</div>
             <div className="stat-sublabel">D-zone to shot</div>
           </div>
@@ -104,7 +104,7 @@ export default function RushAttackVisualization({
 
         <div className="rush-stat-card xg">
           <div className="stat-content">
-            <div className="stat-value">{rushAnalytics.totalRushXG}</div>
+            <div className="stat-value">{rushAnalytics.totalRushXG.toFixed(2)}</div>
             <div className="stat-label">Rush xG</div>
           </div>
         </div>
@@ -280,7 +280,7 @@ export default function RushAttackVisualization({
               </div>
               <div className="tooltip-row">
                 <span className="tooltip-label">Transition:</span>
-                <span className="tooltip-value">{hoveredRush.transitionTime}s</span>
+                <span className="tooltip-value">{hoveredRush.transitionTime.toFixed(1)}s</span>
               </div>
               {hoveredRush.shotXG && (
                 <div className="tooltip-row">
@@ -329,32 +329,32 @@ export default function RushAttackVisualization({
           <div className="insight-content">
             {rushAnalytics.rushConversionRate >= 15 && (
               <div className="insight-item positive">
-                Elite rush conversion rate ({rushAnalytics.rushConversionRate}%) - significantly above NHL average
+                Elite rush conversion rate ({rushAnalytics.rushConversionRate.toFixed(1)}%) - significantly above NHL average (~10%)
               </div>
             )}
-            {rushAnalytics.averageTransitionTime < 6 && (
+            {rushAnalytics.averageTransitionTime < 5 && (
               <div className="insight-item positive">
-                Lightning-fast transitions ({rushAnalytics.averageTransitionTime}s average) - creates high-danger chances
+                Lightning-fast transitions ({rushAnalytics.averageTransitionTime.toFixed(1)}s average) - creates high-danger chances
               </div>
             )}
-            {rushAnalytics.breakaways >= 5 && (
+            {rushAnalytics.breakaways >= 15 && (
               <div className="insight-item positive">
                 {rushAnalytics.breakaways} breakaway opportunities - exceptional speed and positioning
               </div>
             )}
-            {rushAnalytics.oddManRushes >= 10 && (
+            {rushAnalytics.oddManRushes >= 50 && (
               <div className="insight-item positive">
                 {rushAnalytics.oddManRushes} odd-man rushes - strong transition game and opponent pressure
               </div>
             )}
-            {rushAnalytics.totalRushes >= 20 && rushAnalytics.rushConversionRate < 8 && (
+            {rushAnalytics.totalRushes >= 100 && rushAnalytics.rushConversionRate < 8 && (
               <div className="insight-item neutral">
                 Good rush volume but lower conversion rate - focus on shot quality in transition
               </div>
             )}
-            {rushAnalytics.totalRushes < 10 && (
+            {rushAnalytics.totalRushes < 100 && (
               <div className="insight-item neutral">
-                Limited rush opportunities - consider more aggressive zone exits and neutral zone speed
+                Limited rush opportunities ({rushAnalytics.totalRushes}) - consider more aggressive zone exits
               </div>
             )}
           </div>

@@ -14,11 +14,11 @@ import RollingAnalyticsChart from '../components/charts/RollingAnalyticsChart';
 import PlayerAnalyticsCard from '../components/PlayerAnalyticsCard';
 import PlayerSearch from '../components/PlayerSearch';
 // EDGE charts
-import SpeedProfileChart, { type SpeedData } from '../components/charts/SpeedProfileChart';
-import ZoneTimeChart, { type ZoneData } from '../components/charts/ZoneTimeChart';
+import SpeedProfileChart from '../components/charts/SpeedProfileChart';
+import ZoneTimeChart from '../components/charts/ZoneTimeChart';
 import TrackingRadarChart, { type PlayerTrackingData, type TrackingMetric } from '../components/charts/TrackingRadarChart';
-import ShotVelocityChart, { type ShotVelocityData, type ShotVelocityEvent, type ShotType } from '../components/charts/ShotVelocityChart';
-import DistanceFatigueChart, { type GameDistanceData } from '../components/charts/DistanceFatigueChart';
+import ShotVelocityChart from '../components/charts/ShotVelocityChart';
+import DistanceFatigueChart from '../components/charts/DistanceFatigueChart';
 import { edgeTrackingService } from '../services/edgeTrackingService';
 import { EDGE_CACHE } from '../utils/cacheUtils';
 import { type RollingMetrics } from '../services/rollingAnalytics';
@@ -196,38 +196,8 @@ function PlayerProfile() {
     retry: 1,
   });
 
-  // Transform EDGE data for charts
-  const edgeSpeedData: SpeedData | null = useMemo(() => {
-    if (!edgeData?.speed) return null;
-    // Create synthetic speed events from tier burst counts
-    const events: { speed: number }[] = [];
-    // Add representative events for each tier
-    for (let i = 0; i < edgeData.speed.bursts18To20; i++) {
-      events.push({ speed: 19 });
-    }
-    for (let i = 0; i < edgeData.speed.bursts20To22; i++) {
-      events.push({ speed: 21 });
-    }
-    for (let i = 0; i < edgeData.speed.bursts22Plus; i++) {
-      events.push({ speed: 23 });
-    }
-    return {
-      events,
-      averageSpeed: edgeData.detail.avgSpeed,
-      topSpeed: edgeData.speed.topSpeed,
-    };
-  }, [edgeData]);
-
-  const edgeZoneData: ZoneData | null = useMemo(() => {
-    if (!edgeData?.zoneTime) return null;
-    const z = edgeData.zoneTime;
-    return {
-      periods: [], // Per-period breakdown not available from API
-      totalOZTime: z.offensiveZoneTime,
-      totalNZTime: z.neutralZoneTime,
-      totalDZTime: z.defensiveZoneTime,
-    };
-  }, [edgeData]);
+  // EDGE data is now passed directly to chart components
+  // No synthetic data transformation needed - charts use real EDGE aggregates
 
   // Transform EDGE data for TrackingRadarChart
   const edgeTrackingData: PlayerTrackingData | null = useMemo(() => {
@@ -252,59 +222,6 @@ function PlayerProfile() {
     };
   }, [edgeData, player]);
 
-  // Transform EDGE data for ShotVelocityChart
-  const edgeShotData: ShotVelocityData | null = useMemo(() => {
-    if (!edgeData?.shotSpeed) return null;
-    const ss = edgeData.shotSpeed;
-
-    // Create synthetic shot events from shotsByType data
-    const shots: ShotVelocityEvent[] = [];
-    if (ss.shotsByType) {
-      ss.shotsByType.forEach(typeData => {
-        // Add representative shots for each type
-        for (let i = 0; i < Math.min(typeData.count, 20); i++) {
-          shots.push({
-            velocity: typeData.avgSpeed + (Math.random() - 0.5) * 10, // Vary around average
-            type: typeData.shotType as ShotType,
-            x: (Math.random() - 0.5) * 60, // Random offensive zone x
-            y: (Math.random() - 0.5) * 40, // Random y
-            result: i < typeData.goals ? 'goal' : 'save',
-          });
-        }
-      });
-    }
-
-    return {
-      shots,
-      averageVelocity: ss.avgShotSpeed,
-      maxVelocity: ss.maxShotSpeed,
-    };
-  }, [edgeData]);
-
-  // Transform EDGE data for DistanceFatigueChart
-  const edgeDistanceData: GameDistanceData[] = useMemo(() => {
-    if (!edgeData?.distance) return [];
-    const d = edgeData.distance;
-
-    // Create synthetic per-game data based on season totals
-    // Since we don't have per-game data, we'll create representative samples
-    const gamesPlayed = d.gamesPlayed || 20;
-    const avgDistance = d.distancePerGame;
-    const games: GameDistanceData[] = [];
-
-    for (let i = 1; i <= Math.min(gamesPlayed, 20); i++) {
-      games.push({
-        gameId: i,
-        gameNumber: i,
-        date: `Game ${i}`,
-        distance: avgDistance + (Math.random() - 0.5) * 0.5, // Vary around average
-        avgShiftDistance: d.distancePerShift,
-        numberOfShifts: Math.round(20 + Math.random() * 10),
-      });
-    }
-
-    return games;
-  }, [edgeData]);
 
   // Generate EDGE tracking badges for player header
   const edgeBadges: { label: string; color: string }[] = useMemo(() => {
@@ -542,14 +459,6 @@ function PlayerProfile() {
               Attack DNA
               <span className="new-badge">NEW</span>
             </Link>
-            {player?.position !== 'G' && (
-              <Link
-                to={`/movement/${playerId}`}
-                className="profile-tab"
-              >
-                Movement
-              </Link>
-            )}
           </div>
 
           {/* Stats Tab */}
@@ -870,22 +779,21 @@ function PlayerProfile() {
                     Real-time puck and player tracking data from NHL EDGE technology.
                   </p>
 
-                  {/* Speed Profile */}
-                  {edgeSpeedData && (
+                  {/* Speed Profile - REAL EDGE DATA */}
+                  {edgeData.speed && (
                     <div className="edge-chart-section">
                       <SpeedProfileChart
-                        speedData={edgeSpeedData}
-                        position={player.position === 'D' ? 'D' : 'F'}
+                        speedData={edgeData.speed}
                         playerName={`${player.firstName.default} ${player.lastName.default}`}
                       />
                     </div>
                   )}
 
-                  {/* Zone Time */}
-                  {edgeZoneData && (
+                  {/* Zone Time - REAL EDGE DATA */}
+                  {edgeData.zoneTime && (
                     <div className="edge-chart-section" style={{ marginTop: '2rem' }}>
                       <ZoneTimeChart
-                        zoneData={edgeZoneData}
+                        zoneData={edgeData.zoneTime}
                         playerName={`${player.firstName.default} ${player.lastName.default}`}
                       />
                     </div>
@@ -902,21 +810,21 @@ function PlayerProfile() {
                     </div>
                   )}
 
-                  {/* Shot Velocity Chart */}
-                  {edgeShotData && edgeShotData.shots.length > 0 && (
+                  {/* Shot Velocity Chart - REAL EDGE DATA */}
+                  {edgeData.shotSpeed && (
                     <div className="edge-chart-section" style={{ marginTop: '2rem' }}>
                       <ShotVelocityChart
-                        shotData={edgeShotData}
+                        shotData={edgeData.shotSpeed}
                         playerName={`${player.firstName.default} ${player.lastName.default}`}
                       />
                     </div>
                   )}
 
-                  {/* Distance & Fatigue Chart */}
-                  {edgeDistanceData.length > 0 && (
+                  {/* Distance & Fatigue Chart - REAL EDGE DATA */}
+                  {edgeData.distance && (
                     <div className="edge-chart-section" style={{ marginTop: '2rem' }}>
                       <DistanceFatigueChart
-                        distanceData={edgeDistanceData}
+                        distanceData={edgeData.distance}
                         playerName={`${player.firstName.default} ${player.lastName.default}`}
                       />
                     </div>
@@ -965,13 +873,6 @@ function PlayerProfile() {
                     </div>
                   </div>
 
-                  {/* Link to Movement Analysis */}
-                  <div style={{ marginTop: '2rem', padding: '1rem', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
-                    <Link to={`/movement/${player.playerId}`} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#15803d', fontWeight: '500' }}>
-                      <span>View Full Movement Analysis</span>
-                      <span>→</span>
-                    </Link>
-                  </div>
                 </div>
               )}
             </section>

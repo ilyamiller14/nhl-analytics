@@ -11,7 +11,6 @@ import TeamProfile from './pages/TeamProfile';
 import AttackDNAPage from './pages/AttackDNAPage';
 import CoachingDashboard from './pages/CoachingDashboard';
 import ManagementDashboard from './pages/ManagementDashboard';
-import MovementAnalysis from './pages/MovementAnalysis';
 import './App.css';
 
 function App() {
@@ -35,8 +34,6 @@ function App() {
               <Route path="/coaching/:teamAbbrev" element={<CoachingDashboard />} />
               <Route path="/management" element={<ManagementDashboard />} />
               <Route path="/management/:teamAbbrev" element={<ManagementDashboard />} />
-              <Route path="/movement/:playerId" element={<MovementAnalysis />} />
-              <Route path="/movement/team/:teamAbbrev" element={<MovementAnalysis />} />
             </Routes>
           </main>
         </div>
