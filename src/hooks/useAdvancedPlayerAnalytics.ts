@@ -289,8 +289,9 @@ export function useAdvancedPlayerAnalytics(
         const personalGoals = playerPersonalShots.filter((s) => s.result === 'goal').length;
         const goalsAboveExpected = personalGoals - totalIxG;
 
-        // Royal road passes - only those involving the player
-        const royalRoadPassesData = detectRoyalRoadPasses(allEvents, playerPersonalShots, playerPasses);
+        // Royal road passes — use all on-ice team shots (not just personal shots)
+        // so we find passes where the player assisted a teammate's shot too
+        const royalRoadPassesData = detectRoyalRoadPasses(allEvents, playerOnIceShotsFor, playerPasses);
         const royalRoadAnalytics = calculateRoyalRoadAnalytics(royalRoadPassesData);
 
         // Zone/Rush stubs — no real API data exists for these
