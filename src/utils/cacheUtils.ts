@@ -89,7 +89,7 @@ export class CacheManager {
 
       const entry: CacheEntry<any> = JSON.parse(item);
       return Date.now() - entry.timestamp;
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -107,7 +107,7 @@ export class CacheManager {
 
       const entry: CacheEntry<any> = JSON.parse(item);
       return age < entry.expiresIn;
-    } catch (error) {
+    } catch {
       return false;
     }
   }

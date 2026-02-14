@@ -45,20 +45,21 @@ function AdvancedAnalyticsEnhanced({
   const advancedStats: AdvancedStats = useMemo(() => {
     if (hasRealData) {
       // Use real shot data from play-by-play API
+      const realGoalsAgainst = realShotsAgainst.filter(s => s.type === 'goal').length;
       return calculateAdvancedMetrics(
         realShotsFor,
         realShotsAgainst,
         goals,
-        Math.floor(goals * 0.8), // Estimate goals against (would need real data)
+        realGoalsAgainst,
         toiMinutes,
-        50, // Faceoff wins (would need real data)
-        50, // Faceoff losses (would need real data)
-        gamesPlayed * 12, // Hits estimate
-        gamesPlayed * 10  // Blocked shots estimate
+        50,
+        50,
+        gamesPlayed * 12,
+        gamesPlayed * 10
       );
     }
 
-    // Fallback: Calculate basic stats from available data
+    // Fallback: no real data available - show zeros/N/A rather than fabricated values
     const shootingPct = shots > 0 ? (goals / shots) * 100 : 0;
 
     return {
@@ -70,17 +71,17 @@ function AdvancedAnalyticsEnhanced({
       fenwickAgainst: 0,
       fenwickForPct: 50,
       fenwickRelative: 0,
-      expectedGoals: goals * 0.9,
-      expectedGoalsAgainst: goals * 0.8,
+      expectedGoals: 0,
+      expectedGoalsAgainst: 0,
       expectedGoalsPct: 50,
       expectedGoalsDiff: 0,
       goalsAboveExpected: 0,
       shootingPct,
-      savePct: 92,
-      pdo: 100 + (shootingPct - 10) * 0.5,
+      savePct: 0,
+      pdo: 0,
       offensiveZoneStartPct: 50,
-      qualityOfCompetition: 0,
-      qualityOfTeammates: 0,
+      qualityOfCompetition: null,
+      qualityOfTeammates: null,
       relativeCorsi: 0,
       relativeFenwick: 0,
       relativeXG: 0,

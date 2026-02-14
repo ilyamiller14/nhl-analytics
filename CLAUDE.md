@@ -316,144 +316,109 @@ In dev, Vite proxy handles API calls (see `vite.config.ts`).
 
 ### Overview
 
-NHL EDGE is the league's optical player tracking system capturing movement data at 60 fps in all NHL arenas. This integration adds skating analytics, movement pattern visualization, and player comparison tools.
+NHL EDGE is the league's optical player tracking system. This integration provides skating analytics using **REAL EDGE API data only** - no mock data or synthetic generation.
 
-### Edge API Service (`src/services/edgeApiService.ts`)
+### EDGE API Service (`src/services/edgeTrackingService.ts`)
 
-Primary service for EDGE tracking data with exponential backoff retry logic.
+Primary service for EDGE tracking data.
 
 **Endpoints:**
-| Endpoint | Purpose | Rate Limit |
-|----------|---------|------------|
-| `/edge/player/{id}/skating` | Player skating metrics | 30/min |
-| `/edge/player/{id}/movement/{gameId}` | Per-game movement patterns | 30/min |
-| `/edge/game/{gameId}/tracking` | Full game tracking data | 30/min |
-| `/edge/team/{abbrev}/skating-leaders` | Team skating leaderboards | 30/min |
+| Endpoint | Purpose |
+|----------|---------|
+| `/web/edge/skater-detail/{id}/{season}/2` | Player skating overview |
+| `/web/edge/skater-skating-speed-detail/{id}/{season}/2` | Speed metrics (bursts, top speed) |
+| `/web/edge/skater-skating-distance-detail/{id}/{season}/2` | Distance traveled |
+| `/web/edge/skater-zone-time/{id}/{season}/2` | Zone time breakdown |
+| `/web/edge/skater-comparison/{id}/{season}/2` | League percentile comparisons |
+| `/web/edge/skater-shot-speed-detail/{id}/{season}/2` | Shot velocity data |
 
 **Key Types (`src/types/edge.ts`):**
 ```typescript
-interface EdgeSkatingMetrics {
-  playerId: number;
-  topSpeed: number;           // mph
-  avgSpeed: number;           // mph
-  topAcceleration: number;    // mph/s
-  distanceTraveled: number;   // miles per game
-  speedBursts: number;        // sprints > 20mph
-  timeOnIce: number;          // seconds
+interface SkaterSpeedDetail {
+  topSpeed: number;
+  avgTopSpeed: number;
+  bursts18To20: number;
+  bursts20To22: number;
+  bursts22Plus: number;
+  burstsPerGame18To20: number;
+  burstsPerGame20To22: number;
+  burstsPerGame22Plus: number;
 }
 
-interface MovementPattern {
-  playerId: number;
-  gameId: number;
-  positions: TrackingPosition[];
-  heatmap: ZoneHeatmap;
-  corridors: MovementCorridor[];
+interface SkaterDistanceDetail {
+  totalDistance: number;
+  distancePerGame: number;
+  distancePerShift: number;
+  offensiveZoneDistance: number;
+  defensiveZoneDistance: number;
+  neutralZoneDistance: number;
+  evenStrengthDistance: number;
+  powerPlayDistance: number;
+  penaltyKillDistance: number;
 }
 
-interface TrackingPosition {
-  x: number;                  // NHL coordinate
-  y: number;                  // NHL coordinate
-  timestamp: number;          // milliseconds
-  speed: number;              // mph at this moment
-  acceleration: number;       // mph/s at this moment
+interface SkaterZoneTime {
+  offensiveZoneTime: number;
+  neutralZoneTime: number;
+  defensiveZoneTime: number;
+  offensiveZonePct: number;
+  neutralZonePct: number;
+  defensiveZonePct: number;
 }
 
-interface MovementCorridor {
-  startZone: IceZone;
-  endZone: IceZone;
-  frequency: number;          // times per game
-  avgSpeed: number;           // mph through corridor
-  avgTime: number;            // seconds to traverse
+interface ShotSpeedDetail {
+  avgShotSpeed: number;
+  maxShotSpeed: number;
+  totalShots: number;
+  shotsByType: ShotTypeSpeed[];
+  shotsUnder70: number;
+  shots70To80: number;
+  shots80To90: number;
+  shots90Plus: number;
 }
 ```
 
-### Movement Flow Components (`src/components/edge/`)
+### EDGE Chart Components (`src/components/charts/`)
 
-| Component | Purpose | Props |
-|-----------|---------|-------|
-| `MovementFlowChart.tsx` | SVG skating corridor visualization | `playerId`, `gameIds`, `showSpeed` |
-| `SpeedHeatmap.tsx` | Heat map of speed zones | `positions`, `colorScale` |
-| `SkatingMetricsCard.tsx` | Summary stats card | `metrics`, `comparison?` |
-| `MovementComparison.tsx` | Side-by-side player comparison | `playerIds[]`, `gameRange` |
-| `SkatingLeaderboard.tsx` | Team/league leaders table | `teamAbbrev?`, `metric`, `limit` |
+All charts use REAL EDGE data directly - no synthetic events:
+
+| Component | Props Interface | Data |
+|-----------|-----------------|------|
+| `SpeedProfileChart.tsx` | `{ speedData: SkaterSpeedDetail }` | Burst counts, top speed |
+| `DistanceFatigueChart.tsx` | `{ distanceData: SkaterDistanceDetail }` | Zone/situation breakdown |
+| `ZoneTimeChart.tsx` | `{ zoneData: SkaterZoneTime }` | Time percentages |
+| `ShotVelocityChart.tsx` | `{ shotData: ShotSpeedDetail }` | Shot speeds by type |
+| `TrackingRadarChart.tsx` | `{ playerData: PlayerTrackingData }` | Multi-metric radar |
 
 ### EDGE Routes
 
 | Route | Component | Purpose |
 |-------|-----------|---------|
-| `/edge` | EdgeDashboard | Main EDGE analytics hub |
-| `/edge/player/:id` | EdgePlayerDetail | Individual player tracking analysis |
-| `/edge/game/:gameId` | EdgeGameDetail | Game movement analysis |
-| `/edge/compare` | EdgeComparison | Multi-player movement comparison |
-
-### Movement Flow Visualization
-
-The Movement Flow Chart renders skating corridors as SVG paths:
-
-```typescript
-// Corridor rendering
-corridors.forEach(corridor => {
-  // Width = frequency (more common = thicker)
-  // Color = speed (blue = slow, red = fast)
-  // Opacity = recency (recent games more visible)
-});
-```
-
-**Color Scale:**
-- Blue (#3b82f6): < 15 mph
-- Cyan (#06b6d4): 15-18 mph
-- Green (#22c55e): 18-21 mph
-- Yellow (#eab308): 21-23 mph
-- Orange (#f97316): 23-25 mph
-- Red (#ef4444): > 25 mph
+| `/movement/:playerId` | MovementAnalysis | Player movement + EDGE analysis |
+| `/player/:id` (EDGE tab) | PlayerProfile | EDGE tracking tab |
 
 ### EDGE Data Caching
 
 ```typescript
-// src/utils/cacheUtils.ts additions
 EDGE_CACHE = {
-  SKATING_METRICS: 12 hours,    // Player skating stats
-  MOVEMENT_PATTERN: 24 hours,   // Per-game patterns (immutable)
-  GAME_TRACKING: 24 hours,      // Full game data (immutable)
-  SKATING_LEADERS: 6 hours,     // Leaderboards change frequently
+  EDGE_PLAYER_DETAIL: 24 hours,
+  EDGE_SPEED_DATA: 24 hours,
+  EDGE_TEAM_DATA: 24 hours,
 }
-```
-
-### Integration with Attack DNA
-
-EDGE movement data enhances Attack DNA by showing the "how":
-- Attack DNA shows WHERE shots come from
-- EDGE shows HOW players get to those positions
-- Combined view: shot locations + movement corridors overlay
-
-```typescript
-// Combined visualization
-<NHLRink>
-  <ShotScatterPlot shots={attackDNA.shots} />
-  <MovementCorridorOverlay corridors={edge.corridors} opacity={0.3} />
-</NHLRink>
 ```
 
 ---
 
-## EDGE Gotchas and Known Issues
+## EDGE Gotchas
 
-1. **Stricter Rate Limits**: EDGE API is 30 req/min vs 100 for standard NHL API. Always use exponential backoff.
+1. **Data Availability**: EDGE data only exists for 2023-24 season onward.
 
-2. **Data Availability**: EDGE tracking only exists for 2021-22 season onward. Check `seasonId >= 20212022` before requesting.
+2. **Goalie Exclusion**: EDGE charts disabled for goalies (position === 'G').
 
-3. **AHL/Minor League Data**: Very limited or no EDGE data for non-NHL games. Handle gracefully with fallbacks.
+3. **NO MOCK DATA**: All charts use real EDGE aggregate data. Empty states shown when data unavailable.
 
-4. **Processing Delay**: Game tracking data may take up to 24 hours after game completion to be available.
+4. **Aggregate Data Only**: EDGE API provides season aggregates, not per-event arrays. Charts are designed for this.
 
-5. **Coordinate System**: EDGE uses same coordinate system as play-by-play (-100 to 100, -42.5 to 42.5). No conversion needed.
+5. **Coordinate System**: EDGE uses same coordinate system as play-by-play (-100 to 100, -42.5 to 42.5).
 
-6. **Speed Units**: All speeds are in mph (miles per hour), not km/h. Acceleration is mph/s.
-
-7. **Sample Size Warnings**: For players with <5 games of EDGE data, show confidence warnings.
-
-8. **Preseason Data**: Preseason games may have EDGE data but should be flagged as different context.
-
-9. **Memoization Critical**: Movement pattern calculations are expensive. Always useMemo or cache results.
-
-10. **Back-to-Back Games**: Watch for fatigue effects in back-to-back games; consider filtering options.
+6. **Speed Units**: All speeds are in mph (miles per hour).

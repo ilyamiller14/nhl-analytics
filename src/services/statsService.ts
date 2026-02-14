@@ -1,5 +1,6 @@
 // Stats service using real NHL API data
 import { NHL_API_BASE_URL } from './nhlApi';
+import { getCurrentSeason } from '../utils/seasonUtils';
 
 export interface LeagueLeader {
   playerId: number;
@@ -50,7 +51,7 @@ export async function fetchLeagueLeaders(
 ): Promise<LeagueLeader[]> {
   try {
     const response = await fetch(
-      `${NHL_API_BASE_URL}/skater-stats-leaders/20252026/2?categories=${category}&limit=${limit}`
+      `${NHL_API_BASE_URL}/skater-stats-leaders/${getCurrentSeason()}/2?categories=${category}&limit=${limit}`
     );
 
     if (!response.ok) {
@@ -146,54 +147,73 @@ export async function fetchTrendingPlayers(): Promise<LeagueLeader[]> {
 }
 
 /**
- * Get hot streaks - top recent performers
- * Uses real API data for current top scorers
+ * Get league leaders by different categories for display
+ * Returns real data - no fabricated streaks
+ */
+export async function fetchCategoryLeaders(): Promise<{
+  pointsLeaders: LeagueLeader[];
+  goalsLeaders: LeagueLeader[];
+  assistsLeaders: LeagueLeader[];
+}> {
+  const [pointsLeaders, goalsLeaders, assistsLeaders] = await Promise.all([
+    fetchLeagueLeaders('points', 10),
+    fetchLeagueLeaders('goals', 10),
+    fetchLeagueLeaders('assists', 10),
+  ]);
+
+  return { pointsLeaders, goalsLeaders, assistsLeaders };
+}
+
+/**
+ * Fetch goalie leaders from NHL API
+ */
+export async function fetchGoalieLeaders(
+  category: string = 'wins',
+  limit: number = 5
+): Promise<LeagueLeader[]> {
+  try {
+    const response = await fetch(
+      `${NHL_API_BASE_URL}/goalie-stats-leaders/${getCurrentSeason()}/2?categories=${category}&limit=${limit}`
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch goalie leaders: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const leaders = data[category] || [];
+
+    return leaders.map((player: any) => ({
+      playerId: player.id,
+      name: `${player.firstName.default} ${player.lastName.default}`,
+      team: player.teamAbbrev,
+      position: 'G',
+      value: player.value,
+      headshot: player.headshot,
+    }));
+  } catch (error) {
+    console.error('Error fetching goalie leaders:', error);
+    return [];
+  }
+}
+
+/**
+ * @deprecated Hot streaks are no longer fabricated. Use fetchCategoryLeaders() instead.
  */
 export async function fetchHotStreaks(): Promise<HotStreak[]> {
-  const leaders = await fetchLeagueLeaders('points', 10);
-
-  // Use goals leaders for variety
-  const goalLeaders = await fetchLeagueLeaders('goals', 5);
-
-  // Combine and format as "streaks" based on their production
-  const streaks: HotStreak[] = [];
-
-  goalLeaders.forEach((player) => {
-    streaks.push({
-      playerId: player.playerId,
-      name: player.name,
-      team: player.team,
-      streakType: 'Goal scoring',
-      streakLength: Math.max(3, Math.floor(player.value / 10)), // Estimate based on total goals
-    });
-  });
-
-  leaders.slice(0, 5).forEach((player) => {
-    if (!streaks.find(s => s.playerId === player.playerId)) {
-      streaks.push({
-        playerId: player.playerId,
-        name: player.name,
-        team: player.team,
-        streakType: 'Point',
-        streakLength: Math.max(4, Math.floor(player.value / 15)), // Estimate based on total points
-      });
-    }
-  });
-
-  return streaks.slice(0, 10);
+  // Return empty - no fabricated streak data
+  return [];
 }
 
 // Synchronous versions that return cached data or empty arrays
 // These are used by components that haven't been converted to async yet
 
 let syncLeadersCache: LeagueLeader[] = [];
-let syncStreaksCache: HotStreak[] = [];
 
 // Initialize cache on module load
 (async () => {
   try {
     syncLeadersCache = await fetchTrendingPlayers();
-    syncStreaksCache = await fetchHotStreaks();
   } catch (e) {
     console.error('Failed to initialize stats cache:', e);
   }
@@ -209,12 +229,10 @@ export function getTrendingPlayers(): LeagueLeader[] {
 }
 
 /**
- * @deprecated Use fetchHotStreaks() instead
+ * @deprecated Hot streaks are no longer fabricated. Use fetchCategoryLeaders() instead.
  */
 export function getHotStreaks(): HotStreak[] {
-  // Refresh cache in background
-  fetchHotStreaks().then(data => { syncStreaksCache = data; }).catch(() => {});
-  return syncStreaksCache;
+  return [];
 }
 
 /**

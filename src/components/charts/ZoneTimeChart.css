@@ -213,11 +213,108 @@
 
 .chart-empty {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 200px;
   color: #6b7280;
   font-size: 0.95rem;
+  text-align: center;
+  padding: 2rem;
+}
+
+.chart-empty p {
+  margin: 0.25rem 0;
+}
+
+.chart-empty .chart-note {
+  font-size: 0.85rem;
+  font-style: italic;
+  color: #9ca3af;
+}
+
+/* Per-Game Section */
+.per-game-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.per-game-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.per-game-stat {
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border-radius: 6px;
+  border-left: 4px solid #e5e7eb;
+}
+
+.per-game-stat .pg-label {
+  font-size: 0.75rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.25rem;
+}
+
+.per-game-stat .pg-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+/* Entry/Exit Stats */
+.entry-exit-section {
+  margin-top: 1rem;
+}
+
+.entry-stats {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.entry-stat {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 1rem;
+  background: #f8fafc;
+  border-radius: 6px;
+}
+
+.entry-stat.highlight {
+  background: #fef3c7;
+}
+
+.entry-stat .entry-label {
+  font-size: 0.7rem;
+  color: #6b7280;
+  text-transform: uppercase;
+}
+
+.entry-stat .entry-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+/* Data Source Note */
+.data-source-note {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e5e7eb;
+  text-align: center;
+}
+
+.data-source-note p {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #9ca3af;
 }
 
 /* Zone Legend */

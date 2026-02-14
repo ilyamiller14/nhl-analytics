@@ -69,6 +69,17 @@ export interface PlayerLandingResponse {
         powerPlayPoints?: number;
         shorthandedGoals?: number;
         shorthandedPoints?: number;
+        // Goalie-specific fields (present when position === 'G')
+        wins?: number;
+        losses?: number;
+        otLosses?: number;
+        goalsAgainstAvg?: number;
+        savePctg?: number;
+        shutouts?: number;
+        goalsAgainst?: number;
+        shotsAgainst?: number;
+        saves?: number;
+        gamesStarted?: number;
       };
     };
   };

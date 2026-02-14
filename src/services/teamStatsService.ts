@@ -10,6 +10,13 @@
 
 import { CacheManager, ANALYTICS_CACHE } from '../utils/cacheUtils';
 import { API_CONFIG } from '../config/api';
+import { getCurrentSeason } from '../utils/seasonUtils';
+
+// NHL API response types (partial — only fields we use)
+// TODO: type properly with full NHL API schema
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type NHLApiRecord = Record<string, any>;
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export interface TeamInfo {
   teamId: number;
@@ -104,7 +111,7 @@ export interface TeamData {
 
 // Team abbreviation to ID mapping
 const TEAM_ABBREVIATIONS: Record<string, number> = {
-  ANA: 24, ARI: 53, BOS: 6, BUF: 7, CAR: 12, CBJ: 29, CGY: 20, CHI: 16,
+  ANA: 24, BOS: 6, BUF: 7, CAR: 12, CBJ: 29, CGY: 20, CHI: 16,
   COL: 21, DAL: 25, DET: 17, EDM: 22, FLA: 13, LAK: 26, MIN: 30, MTL: 8,
   NJD: 1, NSH: 18, NYI: 2, NYR: 3, OTT: 9, PHI: 4, PIT: 5, SEA: 55,
   SJS: 28, STL: 19, TBL: 14, TOR: 10, UTA: 59, VAN: 23, VGK: 54, WPG: 52, WSH: 15,
@@ -143,7 +150,7 @@ export async function fetchTeamData(teamAbbrev: string): Promise<TeamData | null
       fetch(`${API_CONFIG.NHL_WEB}/roster/${teamAbbrev}/current`),
       fetch(`${API_CONFIG.NHL_WEB}/club-schedule-season/${teamAbbrev}/now`),
       fetch(`${API_CONFIG.NHL_WEB}/standings/now`),
-      fetch(`${API_CONFIG.NHL_STATS}/team/summary?cayenneExp=seasonId=20252026`),
+      fetch(`${API_CONFIG.NHL_STATS}/team/summary?cayenneExp=seasonId=${getCurrentSeason()}`),
     ]);
 
     // At minimum, we need standings data
@@ -166,21 +173,21 @@ export async function fetchTeamData(teamAbbrev: string): Promise<TeamData | null
     }
 
     // Parse team summary stats (PP%, PK%, faceoff%, shots per game)
-    let teamSummary: any = null;
+    let teamSummary: NHLApiRecord | null = null;
     if (teamSummaryResult.status === 'fulfilled' && teamSummaryResult.value.ok) {
       const summaryData = await teamSummaryResult.value.json();
       // Find team by matching team name or ID
       const teamId = TEAM_ABBREVIATIONS[teamAbbrev.toUpperCase()];
-      teamSummary = summaryData.data?.find((t: any) => t.teamId === teamId);
+      teamSummary = summaryData.data?.find((t: NHLApiRecord) => t.teamId === teamId);
     }
 
     // Find team in standings
     const teamStanding = standingsData.standings?.find(
-      (t: any) => t.teamAbbrev?.default?.toUpperCase() === teamAbbrev.toUpperCase()
+      (t: NHLApiRecord) => t.teamAbbrev?.default?.toUpperCase() === teamAbbrev.toUpperCase()
     );
 
     // Parse roster
-    const parsePlayer = (p: any): TeamRosterPlayer => ({
+    const parsePlayer = (p: NHLApiRecord): TeamRosterPlayer => ({
       playerId: p.id,
       firstName: p.firstName?.default || '',
       lastName: p.lastName?.default || '',
@@ -204,8 +211,8 @@ export async function fetchTeamData(teamAbbrev: string): Promise<TeamData | null
 
     // Parse schedule - filter for regular season games only (gameType 2)
     const schedule: TeamScheduleGame[] = (scheduleData.games || [])
-      .filter((g: any) => g.gameType === 2) // Regular season only
-      .map((g: any) => {
+      .filter((g: NHLApiRecord) => g.gameType === 2) // Regular season only
+      .map((g: NHLApiRecord) => {
         const isHome = g.homeTeam?.abbrev?.toUpperCase() === teamAbbrev.toUpperCase();
         let result: 'W' | 'L' | 'OTL' | undefined;
 
@@ -334,7 +341,7 @@ export async function fetchTeamLeaders(
     const data = await response.json();
     const skaters = data.skaters || [];
 
-    const mapToLeader = (p: any, stat: string): TeamLeader => ({
+    const mapToLeader = (p: NHLApiRecord, stat: string): TeamLeader => ({
       playerId: p.playerId,
       name: `${p.firstName?.default || ''} ${p.lastName?.default || ''}`,
       headshot: p.headshot || '',
@@ -343,14 +350,14 @@ export async function fetchTeamLeaders(
     });
 
     // Sort by different stats
-    const byPoints = [...skaters].sort((a: any, b: any) => (b.points || 0) - (a.points || 0));
-    const byGoals = [...skaters].sort((a: any, b: any) => (b.goals || 0) - (a.goals || 0));
-    const byAssists = [...skaters].sort((a: any, b: any) => (b.assists || 0) - (a.assists || 0));
+    const byPoints = [...skaters].sort((a: NHLApiRecord, b: NHLApiRecord) => (b.points || 0) - (a.points || 0));
+    const byGoals = [...skaters].sort((a: NHLApiRecord, b: NHLApiRecord) => (b.goals || 0) - (a.goals || 0));
+    const byAssists = [...skaters].sort((a: NHLApiRecord, b: NHLApiRecord) => (b.assists || 0) - (a.assists || 0));
 
     const leaders = {
-      points: byPoints.slice(0, 5).map((p: any) => mapToLeader(p, 'points')),
-      goals: byGoals.slice(0, 5).map((p: any) => mapToLeader(p, 'goals')),
-      assists: byAssists.slice(0, 5).map((p: any) => mapToLeader(p, 'assists')),
+      points: byPoints.slice(0, 5).map((p: NHLApiRecord) => mapToLeader(p, 'points')),
+      goals: byGoals.slice(0, 5).map((p: NHLApiRecord) => mapToLeader(p, 'goals')),
+      assists: byAssists.slice(0, 5).map((p: NHLApiRecord) => mapToLeader(p, 'assists')),
     };
 
     // Cache for 12 hours - leaders update during games

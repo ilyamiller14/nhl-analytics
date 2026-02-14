@@ -9,6 +9,7 @@ import {
   type ShotAttempt,
   type PassEvent,
 } from '../services/playByPlayService';
+import { getCurrentSeason } from '../utils/seasonUtils';
 
 interface PlayerGameData {
   shotsFor: ShotAttempt[];       // Team shots when player on-ice (for Corsi)
@@ -26,7 +27,7 @@ interface PlayerGameData {
 export function usePlayerGameData(
   playerId: number | null,
   teamId: number | null,
-  season: string = '20252026'
+  season: string = getCurrentSeason()
 ) {
   const [data, setData] = useState<PlayerGameData | null>(null);
   const [isLoading, setIsLoading] = useState(false);

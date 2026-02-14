@@ -18,13 +18,14 @@ import {
   getKeysByPrefix,
   getCacheStats,
 } from '../utils/indexedDBCache';
+import { getCurrentSeason } from '../utils/seasonUtils';
 
-// All NHL team abbreviations
+// All NHL team abbreviations (UTA = Utah Hockey Club, formerly ARI)
 export const NHL_TEAMS = [
-  'ANA', 'ARI', 'BOS', 'BUF', 'CGY', 'CAR', 'CHI', 'COL',
+  'ANA', 'BOS', 'BUF', 'CGY', 'CAR', 'CHI', 'COL',
   'CBJ', 'DAL', 'DET', 'EDM', 'FLA', 'LAK', 'MIN', 'MTL',
   'NSH', 'NJD', 'NYI', 'NYR', 'OTT', 'PHI', 'PIT', 'SJS',
-  'SEA', 'STL', 'TBL', 'TOR', 'VAN', 'VGK', 'WSH', 'WPG',
+  'SEA', 'STL', 'TBL', 'TOR', 'UTA', 'VAN', 'VGK', 'WSH', 'WPG',
 ];
 
 // Cache TTL: 24 hours
@@ -200,7 +201,7 @@ async function preloadTeam(teamAbbrev: string, season: string): Promise<number> 
 /**
  * Start background preloading for all teams
  */
-export async function startPreload(season: string = '20252026'): Promise<void> {
+export async function startPreload(season: string = getCurrentSeason()): Promise<void> {
   // Don't start if already loading
   if (preloadStatus.isLoading) {
     console.log('Preload already in progress');
@@ -287,7 +288,7 @@ export async function getCachedGameCount(): Promise<number> {
  */
 export async function isTeamCached(
   teamAbbrev: string,
-  season: string = '20252026'
+  season: string = getCurrentSeason()
 ): Promise<{ cached: boolean; cachedGames: number; totalGames: number }> {
   const gameIds = await fetchTeamGameIds(teamAbbrev, season);
   let cachedCount = 0;
@@ -309,7 +310,7 @@ export async function isTeamCached(
  */
 export async function priorityPreload(
   priorityTeam: string,
-  season: string = '20252026'
+  season: string = getCurrentSeason()
 ): Promise<void> {
   // First load the priority team
   updateStatus({

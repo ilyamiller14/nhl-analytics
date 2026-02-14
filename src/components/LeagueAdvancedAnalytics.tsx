@@ -2,11 +2,9 @@ import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchAllLeaguePlayers } from '../services/leagueStatsService';
 import { computeAdvancedMetricsForPlayers, type AdvancedPlayerMetrics } from '../services/advancedMetrics';
-import {
-  computeAdvancedStatsForPlayers,
-  type ComputedAdvancedStats,
-} from '../services/computedAdvancedStats';
+import type { ComputedAdvancedStats } from '../services/computedAdvancedStats';
 import { CacheManager, CACHE_DURATION } from '../utils/cacheUtils';
+import { getCurrentSeason } from '../utils/seasonUtils';
 import './LeagueAdvancedAnalytics.css';
 
 // Extended player data with computed advanced stats
@@ -49,17 +47,16 @@ function LeagueAdvancedAnalytics() {
       setIsLoading(true);
       try {
         // Fetch NHL API data
-        const realPlayers = await fetchAllLeaguePlayers('20252026');
+        const realPlayers = await fetchAllLeaguePlayers(getCurrentSeason());
 
         // Compute basic advanced metrics from NHL API data
         const processedPlayers = computeAdvancedMetricsForPlayers(
           realPlayers.filter((p: { gamesPlayed: number }) => p.gamesPlayed > 0)
         );
 
-        // Compute advanced stats (Corsi, Fenwick, xG, PDO) from NHL data
-        const playersWithAdvancedStats: PlayerTableData[] = computeAdvancedStatsForPlayers(
-          processedPlayers
-        );
+        // Advanced on-ice stats (CF%, FF%, xG, PDO) require play-by-play data
+        // and are only available on individual player profiles
+        const playersWithAdvancedStats: PlayerTableData[] = processedPlayers;
 
         const sourceText = `NHL API Data — 2025-26 Season — ${realPlayers.length} players`;
 
@@ -275,24 +272,6 @@ function LeagueAdvancedAnalytics() {
                 <th onClick={() => handleSort('clutchFactor')} className="sortable">
                   Clutch {getSortIcon('clutchFactor')}
                 </th>
-                <th onClick={() => handleSort('advancedStats.corsiForPercentage')} className="sortable highlight-header">
-                  CF% {getSortIcon('advancedStats.corsiForPercentage')}
-                </th>
-                <th onClick={() => handleSort('advancedStats.fenwickForPercentage')} className="sortable">
-                  FF% {getSortIcon('advancedStats.fenwickForPercentage')}
-                </th>
-                <th onClick={() => handleSort('advancedStats.xGoals')} className="sortable">
-                  xG {getSortIcon('advancedStats.xGoals')}
-                </th>
-                <th onClick={() => handleSort('advancedStats.xGoalsDifference')} className="sortable">
-                  xG+/- {getSortIcon('advancedStats.xGoalsDifference')}
-                </th>
-                <th onClick={() => handleSort('advancedStats.pdo')} className="sortable">
-                  PDO {getSortIcon('advancedStats.pdo')}
-                </th>
-                <th onClick={() => handleSort('advancedStats.highDangerShotPercentage')} className="sortable">
-                  HD% {getSortIcon('advancedStats.highDangerShotPercentage')}
-                </th>
                 <th onClick={() => handleSort('avgToi')} className="sortable">
                   TOI {getSortIcon('avgToi')}
                 </th>
@@ -324,44 +303,6 @@ function LeagueAdvancedAnalytics() {
                   <td>{player.gameWinningGoals}</td>
                   <td>{player.faceoffWinPctg > 0 ? (player.faceoffWinPctg * 100).toFixed(1) + '%' : '-'}</td>
                   <td>{player.clutchFactor.toFixed(0)}</td>
-                  <td className="highlight-cell">
-                    {player.advancedStats?.corsiForPercentage
-                      ? <strong>{player.advancedStats.corsiForPercentage.toFixed(1)}%</strong>
-                      : '-'}
-                  </td>
-                  <td>
-                    {player.advancedStats?.fenwickForPercentage
-                      ? player.advancedStats.fenwickForPercentage.toFixed(1) + '%'
-                      : '-'}
-                  </td>
-                  <td>
-                    {player.advancedStats?.xGoals
-                      ? player.advancedStats.xGoals.toFixed(2)
-                      : '-'}
-                  </td>
-                  <td className={
-                    player.advancedStats?.xGoalsDifference
-                      ? player.advancedStats.xGoalsDifference > 0 ? 'positive' : 'negative'
-                      : ''
-                  }>
-                    {player.advancedStats?.xGoalsDifference
-                      ? (player.advancedStats.xGoalsDifference > 0 ? '+' : '') + player.advancedStats.xGoalsDifference.toFixed(1)
-                      : '-'}
-                  </td>
-                  <td className={
-                    player.advancedStats?.pdo
-                      ? player.advancedStats.pdo > 100 ? 'positive' : player.advancedStats.pdo < 100 ? 'negative' : ''
-                      : ''
-                  }>
-                    {player.advancedStats?.pdo
-                      ? player.advancedStats.pdo.toFixed(1)
-                      : '-'}
-                  </td>
-                  <td>
-                    {player.advancedStats?.highDangerShotPercentage
-                      ? player.advancedStats.highDangerShotPercentage.toFixed(1) + '%'
-                      : '-'}
-                  </td>
                   <td>{player.avgToi}</td>
                 </tr>
               ))}
@@ -371,14 +312,12 @@ function LeagueAdvancedAnalytics() {
       </div>
 
       <div className="table-note">
-        <strong>Advanced Metrics Legend:</strong>
+        <strong>Metrics Legend:</strong>
         <br />
-        CF% = Corsi For % (shot attempt share) | FF% = Fenwick For % (unblocked shot attempt share) |
-        xG = Expected Goals | xG+/- = Goals Above/Below Expected |
-        PDO = On-Ice Shooting% + Save% (100 = league avg, luck indicator) |
-        HD% = High Danger Shot % (shot quality)
+        P/60 = Points per 60 minutes | G/60 = Goals per 60 minutes |
+        SH% = Shooting Percentage | Clutch = Game-winning goal impact
         <br />
-        <em style={{ color: '#f59e0b' }}>Note: CF%, FF%, xG, and PDO are estimated from individual stats. View player profiles for actual on-ice metrics from play-by-play data.</em>
+        <em>Advanced on-ice metrics (CF%, FF%, xG, PDO) require play-by-play data — view individual player profiles for those.</em>
         <br />
         <em>Click any player name to view detailed profile with shot charts and trends</em>
       </div>

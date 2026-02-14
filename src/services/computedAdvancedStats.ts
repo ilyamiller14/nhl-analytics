@@ -51,6 +51,9 @@ export interface ComputedAdvancedStats {
   pointsPerxGoals: number;
   goalsPerxGoals: number;
 
+  // Data quality flags
+  isEstimated: boolean; // True when computed from basic stats, not play-by-play
+
   // Primary vs secondary production
   primaryPointsPercentage: number;
   primaryPointsPer60: number;
@@ -78,6 +81,7 @@ function estimateXGoals(
   shots: number,
   goals: number,
   powerPlayGoals: number,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _gamesPlayed: number
 ): number {
   if (shots === 0) return 0;
@@ -371,6 +375,8 @@ export function computeAdvancedStatsFromBasic(player: {
 
     primaryPointsPercentage: Math.round(primaryPointsPercentage * 10) / 10,
     primaryPointsPer60: Math.round(primaryPointsPer60 * 100) / 100,
+
+    isEstimated: true, // These stats are estimated from basic stats, not real play-by-play
   };
 }
 

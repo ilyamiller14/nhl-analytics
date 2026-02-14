@@ -37,7 +37,8 @@ import {
   formatSeasonId,
 } from '../utils/formatters';
 import { calculatePointsPerGame } from '../utils/statCalculations';
-import { getRadarChartData } from '../services/playerService';
+import { getRadarChartData, getGoalieRadarChartData } from '../services/playerService';
+import { getCurrentSeason } from '../utils/seasonUtils';
 import './PlayerProfile.css';
 
 // Helper to get NHL regular season stats from seasonTotals
@@ -153,7 +154,7 @@ function PlayerProfile() {
   const { data: gameData, isLoading: gameDataLoading } = usePlayerGameData(
     player?.playerId || null,
     player?.currentTeamId || null,
-    player?.featuredStats?.season?.toString() || '20252026'
+    player?.featuredStats?.season?.toString() || getCurrentSeason()
   );
 
   // Fetch advanced analytics data - must be called before any conditional returns
@@ -164,7 +165,7 @@ function PlayerProfile() {
   } = useAdvancedPlayerAnalytics(
     player?.playerId || null,
     player?.currentTeamId || null,
-    player?.featuredStats?.season?.toString() || '20252026'
+    player?.featuredStats?.season?.toString() || getCurrentSeason()
   );
 
   // Rolling analytics data - computed from advanced analytics hook
@@ -199,29 +200,65 @@ function PlayerProfile() {
   // EDGE data is now passed directly to chart components
   // No synthetic data transformation needed - charts use real EDGE aggregates
 
-  // Transform EDGE data for TrackingRadarChart
+  // Transform EDGE data for TrackingRadarChart - use API percentiles directly
   const edgeTrackingData: PlayerTrackingData | null = useMemo(() => {
-    if (!edgeData?.comparison || !player) return null;
-    const c = edgeData.comparison;
+    if (!edgeData?.speed || !player) return null;
     const pos = player.position === 'D' ? 'D' : player.position === 'G' ? 'G' : 'F';
+
+    // Access API percentiles directly from transformed data (extended types)
+    const speedData = edgeData.speed as any; // Has percentiles and leagueAvg
+    const zoneData = edgeData.zoneTime as any;
+    const distanceData = edgeData.distance as any;
+    const shotData = edgeData.shotSpeed as any;
 
     const createMetric = (name: string, key: string, value: number, percentile: number, unit: string, desc: string): TrackingMetric => ({
       name, key, value, percentile, unit, description: desc
     });
 
+    // Calculate OZ% - use percentage directly
+    const ozPct = zoneData?.offensiveZonePct || 0;
+
+    // Fast bursts = 18-20 + 20-22
+    const fastBursts = (speedData?.bursts18To20 || 0) + (speedData?.bursts20To22 || 0);
+    const fastBurstsLeagueAvg = (speedData?.leagueAvg?.bursts18To20 || 0) + (speedData?.leagueAvg?.bursts20To22 || 0);
+    // Estimate percentile based on ratio to league avg
+    const fastBurstsPct = fastBurstsLeagueAvg > 0 ? Math.min(99, Math.max(1, Math.round(50 + (fastBursts / fastBurstsLeagueAvg - 1) * 50))) : 50;
+
     return {
       playerId: player.playerId,
       playerName: `${player.firstName.default} ${player.lastName.default}`,
       position: pos as 'F' | 'D' | 'G',
-      speed: createMetric('Top Speed', 'speed', edgeData.speed?.topSpeed || 0, c.percentiles.topSpeed?.leaguePercentile || 50, 'mph', 'Maximum skating speed'),
-      shotVelocity: createMetric('Shot Speed', 'shotVelocity', edgeData.shotSpeed?.maxShotSpeed || 0, 50, 'mph', 'Hardest shot velocity'),
-      distance: createMetric('Distance/Game', 'distance', edgeData.distance?.distancePerGame || 0, c.percentiles.distancePerGame?.leaguePercentile || 50, 'mi', 'Average distance skated per game'),
-      zoneControl: createMetric('OZ Time %', 'zoneControl', edgeData.zoneTime ? (edgeData.zoneTime.offensiveZoneTime / (edgeData.zoneTime.offensiveZoneTime + edgeData.zoneTime.defensiveZoneTime + edgeData.zoneTime.neutralZoneTime)) * 100 : 0, 50, '%', 'Offensive zone time percentage'),
-      burstFrequency: createMetric('Speed Bursts', 'burstFrequency', edgeData.speed?.bursts22Plus || 0, c.percentiles.bursts22Plus?.leaguePercentile || 50, '', 'Number of 22+ mph bursts'),
-      efficiency: createMetric('Avg Speed', 'efficiency', edgeData.detail?.avgSpeed || 0, c.percentiles.avgSpeed?.leaguePercentile || 50, 'mph', 'Average skating speed'),
+      speed: createMetric('Top Speed', 'speed', speedData?.topSpeed || 0, speedData?.percentiles?.topSpeed || 50, 'mph', 'Maximum skating speed'),
+      shotVelocity: createMetric('Shot Speed', 'shotVelocity', shotData?.maxShotSpeed || 0, shotData?.percentiles?.maxShotSpeed || 50, 'mph', 'Hardest shot velocity'),
+      distance: createMetric('Distance/60', 'distance', distanceData?.distancePerGame || 0, distanceData?.percentiles?.distancePer60 || 50, 'mi', 'Distance skated per 60 min'),
+      zoneControl: createMetric('OZ Time %', 'zoneControl', ozPct, zoneData?.percentiles?.offensiveZonePct || 50, '%', 'Offensive zone time percentage'),
+      burstFrequency: createMetric('Elite Bursts', 'burstFrequency', speedData?.bursts22Plus || 0, speedData?.percentiles?.bursts22Plus || 50, '/season', 'Number of 22+ mph bursts'),
+      efficiency: createMetric('Fast Bursts', 'efficiency', fastBursts, fastBurstsPct, '/season', 'Number of 18-22 mph bursts'),
     };
   }, [edgeData, player]);
 
+
+  // Compute dynamic league averages from API data
+  const dynamicLeagueAverages = useMemo(() => {
+    if (!edgeData?.speed) return null;
+    const speedData = edgeData.speed as any;
+    const zoneData = edgeData.zoneTime as any;
+    const distanceData = edgeData.distance as any;
+    const shotData = edgeData.shotSpeed as any;
+
+    const pos = player?.position === 'D' ? 'D' : player?.position === 'G' ? 'G' : 'F';
+    const fastBurstsLeagueAvg = (speedData?.leagueAvg?.bursts18To20 || 0) + (speedData?.leagueAvg?.bursts20To22 || 0);
+
+    return {
+      position: pos as 'F' | 'D' | 'G',
+      speed: speedData?.leagueAvg?.topSpeed || 22.2,
+      shotVelocity: shotData?.leagueAvg?.maxShotSpeed || 85,
+      distance: distanceData?.leagueAvg?.distancePer60 || 9.0,
+      zoneControl: zoneData?.leagueAvg?.offensiveZonePct || 42,
+      burstFrequency: speedData?.leagueAvg?.bursts22Plus || 4,
+      efficiency: fastBurstsLeagueAvg || 400,
+    };
+  }, [edgeData, player]);
 
   // Generate EDGE tracking badges for player header
   const edgeBadges: { label: string; color: string }[] = useMemo(() => {
@@ -284,6 +321,7 @@ function PlayerProfile() {
     );
   }
 
+  const isGoalie = player.position === 'G';
   const currentSeasonStats = player.featuredStats?.regularSeason?.subSeason;
   const careerStats = player.careerTotals?.regularSeason;
   const playoffStats = player.careerTotals?.playoffs;
@@ -296,8 +334,8 @@ function PlayerProfile() {
   const avgToi = currentSeasonTotals?.avgToi || currentSeasonStats?.avgToi;
 
   const age = calculateAge(player.birthDate);
-  const ppg = currentSeasonStats
-    ? calculatePointsPerGame(currentSeasonStats.points, currentSeasonStats.gamesPlayed)
+  const ppg = currentSeasonStats && !isGoalie
+    ? calculatePointsPerGame(currentSeasonStats.points ?? 0, currentSeasonStats.gamesPlayed)
     : 0;
 
   // gameData, advancedAnalytics, gameDataLoading, analyticsLoading, and analyticsError
@@ -324,7 +362,8 @@ function PlayerProfile() {
     strength: mapStrength(shot.strength),
   })) || [];
 
-  // TODO: Extract hits and faceoffs from game data when available
+  // Hits and faceoffs are not available from the current play-by-play API
+  // These are intentionally empty arrays - data not fabricated
   const advancedHits: Hit[] = [];
   const advancedFaceoffs: Faceoff[] = [];
 
@@ -452,13 +491,15 @@ function PlayerProfile() {
             >
               Share Card
             </button>
-            <Link
-              to={`/attack-dna/player/${playerId}`}
-              className="profile-tab attack-dna-link"
-            >
-              Attack DNA
-              <span className="new-badge">NEW</span>
-            </Link>
+            {!isGoalie && (
+              <Link
+                to={`/attack-dna/player/${playerId}`}
+                className="profile-tab attack-dna-link"
+              >
+                Attack DNA
+                <span className="new-badge">NEW</span>
+              </Link>
+            )}
           </div>
 
           {/* Stats Tab */}
@@ -474,61 +515,92 @@ function PlayerProfile() {
                       <div className="stat-card-label">Games Played</div>
                       <div className="stat-card-value">{currentSeasonStats.gamesPlayed}</div>
                     </div>
-                    <div className="stat-card highlight">
-                      <div className="stat-card-label">Goals</div>
-                      <div className="stat-card-value">{currentSeasonStats.goals}</div>
-                    </div>
-                    <div className="stat-card highlight">
-                      <div className="stat-card-label">Assists</div>
-                      <div className="stat-card-value">{currentSeasonStats.assists}</div>
-                    </div>
-                    <div className="stat-card highlight">
-                      <div className="stat-card-label">Points</div>
-                      <div className="stat-card-value">{currentSeasonStats.points}</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-label">+/-</div>
-                      <div className="stat-card-value">
-                        {formatPlusMinus(currentSeasonStats.plusMinus)}
-                      </div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-label">PIM</div>
-                      <div className="stat-card-value">{currentSeasonStats.pim}</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-label">Shots</div>
-                      <div className="stat-card-value">{currentSeasonStats.shots}</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-label">Shooting %</div>
-                      <div className="stat-card-value">
-                        {formatShootingPct(currentSeasonStats.shootingPctg)}
-                      </div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-label">PPG</div>
-                      <div className="stat-card-value">{ppg.toFixed(2)}</div>
-                    </div>
-                    {avgToi && (
-                      <div className="stat-card">
-                        <div className="stat-card-label">Avg TOI</div>
-                        <div className="stat-card-value">
-                          {formatTOIString(avgToi)}
+                    {isGoalie ? (
+                      <>
+                        <div className="stat-card highlight">
+                          <div className="stat-card-label">Wins</div>
+                          <div className="stat-card-value">{currentSeasonStats.wins ?? 0}</div>
                         </div>
-                      </div>
-                    )}
-                    {currentSeasonStats.powerPlayGoals !== undefined && (
-                      <div className="stat-card">
-                        <div className="stat-card-label">PP Goals</div>
-                        <div className="stat-card-value">{currentSeasonStats.powerPlayGoals}</div>
-                      </div>
-                    )}
-                    {currentSeasonStats.shorthandedGoals !== undefined && (
-                      <div className="stat-card">
-                        <div className="stat-card-label">SH Goals</div>
-                        <div className="stat-card-value">{currentSeasonStats.shorthandedGoals}</div>
-                      </div>
+                        <div className="stat-card">
+                          <div className="stat-card-label">Losses</div>
+                          <div className="stat-card-value">{currentSeasonStats.losses ?? 0}</div>
+                        </div>
+                        <div className="stat-card">
+                          <div className="stat-card-label">OTL</div>
+                          <div className="stat-card-value">{currentSeasonStats.otLosses ?? 0}</div>
+                        </div>
+                        <div className="stat-card highlight">
+                          <div className="stat-card-label">GAA</div>
+                          <div className="stat-card-value">{(currentSeasonStats.goalsAgainstAvg ?? 0).toFixed(2)}</div>
+                        </div>
+                        <div className="stat-card highlight">
+                          <div className="stat-card-label">SV%</div>
+                          <div className="stat-card-value">{currentSeasonStats.savePctg != null ? (currentSeasonStats.savePctg >= 1 ? currentSeasonStats.savePctg.toFixed(1) : (currentSeasonStats.savePctg * 100).toFixed(1)) + '%' : '-'}</div>
+                        </div>
+                        <div className="stat-card">
+                          <div className="stat-card-label">Shutouts</div>
+                          <div className="stat-card-value">{currentSeasonStats.shutouts ?? 0}</div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="stat-card highlight">
+                          <div className="stat-card-label">Goals</div>
+                          <div className="stat-card-value">{currentSeasonStats.goals}</div>
+                        </div>
+                        <div className="stat-card highlight">
+                          <div className="stat-card-label">Assists</div>
+                          <div className="stat-card-value">{currentSeasonStats.assists}</div>
+                        </div>
+                        <div className="stat-card highlight">
+                          <div className="stat-card-label">Points</div>
+                          <div className="stat-card-value">{currentSeasonStats.points}</div>
+                        </div>
+                        <div className="stat-card">
+                          <div className="stat-card-label">+/-</div>
+                          <div className="stat-card-value">
+                            {formatPlusMinus(currentSeasonStats.plusMinus)}
+                          </div>
+                        </div>
+                        <div className="stat-card">
+                          <div className="stat-card-label">PIM</div>
+                          <div className="stat-card-value">{currentSeasonStats.pim}</div>
+                        </div>
+                        <div className="stat-card">
+                          <div className="stat-card-label">Shots</div>
+                          <div className="stat-card-value">{currentSeasonStats.shots}</div>
+                        </div>
+                        <div className="stat-card">
+                          <div className="stat-card-label">Shooting %</div>
+                          <div className="stat-card-value">
+                            {formatShootingPct(currentSeasonStats.shootingPctg)}
+                          </div>
+                        </div>
+                        <div className="stat-card">
+                          <div className="stat-card-label">P/GP</div>
+                          <div className="stat-card-value">{ppg.toFixed(2)}</div>
+                        </div>
+                        {avgToi && (
+                          <div className="stat-card">
+                            <div className="stat-card-label">Avg TOI</div>
+                            <div className="stat-card-value">
+                              {formatTOIString(avgToi)}
+                            </div>
+                          </div>
+                        )}
+                        {currentSeasonStats.powerPlayGoals !== undefined && (
+                          <div className="stat-card">
+                            <div className="stat-card-label">PP Goals</div>
+                            <div className="stat-card-value">{currentSeasonStats.powerPlayGoals}</div>
+                          </div>
+                        )}
+                        {currentSeasonStats.shorthandedGoals !== undefined && (
+                          <div className="stat-card">
+                            <div className="stat-card-label">SH Goals</div>
+                            <div className="stat-card-value">{currentSeasonStats.shorthandedGoals}</div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </section>
@@ -542,17 +614,31 @@ function PlayerProfile() {
                     <div className="table-wrapper">
                       <table className="season-history-table">
                         <thead>
-                          <tr>
-                            <th>Season</th>
-                            <th>Team</th>
-                            <th style={{ textAlign: 'center' }}>GP</th>
-                            <th style={{ textAlign: 'center' }}>G</th>
-                            <th style={{ textAlign: 'center' }}>A</th>
-                            <th style={{ textAlign: 'center' }}>PTS</th>
-                            <th style={{ textAlign: 'center' }}>+/-</th>
-                            <th style={{ textAlign: 'center' }}>PIM</th>
-                            <th style={{ textAlign: 'center' }}>P/GP</th>
-                          </tr>
+                          {isGoalie ? (
+                            <tr>
+                              <th>Season</th>
+                              <th>Team</th>
+                              <th style={{ textAlign: 'center' }}>GP</th>
+                              <th style={{ textAlign: 'center' }}>W</th>
+                              <th style={{ textAlign: 'center' }}>L</th>
+                              <th style={{ textAlign: 'center' }}>OTL</th>
+                              <th style={{ textAlign: 'center' }}>GAA</th>
+                              <th style={{ textAlign: 'center' }}>SV%</th>
+                              <th style={{ textAlign: 'center' }}>SO</th>
+                            </tr>
+                          ) : (
+                            <tr>
+                              <th>Season</th>
+                              <th>Team</th>
+                              <th style={{ textAlign: 'center' }}>GP</th>
+                              <th style={{ textAlign: 'center' }}>G</th>
+                              <th style={{ textAlign: 'center' }}>A</th>
+                              <th style={{ textAlign: 'center' }}>PTS</th>
+                              <th style={{ textAlign: 'center' }}>+/-</th>
+                              <th style={{ textAlign: 'center' }}>PIM</th>
+                              <th style={{ textAlign: 'center' }}>P/GP</th>
+                            </tr>
+                          )}
                         </thead>
                         <tbody>
                           {getNHLSeasons(player.seasonTotals).reverse().map((s, idx) => (
@@ -560,16 +646,29 @@ function PlayerProfile() {
                               <td>{formatSeasonDisplay(s.season)}</td>
                               <td>{s.teamName?.default || '-'}</td>
                               <td style={{ textAlign: 'center' }}>{s.gamesPlayed}</td>
-                              <td style={{ textAlign: 'center' }}>{s.goals}</td>
-                              <td style={{ textAlign: 'center' }}>{s.assists}</td>
-                              <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{s.points}</td>
-                              <td style={{ textAlign: 'center', color: s.plusMinus > 0 ? 'green' : s.plusMinus < 0 ? 'red' : 'inherit' }}>
-                                {s.plusMinus > 0 ? '+' : ''}{s.plusMinus}
-                              </td>
-                              <td style={{ textAlign: 'center' }}>{s.pim}</td>
-                              <td style={{ textAlign: 'center' }}>
-                                {s.gamesPlayed > 0 ? (s.points / s.gamesPlayed).toFixed(2) : '0.00'}
-                              </td>
+                              {isGoalie ? (
+                                <>
+                                  <td style={{ textAlign: 'center' }}>{s.wins ?? '-'}</td>
+                                  <td style={{ textAlign: 'center' }}>{s.losses ?? '-'}</td>
+                                  <td style={{ textAlign: 'center' }}>{s.otLosses ?? '-'}</td>
+                                  <td style={{ textAlign: 'center' }}>{s.goalsAgainstAvg != null ? s.goalsAgainstAvg.toFixed(2) : '-'}</td>
+                                  <td style={{ textAlign: 'center' }}>{s.savePctg != null ? (s.savePctg >= 1 ? s.savePctg.toFixed(3) : (s.savePctg * 100).toFixed(1) + '%') : '-'}</td>
+                                  <td style={{ textAlign: 'center' }}>{s.shutouts ?? '-'}</td>
+                                </>
+                              ) : (
+                                <>
+                                  <td style={{ textAlign: 'center' }}>{s.goals}</td>
+                                  <td style={{ textAlign: 'center' }}>{s.assists}</td>
+                                  <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{s.points}</td>
+                                  <td style={{ textAlign: 'center', color: s.plusMinus > 0 ? 'green' : s.plusMinus < 0 ? 'red' : 'inherit' }}>
+                                    {s.plusMinus > 0 ? '+' : ''}{s.plusMinus}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>{s.pim}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {s.gamesPlayed > 0 ? (s.points / s.gamesPlayed).toFixed(2) : '0.00'}
+                                  </td>
+                                </>
+                              )}
                             </tr>
                           ))}
                         </tbody>
@@ -582,7 +681,9 @@ function PlayerProfile() {
                       <h2 className="section-title">Current Season Performance Radar</h2>
                       <div className="radar-chart-container">
                         <StatChart
-                          data={getRadarChartData(currentSeasonStats as any)}
+                          data={isGoalie
+                            ? getGoalieRadarChartData(currentSeasonStats as any)
+                            : getRadarChartData(currentSeasonStats as any)}
                           type="radar"
                           dataKeys={[{ key: 'value', name: 'Performance', color: '#003087' }]}
                           xAxisKey="stat"
@@ -607,28 +708,59 @@ function PlayerProfile() {
                       <span className="career-stat-value">{careerStats.gamesPlayed}</span>
                       <span className="career-stat-label">Games</span>
                     </div>
-                    <div className="career-stat">
-                      <span className="career-stat-value">{careerStats.goals}</span>
-                      <span className="career-stat-label">Goals</span>
-                    </div>
-                    <div className="career-stat">
-                      <span className="career-stat-value">{careerStats.assists}</span>
-                      <span className="career-stat-label">Assists</span>
-                    </div>
-                    <div className="career-stat">
-                      <span className="career-stat-value">{careerStats.points}</span>
-                      <span className="career-stat-label">Points</span>
-                    </div>
-                    <div className="career-stat">
-                      <span className="career-stat-value">
-                        {formatPlusMinus(careerStats.plusMinus)}
-                      </span>
-                      <span className="career-stat-label">+/-</span>
-                    </div>
-                    <div className="career-stat">
-                      <span className="career-stat-value">{careerStats.pim}</span>
-                      <span className="career-stat-label">PIM</span>
-                    </div>
+                    {isGoalie ? (
+                      <>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{(careerStats as any).wins ?? '-'}</span>
+                          <span className="career-stat-label">Wins</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{(careerStats as any).losses ?? '-'}</span>
+                          <span className="career-stat-label">Losses</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{(careerStats as any).otLosses ?? '-'}</span>
+                          <span className="career-stat-label">OTL</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{(careerStats as any).goalsAgainstAvg != null ? (careerStats as any).goalsAgainstAvg.toFixed(2) : '-'}</span>
+                          <span className="career-stat-label">GAA</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{(careerStats as any).savePctg != null ? ((careerStats as any).savePctg >= 1 ? (careerStats as any).savePctg.toFixed(3) : ((careerStats as any).savePctg * 100).toFixed(1) + '%') : '-'}</span>
+                          <span className="career-stat-label">SV%</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{(careerStats as any).shutouts ?? '-'}</span>
+                          <span className="career-stat-label">Shutouts</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{careerStats.goals}</span>
+                          <span className="career-stat-label">Goals</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{careerStats.assists}</span>
+                          <span className="career-stat-label">Assists</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{careerStats.points}</span>
+                          <span className="career-stat-label">Points</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">
+                            {formatPlusMinus(careerStats.plusMinus)}
+                          </span>
+                          <span className="career-stat-label">+/-</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{careerStats.pim}</span>
+                          <span className="career-stat-label">PIM</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </section>
               )}
@@ -641,28 +773,51 @@ function PlayerProfile() {
                       <span className="career-stat-value">{playoffStats.gamesPlayed}</span>
                       <span className="career-stat-label">Games</span>
                     </div>
-                    <div className="career-stat">
-                      <span className="career-stat-value">{playoffStats.goals}</span>
-                      <span className="career-stat-label">Goals</span>
-                    </div>
-                    <div className="career-stat">
-                      <span className="career-stat-value">{playoffStats.assists}</span>
-                      <span className="career-stat-label">Assists</span>
-                    </div>
-                    <div className="career-stat">
-                      <span className="career-stat-value">{playoffStats.points}</span>
-                      <span className="career-stat-label">Points</span>
-                    </div>
-                    <div className="career-stat">
-                      <span className="career-stat-value">
-                        {formatPlusMinus(playoffStats.plusMinus)}
-                      </span>
-                      <span className="career-stat-label">+/-</span>
-                    </div>
-                    <div className="career-stat">
-                      <span className="career-stat-value">{playoffStats.pim}</span>
-                      <span className="career-stat-label">PIM</span>
-                    </div>
+                    {isGoalie ? (
+                      <>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{(playoffStats as any).wins ?? '-'}</span>
+                          <span className="career-stat-label">Wins</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{(playoffStats as any).losses ?? '-'}</span>
+                          <span className="career-stat-label">Losses</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{(playoffStats as any).goalsAgainstAvg != null ? (playoffStats as any).goalsAgainstAvg.toFixed(2) : '-'}</span>
+                          <span className="career-stat-label">GAA</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{(playoffStats as any).shutouts ?? '-'}</span>
+                          <span className="career-stat-label">Shutouts</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{playoffStats.goals}</span>
+                          <span className="career-stat-label">Goals</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{playoffStats.assists}</span>
+                          <span className="career-stat-label">Assists</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{playoffStats.points}</span>
+                          <span className="career-stat-label">Points</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">
+                            {formatPlusMinus(playoffStats.plusMinus)}
+                          </span>
+                          <span className="career-stat-label">+/-</span>
+                        </div>
+                        <div className="career-stat">
+                          <span className="career-stat-value">{playoffStats.pim}</span>
+                          <span className="career-stat-label">PIM</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </section>
               )}
@@ -685,7 +840,17 @@ function PlayerProfile() {
           )}
 
           {/* Analytics Charts Tab */}
-          {activeTab === 'analytics' && currentSeasonStats && (
+          {activeTab === 'analytics' && isGoalie && (
+            <section className="stats-section">
+              <div className="empty-state">
+                <h3 className="empty-state-title">Goalie Analytics</h3>
+                <p className="empty-state-message">
+                  On-ice analytics (Corsi, Fenwick, xG) are designed for skaters. Goalie-specific advanced analytics are not yet available.
+                </p>
+              </div>
+            </section>
+          )}
+          {activeTab === 'analytics' && !isGoalie && currentSeasonStats && (
             <section className="stats-section">
               <AdvancedAnalyticsTable
                 goals={currentSeasonStats.goals}
@@ -766,8 +931,9 @@ function PlayerProfile() {
                 <div className="empty-state">
                   <h3 className="empty-state-title">No EDGE Tracking Data</h3>
                   <p className="empty-state-message">
-                    NHL EDGE tracking data is not available for this player.
-                    EDGE data requires games played in 2023-24 season or later.
+                    {isGoalie
+                      ? 'EDGE tracking data is for skaters only. Goalie-specific tracking metrics are not currently available.'
+                      : 'NHL EDGE tracking data is not available for this player. This data requires the player to have appeared in games tracked by NHL EDGE.'}
                   </p>
                 </div>
               )}
@@ -804,6 +970,7 @@ function PlayerProfile() {
                     <div className="edge-chart-section" style={{ marginTop: '2rem' }}>
                       <TrackingRadarChart
                         playerData={edgeTrackingData}
+                        leagueAverage={dynamicLeagueAverages || undefined}
                         position={player.position === 'D' ? 'D' : 'F'}
                         showPercentiles={true}
                       />

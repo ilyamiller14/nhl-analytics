@@ -182,7 +182,8 @@ export default function AttackDNAv2({
     // Calculate polygon points
     const points = axes.map((axis) => {
       const angleRad = (axis.angle * Math.PI) / 180;
-      const value = (profile as any)[axis.key] / 100;
+      const rawValue = (profile as any)[axis.key];
+      const value = (isNaN(rawValue) || rawValue == null ? 50 : rawValue) / 100;
       return {
         x: center + Math.cos(angleRad) * radius * value,
         y: center + Math.sin(angleRad) * radius * value,

@@ -50,33 +50,46 @@ export default function ZoneTimeChart({
   playerName,
   isTeam = false,
 }: ZoneTimeChartProps) {
-  // Prepare pie chart data - REAL EDGE DATA
-  const pieData = useMemo(() => [
-    {
-      name: 'Offensive',
-      value: zoneData.offensiveZoneTime || 0,
-      pct: zoneData.offensiveZonePct || 0,
-      color: ZONE_COLORS.OZ,
-    },
-    {
-      name: 'Neutral',
-      value: zoneData.neutralZoneTime || 0,
-      pct: zoneData.neutralZonePct || 0,
-      color: ZONE_COLORS.NZ,
-    },
-    {
-      name: 'Defensive',
-      value: zoneData.defensiveZoneTime || 0,
-      pct: zoneData.defensiveZonePct || 0,
-      color: ZONE_COLORS.DZ,
-    },
-  ], [zoneData]);
+  // Check if we have valid percentage data (API may return percentages but no raw time)
+  const hasPctData = (zoneData.offensiveZonePct || 0) > 0 ||
+                     (zoneData.defensiveZonePct || 0) > 0 ||
+                     (zoneData.neutralZonePct || 0) > 0;
 
-  // Calculate zone balance indicator
+  // Use percentages as values for pie chart if raw times are 0
+  // The pie chart will display as proportional segments
+  const pieData = useMemo(() => {
+    const ozTime = zoneData.offensiveZoneTime || 0;
+    const nzTime = zoneData.neutralZoneTime || 0;
+    const dzTime = zoneData.defensiveZoneTime || 0;
+    const hasTimeData = ozTime > 0 || nzTime > 0 || dzTime > 0;
+
+    return [
+      {
+        name: 'Offensive',
+        value: hasTimeData ? ozTime : (zoneData.offensiveZonePct || 0),
+        pct: zoneData.offensiveZonePct || 0,
+        color: ZONE_COLORS.OZ,
+      },
+      {
+        name: 'Neutral',
+        value: hasTimeData ? nzTime : (zoneData.neutralZonePct || 0),
+        pct: zoneData.neutralZonePct || 0,
+        color: ZONE_COLORS.NZ,
+      },
+      {
+        name: 'Defensive',
+        value: hasTimeData ? dzTime : (zoneData.defensiveZonePct || 0),
+        pct: zoneData.defensiveZonePct || 0,
+        color: ZONE_COLORS.DZ,
+      },
+    ];
+  }, [zoneData]);
+
+  // Calculate zone balance indicator using percentages
   const zoneBalance = useMemo(() => {
-    const ozDzRatio = zoneData.defensiveZoneTime > 0
-      ? zoneData.offensiveZoneTime / zoneData.defensiveZoneTime
-      : 0;
+    const ozPct = zoneData.offensiveZonePct || 0;
+    const dzPct = zoneData.defensiveZonePct || 0;
+    const ozDzRatio = dzPct > 0 ? ozPct / dzPct : 0;
 
     if (ozDzRatio > 1.2) return { label: 'Offensive', color: ZONE_COLORS.OZ };
     if (ozDzRatio < 0.8) return { label: 'Defensive', color: ZONE_COLORS.DZ };
@@ -86,8 +99,8 @@ export default function ZoneTimeChart({
   const totalTime = zoneData.totalZoneTime ||
     (zoneData.offensiveZoneTime + zoneData.neutralZoneTime + zoneData.defensiveZoneTime);
 
-  // Empty state
-  if (totalTime === 0) {
+  // Empty state - check both time AND percentage data
+  if (totalTime === 0 && !hasPctData) {
     return (
       <div className="zone-time-chart">
         <div className="chart-empty">
@@ -152,8 +165,12 @@ export default function ZoneTimeChart({
             </ResponsiveContainer>
             {/* Center label */}
             <div className="donut-center">
-              <span className="center-value">{formatTime(totalTime)}</span>
-              <span className="center-label">Total Time</span>
+              <span className="center-value">
+                {totalTime > 0 ? formatTime(totalTime) : '100%'}
+              </span>
+              <span className="center-label">
+                {totalTime > 0 ? 'Total Time' : 'Zone Split'}
+              </span>
             </div>
           </div>
 
@@ -164,7 +181,9 @@ export default function ZoneTimeChart({
                 <div className="zone-color" style={{ backgroundColor: zone.color }}></div>
                 <div className="zone-info">
                   <span className="zone-name">{zone.name}</span>
-                  <span className="zone-time">{formatTime(zone.value)}</span>
+                  {totalTime > 0 && (
+                    <span className="zone-time">{formatTime(zone.value)}</span>
+                  )}
                 </div>
                 <span className="zone-pct">{zone.pct.toFixed(1)}%</span>
               </div>

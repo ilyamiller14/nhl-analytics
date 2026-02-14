@@ -61,45 +61,45 @@ interface TrackingRadarChartProps {
   showPercentiles?: boolean;
 }
 
-// Default league averages by position
+// Default league averages by position (from NHL EDGE API)
 const DEFAULT_LEAGUE_AVERAGES: Record<string, LeagueAverageData> = {
   F: {
     position: 'F',
-    speed: 14.2,
-    shotVelocity: 72.5,
-    distance: 3.2,
-    zoneControl: 50,
-    burstFrequency: 35,
-    efficiency: 50,
+    speed: 22.2,           // Top speed (mph) - API: 22.18
+    shotVelocity: 72.5,    // Shot velocity (mph)
+    distance: 9.0,         // Distance per 60 min (mi) - API: ~9
+    zoneControl: 42,       // OZ time % - API: 42.3%
+    burstFrequency: 4,     // Elite bursts (22+) per season - API: 3.69
+    efficiency: 400,       // Fast bursts (18-22 mph) per season - API: ~400
   },
   D: {
     position: 'D',
-    speed: 13.5,
+    speed: 21.8,
     shotVelocity: 78.2,
-    distance: 3.5,
-    zoneControl: 48,
-    burstFrequency: 28,
-    efficiency: 50,
+    distance: 10.0,
+    zoneControl: 40,
+    burstFrequency: 3,
+    efficiency: 350,
   },
   G: {
     position: 'G',
-    speed: 8.5,
+    speed: 14.0,
     shotVelocity: 0,
-    distance: 1.2,
+    distance: 0.5,
     zoneControl: 50,
-    burstFrequency: 5,
-    efficiency: 50,
+    burstFrequency: 0,
+    efficiency: 0,
   },
 };
 
 // Metric display configuration
 const METRIC_CONFIG = {
-  speed: { label: 'Speed', fullLabel: 'Avg Speed (mph)', color: '#3b82f6' },
+  speed: { label: 'Top Speed', fullLabel: 'Top Speed (mph)', color: '#3b82f6' },
   shotVelocity: { label: 'Shot Vel', fullLabel: 'Shot Velocity (mph)', color: '#ef4444' },
-  distance: { label: 'Distance', fullLabel: 'Distance/Game (mi)', color: '#10b981' },
+  distance: { label: 'Distance', fullLabel: 'Distance/60 (mi)', color: '#10b981' },
   zoneControl: { label: 'Zone Ctrl', fullLabel: 'OZ Time %', color: '#f59e0b' },
-  burstFrequency: { label: 'Bursts', fullLabel: 'High-Speed Bursts', color: '#8b5cf6' },
-  efficiency: { label: 'Efficiency', fullLabel: 'xG/60', color: '#ec4899' },
+  burstFrequency: { label: 'Elite', fullLabel: 'Elite Bursts (22+ mph)', color: '#8b5cf6' },
+  efficiency: { label: 'Fast', fullLabel: 'Fast Bursts (18-22 mph)', color: '#ec4899' },
 };
 
 export default function TrackingRadarChart({
@@ -185,7 +185,7 @@ export default function TrackingRadarChart({
           </div>
           <div className="tooltip-row">
             <span className="tooltip-label">Percentile:</span>
-            <span className="tooltip-value percentile">{data.percentile}th</span>
+            <span className="tooltip-value percentile">{formatOrdinal(data.percentile)}</span>
           </div>
           <div className="tooltip-description">{data.description}</div>
         </div>
@@ -267,20 +267,20 @@ export default function TrackingRadarChart({
                       backgroundColor: getPercentileColor(metric.percentile),
                     }}
                   >
-                    {metric.percentile}th
+                    {formatOrdinal(metric.percentile)}
                   </span>
                 </div>
                 <div className="metric-values">
                   <div className="value-row">
                     <span className="value-label">Player:</span>
                     <span className="value-number">
-                      {metric.playerValue.toFixed(1)} {metric.unit}
+                      {formatValue(metric.playerValue, metric.unit)}
                     </span>
                   </div>
                   <div className="value-row league">
                     <span className="value-label">League Avg:</span>
                     <span className="value-number">
-                      {metric.leagueValue.toFixed(1)} {metric.unit}
+                      {formatValue(metric.leagueValue, metric.unit)}
                     </span>
                   </div>
                 </div>
@@ -325,6 +325,23 @@ function getPercentileColor(percentile: number): string {
   return '#ef4444';
 }
 
+// Helper to format ordinal numbers (1st, 2nd, 3rd, etc.)
+function formatOrdinal(n: number): string {
+  if (isNaN(n) || n === undefined || n === null) return 'N/A';
+  const num = Math.round(n);
+  const suffix = ['th', 'st', 'nd', 'rd'];
+  const v = num % 100;
+  return num + (suffix[(v - 20) % 10] || suffix[v] || suffix[0]);
+}
+
+// Helper to safely format numeric values
+function formatValue(value: number, unit: string): string {
+  if (value === undefined || value === null || isNaN(value)) {
+    return `-- ${unit}`;
+  }
+  return `${value.toFixed(1)} ${unit}`;
+}
+
 // Helper to create default player data from raw values
 export function createPlayerTrackingData(
   playerId: number,
@@ -344,12 +361,12 @@ export function createPlayerTrackingData(
 
   // Calculate percentiles based on assumed standard deviations
   const stdDevs: Record<string, number> = {
-    speed: 2.0,
-    shotVelocity: 8.0,
-    distance: 0.5,
-    zoneControl: 10.0,
-    burstFrequency: 15.0,
-    efficiency: 15.0,
+    speed: 1.5,            // Top speed variance
+    shotVelocity: 8.0,     // Shot velocity variance
+    distance: 1.5,         // Distance per 60 variance
+    zoneControl: 8.0,      // OZ% variance
+    burstFrequency: 5.0,   // Elite bursts (22+) variance
+    efficiency: 100.0,     // Fast bursts (18-22) variance
   };
 
   const calculatePercentile = (value: number, average: number, stdDev: number): number => {
@@ -395,20 +412,20 @@ export function createPlayerTrackingData(
       description: 'Offensive zone time percentage when on ice',
     },
     burstFrequency: {
-      name: 'Burst Frequency',
+      name: 'Elite Bursts',
       key: 'burstFrequency',
       value: rawValues.burstFrequency,
       percentile: calculatePercentile(rawValues.burstFrequency, avg.burstFrequency, stdDevs.burstFrequency),
-      unit: '/game',
-      description: 'High-speed skating bursts (18+ mph) per game',
+      unit: '/season',
+      description: 'Elite speed bursts (22+ mph) per season',
     },
     efficiency: {
-      name: 'Efficiency',
+      name: 'Fast Bursts',
       key: 'efficiency',
       value: rawValues.efficiency,
       percentile: calculatePercentile(rawValues.efficiency, avg.efficiency, stdDevs.efficiency),
-      unit: 'xG/60',
-      description: 'Expected goals generated per 60 minutes',
+      unit: '/season',
+      description: 'Fast speed bursts (18-22 mph) per season',
     },
   };
 }

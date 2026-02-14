@@ -24,6 +24,7 @@ import {
 import { fetchGamePlayByPlay, fetchPlayerSeasonGames } from '../services/playByPlayService';
 import { detectZoneEntries } from '../services/zoneTracking';
 import { API_CONFIG } from '../config/api';
+import { getCurrentSeason, formatSeasonString } from '../utils/seasonUtils';
 import type { AttackDNAv2 as AttackDNAv2Type, SeasonTrend, GameMetrics } from '../types/playStyle';
 import './AttackDNAPage.css';
 
@@ -125,7 +126,7 @@ export default function AttackDNAPage() {
     setEntityInfo(info);
 
     // Get season
-    const season = searchParams.get('season') || '20252026';
+    const season = searchParams.get('season') || getCurrentSeason();
 
     // Fetch all player's games for the season
     const gameIds = await fetchPlayerSeasonGames(id, season);
@@ -150,7 +151,7 @@ export default function AttackDNAPage() {
   // Load team info and cache game IDs
   const loadTeamInfo = async (abbrev: string) => {
     // Fetch team schedule to get team ID and games
-    const season = searchParams.get('season') || '20252026';
+    const season = searchParams.get('season') || getCurrentSeason();
     const scheduleResponse = await fetch(`${API_CONFIG.NHL_WEB}/club-schedule-season/${abbrev}/${season}`);
     if (!scheduleResponse.ok) throw new Error('Failed to fetch team schedule');
     const scheduleData = await scheduleResponse.json();
@@ -255,7 +256,7 @@ export default function AttackDNAPage() {
         });
 
         // Build trend
-        const trend = buildSeasonTrend(gameMetricsList, data.teamId, '2024-25', 5);
+        const trend = buildSeasonTrend(gameMetricsList, data.teamId, formatSeasonString(getCurrentSeason()), 5);
         setSeasonTrend(trend);
       } catch (err) {
         console.warn('Failed to build season trends:', err);
@@ -281,7 +282,7 @@ export default function AttackDNAPage() {
     try {
       await navigator.clipboard.writeText(url);
       alert('Link copied to clipboard!');
-    } catch (err) {
+    } catch {
       const textArea = document.createElement('textarea');
       textArea.value = url;
       document.body.appendChild(textArea);

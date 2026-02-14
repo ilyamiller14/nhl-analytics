@@ -347,7 +347,7 @@ export function analyzeMomentum(
   const momentumPeriods: MomentumPeriod[] = [];
   let currentPeriod: MomentumPeriod | null = null;
 
-  rollingAverages.forEach((sample, _index) => {
+  rollingAverages.forEach((sample) => {
     const intensity = Math.abs(sample.momentum);
     const teamId = sample.momentum > 0 ? homeTeamId : awayTeamId;
 

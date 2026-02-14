@@ -22,6 +22,7 @@ import { detectRushAttacks, calculateRushAnalytics } from '../services/rushAnaly
 import { analyzeDefensiveCoverage } from '../services/defensiveAnalytics';
 import { calculateXGDifferential } from '../services/xgModel';
 import { calculateRollingMetrics, type GameMetrics, type RollingMetrics } from '../services/rollingAnalytics';
+import { getCurrentSeason } from '../utils/seasonUtils';
 
 export interface AdvancedPlayerAnalytics {
   // On-Ice xG Metrics (team performance when player is on ice)
@@ -85,7 +86,7 @@ export interface AdvancedPlayerAnalytics {
 export function useAdvancedPlayerAnalytics(
   playerId: number | null,
   teamId: number | null,
-  season: string = '20252026'
+  season: string = getCurrentSeason()
 ) {
   const [analytics, setAnalytics] = useState<AdvancedPlayerAnalytics | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -114,11 +115,11 @@ export function useAdvancedPlayerAnalytics(
         }
 
         // Collect all events and shots across all games
-        let allEvents: any[] = [];
-        let allShots: ShotEvent[] = [];
-        let allPasses: any[] = [];
-        let playerOnIceShotsFor: ShotEvent[] = [];
-        let playerOnIceShotsAgainst: ShotEvent[] = [];
+        const allEvents: any[] = [];
+        const allShots: ShotEvent[] = [];
+        const allPasses: any[] = [];
+        const playerOnIceShotsFor: ShotEvent[] = [];
+        const playerOnIceShotsAgainst: ShotEvent[] = [];
 
         // Per-game data for rolling metrics
         const perGameMetrics: GameMetrics[] = [];

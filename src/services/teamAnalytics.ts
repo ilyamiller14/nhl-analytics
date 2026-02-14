@@ -66,9 +66,6 @@ export function calculateTeamAnalytics(stats: TeamStats): TeamAdvancedAnalytics 
 
   // Calculate shooting and save percentages
   // Since NHL standings API doesn't provide shot data, we estimate based on goals
-  let shootingPct: number;
-  let savePct: number;
-
   // Estimate shots based on team's offensive/defensive performance relative to league average
   // Teams that score more tend to generate more shots, but not perfectly correlated
   const estimatedShotsFor = LEAGUE_AVG_SHOTS_PER_GAME * (0.7 + 0.3 * (gfPerGame / LEAGUE_AVG_GOALS_PER_GAME));
@@ -76,12 +73,12 @@ export function calculateTeamAnalytics(stats: TeamStats): TeamAdvancedAnalytics 
 
   // Calculate shooting% and save% from estimated shots
   // Shooting% = Goals / Shots (typical range: 7-13%)
-  shootingPct = gfPerGame > 0 && estimatedShotsFor > 0
+  const shootingPct = gfPerGame > 0 && estimatedShotsFor > 0
     ? Math.min(14, Math.max(6, (gfPerGame / estimatedShotsFor) * 100))
     : LEAGUE_AVG_SHOOTING_PCT;
 
   // Save% = (Shots Against - Goals Against) / Shots Against (typical range: 88-93%)
-  savePct = estimatedShotsAgainst > 0
+  const savePct = estimatedShotsAgainst > 0
     ? Math.min(94, Math.max(86, ((estimatedShotsAgainst - gaPerGame) / estimatedShotsAgainst) * 100))
     : LEAGUE_AVG_SAVE_PCT;
 

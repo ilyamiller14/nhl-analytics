@@ -53,7 +53,7 @@ import './CoachingDashboard.css';
 // All NHL teams for selector
 const NHL_TEAMS = [
   { abbrev: 'ANA', name: 'Anaheim Ducks' },
-  { abbrev: 'ARI', name: 'Utah Hockey Club' },
+  { abbrev: 'UTA', name: 'Utah Hockey Club' },
   { abbrev: 'BOS', name: 'Boston Bruins' },
   { abbrev: 'BUF', name: 'Buffalo Sabres' },
   { abbrev: 'CGY', name: 'Calgary Flames' },
@@ -133,6 +133,13 @@ export default function CoachingDashboard() {
   useEffect(() => {
     if (!teamAbbrev) return;
 
+    // Validate team abbreviation
+    const validTeam = NHL_TEAMS.find(t => t.abbrev === teamAbbrev);
+    if (!validTeam) {
+      setError(`Unknown team abbreviation: ${teamAbbrev}. Please select a valid team.`);
+      return;
+    }
+
     async function loadData() {
       setIsLoading(true);
       setError(null);
@@ -168,12 +175,31 @@ export default function CoachingDashboard() {
           pbpData = cachedData.map(convertCachedToGamePBP);
           console.log(`Loaded ${pbpData.length} games from edge cache`);
         } else {
-          // Fall back to individual fetches (slower)
-          setLoadingProgress(`Loading ${completedGames.length} games individually...`);
+          // Fall back to individual fetches in batches (slower)
           const gameIds = completedGames.map((g) => g.gameId);
-          pbpData = await Promise.all(
-            gameIds.map((id) => fetchGamePlayByPlay(id))
-          );
+          const batchSize = 10;
+          const allResults: GamePlayByPlay[] = [];
+          const overallTimeout = 45000; // 45s max
+          const startTime = Date.now();
+
+          for (let i = 0; i < gameIds.length; i += batchSize) {
+            if (Date.now() - startTime > overallTimeout) {
+              break; // Use whatever we have so far
+            }
+            const batch = gameIds.slice(i, i + batchSize);
+            setLoadingProgress(`Loading games... ${Math.min(i + batchSize, gameIds.length)}/${gameIds.length}`);
+            const batchResults = await Promise.all(
+              batch.map(async (id) => {
+                try {
+                  return await fetchGamePlayByPlay(id);
+                } catch {
+                  return null;
+                }
+              })
+            );
+            allResults.push(...batchResults.filter((r): r is GamePlayByPlay => r !== null));
+          }
+          pbpData = allResults;
         }
 
         setLoadingProgress('Computing decision quality metrics...');
@@ -220,9 +246,9 @@ export default function CoachingDashboard() {
         // Analyze momentum from most recent game
         setLoadingProgress('Analyzing recent game momentum...');
         if (pbpData.length > 0 && completedGames.length > 0) {
-          // Get the most recent game
-          const mostRecentGame = pbpData[0];
-          const recentGameInfo = completedGames[0];
+          // Get the most recent game (last in the array, sorted chronologically)
+          const mostRecentGame = pbpData[pbpData.length - 1];
+          const recentGameInfo = completedGames[completedGames.length - 1];
 
           if (mostRecentGame.allEvents && mostRecentGame.allEvents.length > 0) {
             const homeTeamId = mostRecentGame.homeTeamId;

@@ -66,9 +66,13 @@ export interface GamePlayByPlay {
  */
 export async function fetchGameShifts(gameId: number): Promise<PlayerShift[]> {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
     const response = await fetch(
-      `${NHL_STATS_API_URL}/shiftcharts?cayenneExp=gameId=${gameId}`
+      `${NHL_STATS_API_URL}/shiftcharts?cayenneExp=gameId=${gameId}`,
+      { signal: controller.signal }
     );
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       console.warn(`Failed to fetch shift data for game ${gameId}`);
@@ -122,11 +126,14 @@ export async function fetchGamePlayByPlay(gameId: number): Promise<GamePlayByPla
   }
 
   try {
-    // Fetch play-by-play and shift data in parallel
+    // Fetch play-by-play and shift data in parallel (with timeout)
+    const pbpController = new AbortController();
+    const pbpTimeoutId = setTimeout(() => pbpController.abort(), 15000); // 15s timeout
     const [pbpResponse, shifts] = await Promise.all([
-      fetch(`${NHL_API_BASE_URL}/gamecenter/${gameId}/play-by-play`),
+      fetch(`${NHL_API_BASE_URL}/gamecenter/${gameId}/play-by-play`, { signal: pbpController.signal }),
       fetchGameShifts(gameId),
     ]);
+    clearTimeout(pbpTimeoutId);
 
     const response = pbpResponse;
 

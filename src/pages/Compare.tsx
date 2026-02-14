@@ -113,6 +113,13 @@ function Compare() {
           </div>
         )}
 
+        {/* Goalie vs Skater Warning */}
+        {players.length >= 2 && players.some(p => p.position === 'G') && players.some(p => p.position !== 'G') && (
+          <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: '8px', padding: '1rem', marginBottom: '1rem' }}>
+            <strong>⚠️ Mixed position comparison:</strong> You are comparing goalies and skaters. Some metrics may not be directly comparable between positions.
+          </div>
+        )}
+
         {/* Comparison Interface */}
         {players.length >= 2 && (
           <>

@@ -5,6 +5,10 @@
  * Analyzes controlled entries vs dump-ins, exit success rates
  */
 
+// TODO: type properly with full NHL play-by-play event schema
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PlayByPlayEvent = Record<string, any>;
+
 export type ZoneType = 'defensive' | 'neutral' | 'offensive';
 export type EntryType = 'controlled' | 'dump' | 'pass';
 export type ExitType = 'controlled' | 'clear' | 'pass';
@@ -94,7 +98,7 @@ function isZoneEntry(prevX: number, currX: number): boolean {
  * - Controlled = same team had possession before AND after crossing the line
  * - Dump = puck was dumped in (different team had last touch, or immediate turnover)
  */
-export function detectZoneEntries(allEvents: any[]): ZoneEntry[] {
+export function detectZoneEntries(allEvents: PlayByPlayEvent[]): ZoneEntry[] {
   const entries: ZoneEntry[] = [];
 
   // Events that indicate possession was lost immediately after entry
@@ -205,7 +209,7 @@ export function detectZoneEntries(allEvents: any[]): ZoneEntry[] {
  * Check if zone entry was sustained (no immediate turnover or faceoff)
  */
 function checkEntrySustained(
-  allEvents: any[],
+  allEvents: PlayByPlayEvent[],
   entryIndex: number,
   teamId: number
 ): boolean {
@@ -243,7 +247,7 @@ function checkEntrySustained(
  * Check if entry led to a shot within X seconds
  */
 function checkQuickShot(
-  allEvents: any[],
+  allEvents: PlayByPlayEvent[],
   entryIndex: number,
   withinSeconds: number
 ): boolean {
@@ -287,7 +291,7 @@ function isZoneExit(prevX: number, currX: number): boolean {
  * Detect zone exits from play-by-play events
  * Tracks exits from BOTH end zones since teams switch sides each period
  */
-export function detectZoneExits(allEvents: any[]): ZoneExit[] {
+export function detectZoneExits(allEvents: PlayByPlayEvent[]): ZoneExit[] {
   const exits: ZoneExit[] = [];
 
   for (let i = 1; i < allEvents.length; i++) {
@@ -352,7 +356,7 @@ export function detectZoneExits(allEvents: any[]): ZoneExit[] {
  * Check if zone exit was successful (no immediate turnover)
  */
 function checkExitSuccess(
-  allEvents: any[],
+  allEvents: PlayByPlayEvent[],
   exitIndex: number,
   teamId: number
 ): boolean {

@@ -1,16 +1,45 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import LeagueLeaders from '../components/LeagueLeaders';
 import TeamStandings from '../components/TeamStandings';
 import LeagueAdvancedAnalytics from '../components/LeagueAdvancedAnalytics';
-import { getHotStreaks, getTrendingPlayers } from '../services/statsService';
+import { fetchTrendingPlayers, fetchCategoryLeaders, fetchGoalieLeaders, type LeagueLeader } from '../services/statsService';
 import { Link } from 'react-router-dom';
 import './Trends.css';
 
 function Trends() {
   const [activeTab, setActiveTab] = useState<'leaders' | 'standings' | 'analytics' | 'trends'>('leaders');
 
-  const hotStreaks = getHotStreaks();
-  const trendingPlayers = getTrendingPlayers();
+  const [pointsLeaders, setPointsLeaders] = useState<LeagueLeader[]>([]);
+  const [goalsLeaders, setGoalsLeaders] = useState<LeagueLeader[]>([]);
+  const [assistsLeaders, setAssistsLeaders] = useState<LeagueLeader[]>([]);
+  const [goalieWinsLeaders, setGoalieWinsLeaders] = useState<LeagueLeader[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadData() {
+      setIsLoading(true);
+      try {
+        const [, categories, goalieLeaders] = await Promise.all([
+          fetchTrendingPlayers(),
+          fetchCategoryLeaders(),
+          fetchGoalieLeaders('wins', 10),
+        ]);
+        if (!cancelled) {
+          setPointsLeaders(categories.pointsLeaders);
+          setGoalsLeaders(categories.goalsLeaders);
+          setAssistsLeaders(categories.assistsLeaders);
+          setGoalieWinsLeaders(goalieLeaders);
+        }
+      } catch (e) {
+        console.error('Failed to load trends data:', e);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+    loadData();
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <div className="trends-page">
@@ -22,50 +51,52 @@ function Trends() {
           </p>
         </div>
 
-        {/* Quick Stats Cards */}
+        {/* Quick Stats Cards - show different categories */}
         <div className="quick-stats-grid">
           <div className="quick-stat-card">
             <div className="stat-content">
-              <div className="stat-label">Hot Streak</div>
+              <div className="stat-label">Points Leader</div>
               <div className="stat-value">
-                {hotStreaks[0]?.name || 'Loading...'}
+                {pointsLeaders[0]?.name || (isLoading ? 'Loading...' : 'N/A')}
               </div>
               <div className="stat-meta">
-                {hotStreaks[0]?.streakLength || 0} game {hotStreaks[0]?.streakType.toLowerCase()} streak
+                {pointsLeaders[0] ? `${pointsLeaders[0].value} points • ${pointsLeaders[0].team}` : ''}
               </div>
             </div>
           </div>
 
           <div className="quick-stat-card">
             <div className="stat-content">
-              <div className="stat-label">Trending</div>
+              <div className="stat-label">Goals Leader</div>
               <div className="stat-value">
-                {trendingPlayers[0]?.name || 'Loading...'}
+                {goalsLeaders[0]?.name || (isLoading ? 'Loading...' : 'N/A')}
               </div>
               <div className="stat-meta">
-                {trendingPlayers[0]?.value || 0} points
+                {goalsLeaders[0] ? `${goalsLeaders[0].value} goals • ${goalsLeaders[0].team}` : ''}
               </div>
             </div>
           </div>
 
           <div className="quick-stat-card">
             <div className="stat-content">
-              <div className="stat-label">Top Scorer</div>
+              <div className="stat-label">Assists Leader</div>
               <div className="stat-value">
-                {trendingPlayers[0]?.name || 'Loading...'}
+                {assistsLeaders[0]?.name || (isLoading ? 'Loading...' : 'N/A')}
               </div>
               <div className="stat-meta">
-                {trendingPlayers[0]?.team || 'N/A'}
+                {assistsLeaders[0] ? `${assistsLeaders[0].value} assists • ${assistsLeaders[0].team}` : ''}
               </div>
             </div>
           </div>
 
           <div className="quick-stat-card">
             <div className="stat-content">
-              <div className="stat-label">League Leader</div>
-              <div className="stat-value">Points</div>
+              <div className="stat-label">Goalie Wins Leader</div>
+              <div className="stat-value">
+                {goalieWinsLeaders[0]?.name || (isLoading ? 'Loading...' : 'N/A')}
+              </div>
               <div className="stat-meta">
-                {trendingPlayers[0]?.value || 0} total
+                {goalieWinsLeaders[0] ? `${goalieWinsLeaders[0].value} wins • ${goalieWinsLeaders[0].team}` : ''}
               </div>
             </div>
           </div>
@@ -95,7 +126,7 @@ function Trends() {
             className={`tab-button ${activeTab === 'trends' ? 'active' : ''}`}
             onClick={() => setActiveTab('trends')}
           >
-            Hot & Trending
+            Trending
           </button>
         </div>
 
@@ -110,37 +141,40 @@ function Trends() {
           {activeTab === 'trends' && (
             <div className="trending-section">
               <div className="trending-grid">
-                {/* Hot Streaks */}
+                {/* Points Leaders */}
                 <div className="trending-card">
                   <h3 className="trending-card-title">
-                    Hot Streaks
+                    Points Leaders
                   </h3>
                   <div className="streak-list">
-                    {hotStreaks.map((streak, index) => (
+                    {pointsLeaders.slice(0, 10).map((player, index) => (
                       <Link
-                        key={streak.playerId}
-                        to={`/player/${streak.playerId}`}
+                        key={player.playerId}
+                        to={`/player/${player.playerId}`}
                         className="streak-item"
                       >
                         <span className="streak-rank">{index + 1}</span>
                         <div className="streak-info">
-                          <div className="streak-player">{streak.name}</div>
+                          <div className="streak-player">{player.name}</div>
                           <div className="streak-meta">
-                            {streak.team} • {streak.streakLength} game {streak.streakType.toLowerCase()} streak
+                            {player.team} • {player.value} points
                           </div>
                         </div>
                       </Link>
                     ))}
+                    {pointsLeaders.length === 0 && !isLoading && (
+                      <p className="empty-state-message">No data available</p>
+                    )}
                   </div>
                 </div>
 
-                {/* Trending Up */}
+                {/* Goals Leaders */}
                 <div className="trending-card">
                   <h3 className="trending-card-title">
-                    Trending Players
+                    Goals Leaders
                   </h3>
                   <div className="trending-list">
-                    {trendingPlayers.map((player, index) => (
+                    {goalsLeaders.slice(0, 10).map((player, index) => (
                       <Link
                         key={player.playerId}
                         to={`/player/${player.playerId}`}
@@ -150,12 +184,40 @@ function Trends() {
                         <div className="trending-info">
                           <div className="trending-player">{player.name}</div>
                           <div className="trending-meta">
-                            {player.team} • {player.value} points in {player.gamesPlayed} GP
+                            {player.team} • {player.value} goals
                           </div>
                         </div>
-                        <div className="trending-badge">#{index + 1}</div>
                       </Link>
                     ))}
+                    {goalsLeaders.length === 0 && !isLoading && (
+                      <p className="empty-state-message">No data available</p>
+                    )}
+                  </div>
+                </div>
+                {/* Goalie Wins Leaders */}
+                <div className="trending-card">
+                  <h3 className="trending-card-title">
+                    Goalie Wins Leaders
+                  </h3>
+                  <div className="trending-list">
+                    {goalieWinsLeaders.slice(0, 10).map((player, index) => (
+                      <Link
+                        key={player.playerId}
+                        to={`/player/${player.playerId}`}
+                        className="trending-item"
+                      >
+                        <span className="trending-rank">{index + 1}</span>
+                        <div className="trending-info">
+                          <div className="trending-player">{player.name}</div>
+                          <div className="trending-meta">
+                            {player.team} • {player.value} wins
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
+                    {goalieWinsLeaders.length === 0 && !isLoading && (
+                      <p className="empty-state-message">No data available</p>
+                    )}
                   </div>
                 </div>
               </div>

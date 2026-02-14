@@ -68,8 +68,6 @@ export function detectBreakouts(allEvents: any[]): BreakoutAttempt[] {
         const breakoutType = classifyBreakoutType(
           prevEvent,
           currEvent,
-          allEvents,
-          i
         );
 
         // Determine result
@@ -128,8 +126,6 @@ function getZone(xCoord: number): 'defensive' | 'neutral' | 'offensive' {
 function classifyBreakoutType(
   prevEvent: any,
   currEvent: any,
-  _allEvents: any[],
-  _currIndex: number
 ): BreakoutType {
   const startX = prevEvent.details.xCoord;
   const startY = prevEvent.details.yCoord || 0;
@@ -354,7 +350,7 @@ export function compareBreakoutStrategies(
 
   // Most effective (highest success rate with reasonable attempts)
   const effective = types
-    .filter(([_, data]) => data.attempts >= 3)
+    .filter(([, data]) => data.attempts >= 3)
     .sort((a, b) => b[1].successRate - a[1].successRate);
 
   const mostEffective = effective[0]?.[0] || 'd-to-d';

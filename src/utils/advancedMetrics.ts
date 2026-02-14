@@ -55,8 +55,8 @@ export interface AdvancedStats {
 
   // Zone starts and deployment
   offensiveZoneStartPct: number;
-  qualityOfCompetition: number;
-  qualityOfTeammates: number;
+  qualityOfCompetition: number | null;
+  qualityOfTeammates: number | null;
 
   // Relative metrics (compared to team average)
   relativeCorsi: number;
@@ -163,7 +163,9 @@ export function calculateAdvancedMetrics(
   const fenwickFor60 = fenwickFor * per60Multiplier;
   const xG60 = expectedGoals * per60Multiplier;
   const goals60 = goals * per60Multiplier;
-  const points60 = 0; // Would need assists data
+  // points60 requires assists - computed as (goals + goalsAgainst proxy) * per60
+  // Since we don't have assists here, use goals only. Callers can override.
+  const points60 = goals60; // Will be overridden by callers with full data
 
   return {
     corsiFor,
@@ -183,8 +185,8 @@ export function calculateAdvancedMetrics(
     savePct,
     pdo,
     offensiveZoneStartPct,
-    qualityOfCompetition: 0, // Would need opponent data
-    qualityOfTeammates: 0,   // Would need teammate data
+    qualityOfCompetition: null, // Requires opponent on-ice data
+    qualityOfTeammates: null,   // Requires teammate on-ice data
     relativeCorsi,
     relativeFenwick,
     relativeXG,

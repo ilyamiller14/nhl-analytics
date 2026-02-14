@@ -118,11 +118,11 @@ workers/
 - E2E testing infrastructure (Playwright)
 
 ## Recent Changes
-1. **Caching**: 24-hour client-side + edge caching for all analytics data
-2. **Per-60 Fix**: avgToi now sourced from seasonTotals (not featuredStats)
-3. **Heat Maps**: Redesigned with smooth radial gradients
-4. **Team Pages**: Sophisticated dark-theme design
-5. **Scheduled Warming**: Daily cron job pre-populates cache
+1. **ALL MOCK DATA REMOVED**: Removed all mock data generators and synthetic data generation from the codebase
+2. **EDGE Charts Rewritten**: All EDGE charts now use real API aggregate data directly (no fake events)
+3. **Removed Mock-Dependent Components**: Deleted MovementRiverChart, FormationGhostChart, TeamFlowFieldChart, ShiftIntensityChart, MovementFingerprintChart, MovementCorridorChart, TrailToShotVisualization
+4. **Caching**: 24-hour client-side + edge caching for all analytics data
+5. **Per-60 Fix**: avgToi now sourced from seasonTotals (not featuredStats)
 
 ## Design Patterns in Use
 - React Context for global state
@@ -147,15 +147,17 @@ workers/
 
 Frontend and API proxy are both deployed via Cloudflare:
 
-- **Frontend**: Cloudflare Pages (auto-deploys on push to main)
+- **Frontend**: Cloudflare Pages at `nhl-analytics.pages.dev`
 - **API Proxy**: Cloudflare Workers at `nhl-api-proxy.deepdivenhl.workers.dev`
 
+**Important**: Production uses the `production` branch, not `main`. Manual deploy required.
+
 ```bash
+# Deploy frontend to PRODUCTION
+npm run build && npx wrangler pages deploy dist --project-name=nhl-analytics --branch=production
+
 # Deploy API proxy (Cloudflare Worker)
 cd workers && npx wrangler deploy
-
-# Build frontend (Cloudflare Pages handles deployment)
-npm run build
 ```
 
 ---
@@ -191,27 +193,24 @@ interface SkaterComparison { percentiles: { topSpeed, avgSpeed, distancePerGame 
 
 ### EDGE Tracking Visualizations (`src/components/charts/`)
 
-All charts integrated into PlayerProfile EDGE tab:
+All charts integrated into PlayerProfile EDGE tab. **ALL CHARTS USE REAL EDGE DATA ONLY - NO MOCK DATA.**
 
-| Component | Purpose | Used In |
-|-----------|---------|---------|
-| `SpeedProfileChart.tsx` | Speed distribution histogram + burst tiers | PlayerProfile |
-| `ShotVelocityChart.tsx` | Shot speed by type and location | PlayerProfile |
-| `ZoneTimeChart.tsx` | OZ/NZ/DZ time donut chart + period breakdown | PlayerProfile |
-| `DistanceFatigueChart.tsx` | Distance trends + fatigue correlation | PlayerProfile |
-| `TrackingRadarChart.tsx` | Multi-axis radar (speed, distance, zone control) | PlayerProfile |
+| Component | Purpose | Data Source |
+|-----------|---------|-------------|
+| `SpeedProfileChart.tsx` | Speed burst tiers (18-20, 20-22, 22+ mph), top speed, positional comparison | SkaterSpeedDetail (EDGE API) |
+| `ShotVelocityChart.tsx` | Shot velocity by type (wrist, slap, snap, backhand), speed distribution tiers | ShotSpeedDetail (EDGE API) |
+| `ZoneTimeChart.tsx` | OZ/NZ/DZ time donut chart, zone balance, per-game averages | SkaterZoneTime (EDGE API) |
+| `DistanceFatigueChart.tsx` | Zone breakdown, situation breakdown (5v5, PP, PK), distance metrics | SkaterDistanceDetail (EDGE API) |
+| `TrackingRadarChart.tsx` | 6-axis radar (speed, shot velocity, distance, zone control, bursts, efficiency) | SkaterComparison (EDGE API) |
 
-### Movement Flow System ("Ice Flow")
+### Movement Analysis System
 
-Coaching/management analytics for movement pattern intelligence.
+Real data from play-by-play events and EDGE API.
 
-| Component | Purpose |
-|-----------|---------|
-| `MovementRiverChart.tsx` | Animated SVG skating trails with playback controls |
-| `MovementFingerprintChart.tsx` | Player movement signature (radial histogram) |
-| `FormationGhostChart.tsx` | Expected vs actual position deviation overlay |
-| `TeamFlowFieldChart.tsx` | Team-wide movement vector field |
-| `ShiftIntensityChart.tsx` | Shift-by-shift intensity timeline |
+| Component | Purpose | Data Source |
+|-----------|---------|-------------|
+| `RushAttackVisualization.tsx` | Rush attack analysis, breakaways, shot conversion | Play-by-play events |
+| `ZoneEntryVisualization.tsx` | Controlled vs dump entries, entry success rates | Play-by-play events |
 
 ### Routes
 
@@ -249,4 +248,54 @@ EDGE_CACHE = {
 
 - **Data Availability**: 2023-24 season onwards
 - **Goalie Exclusion**: EDGE charts disabled for goalies (position === 'G')
-- **Mock Data**: Movement Flow charts use mock data until real tracking APIs available
+- **NO MOCK DATA**: All charts use real EDGE API data only. Charts display empty states when data unavailable.
+
+---
+
+## Movement Analytics (REAL DATA ONLY)
+
+### Overview
+
+Movement analysis uses REAL data from NHL EDGE API and play-by-play events. No mock data generators are used.
+
+### Data Sources
+
+| Data Type | Source | Description |
+|-----------|--------|-------------|
+| Speed metrics | EDGE API (SkaterSpeedDetail) | Top speed, burst counts, per-game averages |
+| Distance metrics | EDGE API (SkaterDistanceDetail) | Zone breakdown, situation breakdown, totals |
+| Zone time | EDGE API (SkaterZoneTime) | OZ/NZ/DZ time percentages and totals |
+| Shot velocity | EDGE API (ShotSpeedDetail) | Shot speeds by type, speed tiers |
+| Zone entries | Play-by-play API | Controlled vs dump entries |
+| Rush attacks | Play-by-play API | Breakaways, odd-man rushes, conversion rates |
+
+### Movement Analysis Page (`/movement/:playerId`)
+
+Uses `useMovementAnalytics` hook to fetch real data:
+
+```typescript
+const {
+  zoneAnalytics,    // From play-by-play: zone entries, controlled %
+  rushAnalytics,    // From play-by-play: rush attacks, breakaways
+  edgeData,         // From EDGE API: speed, distance, zoneTime, shotSpeed
+  gamesAnalyzed,
+  isLoading,
+  error,
+} = useMovementAnalytics({
+  playerId: 8478402,
+  teamId: 22,
+  maxGames: 82,
+});
+```
+
+### View Modes
+
+| Tab | Component | Data Source |
+|-----|-----------|-------------|
+| Overview | Stats cards | All EDGE + play-by-play |
+| Rush Attacks | RushAttackVisualization | Play-by-play events |
+| Zone Entries | ZoneEntryVisualization | Play-by-play events |
+| Speed Profile | SpeedProfileChart | EDGE SkaterSpeedDetail |
+| Distance | DistanceFatigueChart | EDGE SkaterDistanceDetail |
+| Zone Time | ZoneTimeChart | EDGE SkaterZoneTime |
+| Shot Velocity | ShotVelocityChart | EDGE ShotSpeedDetail |

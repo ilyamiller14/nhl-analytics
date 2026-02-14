@@ -567,31 +567,45 @@ function TeamProfile() {
                 </div>
               </section>
 
-              {/* Expected Goals */}
+              {/* Expected Goals - requires play-by-play data */}
               <section className="team-section">
                 <h2 className="section-title">Expected Goals</h2>
-                <div className="analytics-stats-grid">
-                  <div className="analytics-stat-card">
-                    <span className="analytics-stat-value">{analytics.estimatedXGF}</span>
-                    <span className="analytics-stat-label">xGF (Expected Goals For)</span>
+                {isLoadingRealAnalytics ? (
+                  <div className="analytics-loading">
+                    <div className="loading-spinner small"></div>
+                    <p>Loading play-by-play data...</p>
                   </div>
-                  <div className="analytics-stat-card">
-                    <span className="analytics-stat-value">{analytics.estimatedXGA}</span>
-                    <span className="analytics-stat-label">xGA (Expected Goals Against)</span>
+                ) : realAnalytics && realAnalytics.gamesAnalyzed > 0 ? (
+                  <div className="analytics-stats-grid">
+                    <div className="analytics-stat-card">
+                      <span className="analytics-stat-value">{stats.goalsFor}</span>
+                      <span className="analytics-stat-label">Goals For</span>
+                    </div>
+                    <div className="analytics-stat-card">
+                      <span className="analytics-stat-value">{stats.goalsAgainst}</span>
+                      <span className="analytics-stat-label">Goals Against</span>
+                    </div>
+                    <div className="analytics-stat-card highlight">
+                      <span className={`analytics-stat-value ${stats.goalDifferential >= 0 ? 'positive' : 'negative'}`}>
+                        {stats.goalDifferential >= 0 ? '+' : ''}{stats.goalDifferential}
+                      </span>
+                      <span className="analytics-stat-label">Goal Differential</span>
+                    </div>
+                    <div className="analytics-stat-card">
+                      <span className="analytics-stat-value">
+                        {((stats.goalsFor / (stats.goalsFor + stats.goalsAgainst)) * 100).toFixed(1)}%
+                      </span>
+                      <span className="analytics-stat-label">Goals For %</span>
+                    </div>
                   </div>
-                  <div className="analytics-stat-card highlight">
-                    <span className={`analytics-stat-value ${analytics.xGDifferential >= 0 ? 'positive' : 'negative'}`}>
-                      {analytics.xGDifferential >= 0 ? '+' : ''}{analytics.xGDifferential}
-                    </span>
-                    <span className="analytics-stat-label">xG Differential</span>
+                ) : (
+                  <div className="analytics-empty">
+                    <p>Expected goals requires play-by-play data.</p>
+                    <p className="analytics-empty-detail">
+                      Play-by-play data is not yet available for this team.
+                    </p>
                   </div>
-                  <div className="analytics-stat-card">
-                    <span className={`analytics-stat-value ${analytics.goalsAboveExpected >= 0 ? 'positive' : 'negative'}`}>
-                      {analytics.goalsAboveExpected >= 0 ? '+' : ''}{analytics.goalsAboveExpected}
-                    </span>
-                    <span className="analytics-stat-label">Goals Above Expected</span>
-                  </div>
-                </div>
+                )}
               </section>
 
               {/* Possession Metrics */}
@@ -684,27 +698,55 @@ function TeamProfile() {
               {/* Projections */}
               <section className="team-section">
                 <h2 className="section-title">Season Projections</h2>
-                <div className="projection-grid">
-                  <div className="projection-card">
-                    <div className="projection-value">{analytics.pointsPace}</div>
-                    <div className="projection-label">82-Game Points Pace</div>
-                  </div>
-                  <div className="projection-card">
-                    <div className="projection-value">{analytics.playoffOdds}%</div>
-                    <div className="projection-label">Playoff Odds</div>
-                    <div className="projection-bar">
-                      <div
-                        className="projection-fill"
-                        style={{
-                          width: `${analytics.playoffOdds}%`,
-                          backgroundColor: analytics.playoffOdds >= 75 ? '#10b981' :
-                                           analytics.playoffOdds >= 50 ? '#3b82f6' :
-                                           analytics.playoffOdds >= 25 ? '#f59e0b' : '#ef4444'
-                        }}
-                      />
+                {(() => {
+                  const gp = stats.gamesPlayed || 1;
+                  const gamesRemaining = 82 - gp;
+                  const pointsPace = analytics.pointsPace;
+                  const ptsPerGame = stats.points / gp;
+                  // Historical playoff cutoff: ~96 pts (Eastern), ~95 pts (Western), use 96 as default
+                  const playoffCutoff = 96;
+                  // Points needed from remaining games
+                  const pointsNeeded = Math.max(0, playoffCutoff - stats.points);
+                  const ptsPerGameNeeded = gamesRemaining > 0 ? pointsNeeded / gamesRemaining : 0;
+                  // Playoff probability: compare pace to cutoff using logistic function
+                  // Centered at cutoff, steepness increases as season progresses
+                  const steepness = 0.1 + (gp / 82) * 0.2; // Gets steeper later in season
+                  const playoffProb = Math.min(99, Math.max(1,
+                    Math.round(100 / (1 + Math.exp(-steepness * (pointsPace - playoffCutoff))))
+                  ));
+                  return (
+                    <div className="projection-grid">
+                      <div className="projection-card">
+                        <div className="projection-value">{pointsPace}</div>
+                        <div className="projection-label">82-Game Points Pace</div>
+                        <div className="projection-detail" style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '4px' }}>
+                          {stats.points} pts in {gp} GP • {ptsPerGame.toFixed(2)} pts/game
+                        </div>
+                      </div>
+                      <div className="projection-card">
+                        <div className="projection-value">{playoffProb}%</div>
+                        <div className="projection-label">Playoff Probability</div>
+                        <div className="projection-bar">
+                          <div
+                            className="projection-fill"
+                            style={{
+                              width: `${playoffProb}%`,
+                              backgroundColor: playoffProb >= 75 ? '#10b981' :
+                                               playoffProb >= 50 ? '#3b82f6' :
+                                               playoffProb >= 25 ? '#f59e0b' : '#ef4444'
+                            }}
+                          />
+                        </div>
+                        <div className="projection-detail" style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '4px' }}>
+                          {gamesRemaining > 0
+                            ? `Need ${pointsNeeded} pts in ${gamesRemaining} games (${ptsPerGameNeeded.toFixed(2)} pts/gm) to reach ~${playoffCutoff} pt cutoff`
+                            : `Season complete — ${stats.points >= playoffCutoff ? 'above' : 'below'} ~${playoffCutoff} pt historical cutoff`
+                          }
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
               </section>
 
               {/* Team Shot Maps */}

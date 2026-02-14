@@ -1,4 +1,5 @@
 import { NHL_API_BASE_URL } from './nhlApi';
+import { getCurrentSeason, getCurrentSeasonId } from '../utils/seasonUtils';
 
 export interface LeaguePlayerStats {
   playerId: number;
@@ -33,6 +34,7 @@ export interface LeaguePlayerStats {
  * This gets real-time stats for top players
  */
 export async function fetchLeagueLeaders(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _limit: number = 50
 ): Promise<LeaguePlayerStats[]> {
   try {
@@ -41,7 +43,7 @@ export async function fetchLeagueLeaders(
     const standingsData = await standingsResponse.json();
 
     // Get current season from standings
-    const currentSeason = standingsData.standings?.[0]?.seasonId || 20252026;
+    const currentSeason = standingsData.standings?.[0]?.seasonId || getCurrentSeasonId();
 
     // Note: The NHL API doesn't have a single "league leaders" endpoint
     // We'll need to aggregate from team rosters or use the skater stats endpoint
@@ -62,7 +64,7 @@ export async function fetchLeagueLeaders(
  */
 export async function fetchTeamRosterStats(
   teamAbbrev: string,
-  season: string = '20252026'
+  season: string = getCurrentSeason()
 ): Promise<LeaguePlayerStats[]> {
   try {
     const response = await fetch(`${NHL_API_BASE_URL}/club-stats/${teamAbbrev}/${season}/2`);
@@ -136,7 +138,7 @@ export const NHL_TEAMS = [
  * This fetches real-time stats for every player in the NHL
  */
 export async function fetchAllLeaguePlayers(
-  season: string = '20252026'
+  season: string = getCurrentSeason()
 ): Promise<LeaguePlayerStats[]> {
   try {
     // Fetch ALL 32 teams in parallel batches for better performance

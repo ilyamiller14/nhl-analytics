@@ -37,19 +37,24 @@ function AdvancedAnalyticsTable({
 }: AdvancedAnalyticsTableProps) {
   const hasRealData = realShotsFor.length > 0;
 
-  const advancedStats: AdvancedStats = useMemo(() => {
+  const advancedStats: AdvancedStats & { hasOnIceData: boolean } = useMemo(() => {
     if (hasRealData) {
-      return calculateAdvancedMetrics(
+      // Use real on-ice goals against from shot data
+      const realGoalsAgainst = realShotsAgainst.filter(s => s.type === 'goal').length;
+      const stats = calculateAdvancedMetrics(
         realShotsFor,
         realShotsAgainst,
         goals,
-        Math.floor(goals * 0.8),
+        realGoalsAgainst,
         toiMinutes,
         50,
         50,
         gamesPlayed * 12,
         gamesPlayed * 10
       );
+      // Override points60 with real data since we have assists
+      stats.points60 = toiMinutes > 0 ? (points / toiMinutes) * 60 : 0;
+      return { ...stats, hasOnIceData: true };
     }
 
     const shootingPct = shots > 0 ? (goals / shots) * 100 : 0;
@@ -63,17 +68,17 @@ function AdvancedAnalyticsTable({
       fenwickAgainst: 0,
       fenwickForPct: 50,
       fenwickRelative: 0,
-      expectedGoals: goals * 0.9,
-      expectedGoalsAgainst: goals * 0.8,
+      expectedGoals: 0,
+      expectedGoalsAgainst: 0,
       expectedGoalsPct: 50,
       expectedGoalsDiff: 0,
       goalsAboveExpected: 0,
       shootingPct,
-      savePct: 92,
-      pdo: 100 + (shootingPct - 10) * 0.5,
+      savePct: 0,
+      pdo: 0,
       offensiveZoneStartPct: 50,
-      qualityOfCompetition: 0,
-      qualityOfTeammates: 0,
+      qualityOfCompetition: null,
+      qualityOfTeammates: null,
       relativeCorsi: 0,
       relativeFenwick: 0,
       relativeXG: 0,
@@ -82,6 +87,7 @@ function AdvancedAnalyticsTable({
       xG60: 0,
       goals60: toiMinutes > 0 ? (goals / toiMinutes) * 60 : 0,
       points60: toiMinutes > 0 ? (points / toiMinutes) * 60 : 0,
+      hasOnIceData: false,
     };
   }, [hasRealData, realShotsFor, realShotsAgainst, goals, toiMinutes, gamesPlayed, shots, points]);
 
@@ -120,15 +126,31 @@ function AdvancedAnalyticsTable({
           <tbody>
             <tr>
               <td className="metric-name">Corsi For %</td>
-              <td className="metric-value">{advancedStats.corsiForPct.toFixed(1)}%</td>
-              <td>{advancedStats.corsiFor} / {advancedStats.corsiAgainst}</td>
-              <td className="metric-desc">All shot attempts (shots + blocks + misses)</td>
+              <td className="metric-value">
+                {advancedStats.hasOnIceData
+                  ? `${advancedStats.corsiForPct.toFixed(1)}%`
+                  : <span title="Requires play-by-play data">N/A</span>}
+              </td>
+              <td>
+                {advancedStats.hasOnIceData
+                  ? `${advancedStats.corsiFor} / ${advancedStats.corsiAgainst}`
+                  : '-'}
+              </td>
+              <td className="metric-desc">All shot attempts (shots + blocks + misses){!advancedStats.hasOnIceData && ' — requires play-by-play data'}</td>
             </tr>
             <tr>
               <td className="metric-name">Fenwick For %</td>
-              <td className="metric-value">{advancedStats.fenwickForPct.toFixed(1)}%</td>
-              <td>{advancedStats.fenwickFor} / {advancedStats.fenwickAgainst}</td>
-              <td className="metric-desc">Unblocked shot attempts (shots + misses)</td>
+              <td className="metric-value">
+                {advancedStats.hasOnIceData
+                  ? `${advancedStats.fenwickForPct.toFixed(1)}%`
+                  : <span title="Requires play-by-play data">N/A</span>}
+              </td>
+              <td>
+                {advancedStats.hasOnIceData
+                  ? `${advancedStats.fenwickFor} / ${advancedStats.fenwickAgainst}`
+                  : '-'}
+              </td>
+              <td className="metric-desc">Unblocked shot attempts (shots + misses){!advancedStats.hasOnIceData && ' — requires play-by-play data'}</td>
             </tr>
           </tbody>
         </table>
@@ -148,26 +170,38 @@ function AdvancedAnalyticsTable({
           </thead>
           <tbody>
             <tr className="highlight-row">
-              <td className="metric-name">WAR</td>
+              <td className="metric-name">Offensive WAR</td>
               <td className="metric-value">{war.toFixed(2)}</td>
               <td className="metric-desc">
-                Wins Above Replacement - {war > 5 ? 'Elite' : war > 3 ? 'All-Star' : war > 1 ? 'Above Average' : 'Average'}
+                Offensive wins above replacement (based on goals, assists, +/-, TOI) - {war > 5 ? 'Elite' : war > 3 ? 'All-Star' : war > 1 ? 'Above Average' : 'Average'}
               </td>
             </tr>
             <tr>
-              <td className="metric-name">On-Ice xGF</td>
-              <td className="metric-value">{advancedStats.expectedGoals.toFixed(2)}</td>
-              <td className="metric-desc">Team xG when player on ice</td>
+              <td className="metric-name">{advancedStats.hasOnIceData ? 'On-Ice xGF' : 'On-Ice xGF'}</td>
+              <td className="metric-value">
+                {advancedStats.hasOnIceData
+                  ? advancedStats.expectedGoals.toFixed(2)
+                  : <span title="Requires play-by-play data">N/A</span>}
+              </td>
+              <td className="metric-desc">Team xG when player on ice{!advancedStats.hasOnIceData && ' (requires play-by-play data)'}</td>
             </tr>
             <tr>
               <td className="metric-name">On-Ice xGA</td>
-              <td className="metric-value">{advancedStats.expectedGoalsAgainst.toFixed(2)}</td>
-              <td className="metric-desc">Opponent xG when player on ice</td>
+              <td className="metric-value">
+                {advancedStats.hasOnIceData
+                  ? advancedStats.expectedGoalsAgainst.toFixed(2)
+                  : <span title="Requires play-by-play data">N/A</span>}
+              </td>
+              <td className="metric-desc">Opponent xG when player on ice{!advancedStats.hasOnIceData && ' (requires play-by-play data)'}</td>
             </tr>
             <tr>
               <td className="metric-name">On-Ice xG%</td>
-              <td className="metric-value">{advancedStats.expectedGoalsPct.toFixed(1)}%</td>
-              <td className="metric-desc">xG share when on ice (&gt;50% is good)</td>
+              <td className="metric-value">
+                {advancedStats.hasOnIceData
+                  ? `${advancedStats.expectedGoalsPct.toFixed(1)}%`
+                  : <span title="Requires play-by-play data">N/A</span>}
+              </td>
+              <td className="metric-desc">xG share when on ice (&gt;50% is good){!advancedStats.hasOnIceData && ' (requires play-by-play data)'}</td>
             </tr>
             <tr>
               <td className="metric-name">Shooting %</td>

@@ -41,7 +41,7 @@ const PERIOD_OPTIONS = [
 // All NHL teams for selector
 const NHL_TEAMS = [
   { abbrev: 'ANA', name: 'Anaheim Ducks' },
-  { abbrev: 'ARI', name: 'Utah Hockey Club' },
+  { abbrev: 'UTA', name: 'Utah Hockey Club' },
   { abbrev: 'BOS', name: 'Boston Bruins' },
   { abbrev: 'BUF', name: 'Buffalo Sabres' },
   { abbrev: 'CGY', name: 'Calgary Flames' },
@@ -96,6 +96,13 @@ export default function ManagementDashboard() {
   // Load team data when team changes (only fetches data, doesn't compute)
   useEffect(() => {
     if (!teamAbbrev) return;
+
+    // Validate team abbreviation
+    const validTeam = NHL_TEAMS.find(t => t.abbrev === teamAbbrev);
+    if (!validTeam) {
+      setError(`Unknown team abbreviation: ${teamAbbrev}. Please select a valid team.`);
+      return;
+    }
 
     async function loadData() {
       setIsLoading(true);
@@ -201,21 +208,34 @@ export default function ManagementDashboard() {
 
         let pbpWithShifts = playByPlayData;
         if (needsShifts) {
-          // Fetch shifts for all games in parallel batches
-          const batchSize = 5;
+          // Fetch shifts for all games in parallel batches with overall timeout
+          const batchSize = 10;
           const updatedGames: GamePlayByPlay[] = [];
+          const overallTimeout = 30000; // 30s max for all shifts
+          const startTime = Date.now();
 
           for (let i = 0; i < playByPlayData.length; i += batchSize) {
+            // Check overall timeout
+            if (Date.now() - startTime > overallTimeout) {
+              // Add remaining games with empty shifts
+              updatedGames.push(...playByPlayData.slice(i).map(g => ({ ...g, shifts: g.shifts || [] })));
+              break;
+            }
+
             const batch = playByPlayData.slice(i, i + batchSize);
-            setLoadingProgress(`Loading shifts... ${i}/${playByPlayData.length} games`);
+            setLoadingProgress(`Loading shifts... ${Math.min(i + batchSize, playByPlayData.length)}/${playByPlayData.length} games`);
 
             const batchResults = await Promise.all(
               batch.map(async (game) => {
                 if (game.shifts && game.shifts.length > 0) {
                   return game; // Already has shifts
                 }
-                const shifts = await fetchGameShifts(game.gameId);
-                return { ...game, shifts };
+                try {
+                  const shifts = await fetchGameShifts(game.gameId);
+                  return { ...game, shifts };
+                } catch {
+                  return { ...game, shifts: [] };
+                }
               })
             );
             updatedGames.push(...batchResults);
@@ -439,9 +459,9 @@ export default function ManagementDashboard() {
                         {player.changes.map((change, idx) => (
                           <div key={idx} className="mini-change">
                             <span className="mc-metric">{change.metricLabel}</span>
-                            <span className={`mc-direction ${change.changeDirection}`}>
+                            <span className={`mc-direction ${change.isPositive ? 'positive' : 'negative'}`}>
                               {change.changeDirection === 'up' ? '↑' : '↓'}
-                              {Math.abs(change.changePercent).toFixed(0)}%
+                              {change.formattedChange} ({change.formattedPrevious} → {change.formattedCurrent})
                             </span>
                           </div>
                         ))}
@@ -557,6 +577,9 @@ export default function ManagementDashboard() {
 // Helper Components
 
 function ChangeCard({ change }: { change: BehaviorChange }) {
+  const arrow = change.changeDirection === 'up' ? '↑' : '↓';
+  const sentimentClass = change.isPositive ? 'positive' : 'negative';
+
   return (
     <div className={`change-card ${change.significance}`}>
       <div className="change-card-header">
@@ -566,12 +589,11 @@ function ChangeCard({ change }: { change: BehaviorChange }) {
         </span>
       </div>
       <div className="change-card-body">
-        <span className={`cc-direction ${change.changeDirection}`}>
-          {change.changeDirection === 'up' ? '↑' : '↓'}
-          {Math.abs(change.changePercent).toFixed(1)}%
+        <span className={`cc-direction ${sentimentClass}`}>
+          {arrow}{change.formattedChange}
         </span>
         <span className="cc-values">
-          {change.previousValue.toFixed(1)} → {change.currentValue.toFixed(1)}
+          {change.formattedPrevious} → {change.formattedCurrent}
         </span>
       </div>
       <p className="cc-interpretation">{change.interpretation}</p>

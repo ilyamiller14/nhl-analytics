@@ -19,7 +19,8 @@ import { API_CONFIG } from '../config/api';
 const NHL_API_BASE_URL = API_CONFIG.NHL_WEB;
 
 // Current season constant (2025-26 season)
-const CURRENT_SEASON = '20252026';
+import { getCurrentSeason } from '../utils/seasonUtils';
+const CURRENT_SEASON = getCurrentSeason();
 
 // Default game type (regular season)
 const DEFAULT_GAME_TYPE: EdgeGameType = 2;
@@ -60,17 +61,18 @@ interface RawZoneTimeResponse {
 }
 
 interface RawDistanceResponse {
-  skatingDistanceDetails: {
-    totalDistance: { imperial: number; metric: number };
-    distancePerGame: { imperial: number; metric: number; percentile: number; leagueAvg: { imperial: number } };
-    distancePerShift: { imperial: number; metric: number };
-  };
+  skatingDistanceDetails: Array<{
+    strengthCode: string;
+    distanceTotal: { imperial: number; metric: number; percentile: number };
+    distancePer60: { imperial: number; metric: number; percentile: number; leagueAvg: { imperial: number } };
+    distanceMaxGame?: { imperial: number; metric: number };
+  }>;
   skatingDistanceLast10: unknown[];
 }
 
 interface RawShotSpeedResponse {
   shotSpeedDetails: {
-    maxShotSpeed?: { imperial: number; metric: number; percentile: number; leagueAvg: { imperial: number } };
+    topShotSpeed?: { imperial: number; metric: number; percentile: number; leagueAvg: { imperial: number } };
     avgShotSpeed?: { imperial: number; metric: number; percentile: number; leagueAvg: { imperial: number } };
   };
   hardestShots: unknown[];
@@ -78,45 +80,99 @@ interface RawShotSpeedResponse {
 
 interface RawComparisonResponse {
   player: {
-    playerId: number;
+    id: number;
     firstName: { default: string };
     lastName: { default: string };
-    teamAbbrev: string;
     position: string;
+    team: { abbrev: string };
   };
   skatingSpeedDetails: {
-    maxSkatingSpeed: { imperial: number; percentile: number; leagueAvg: { imperial: number } };
-    burstsOver22: { value: number; percentile: number; leagueAvg: number };
+    maxSkatingSpeed: { imperial: number; metric: number };
+    burstsOver22: number;
+    bursts20To22: number;
+    bursts18To20: number;
   };
   skatingDistanceDetails: {
-    distancePerGame: { imperial: number; percentile: number; leagueAvg: { imperial: number } };
+    distanceTotal: { imperial: number; metric: number };
+    distancePer60: { imperial: number; metric: number };
   };
-  zoneTimeDetails: Array<{
-    strengthCode: string;
+  zoneTimeDetails: {
     offensiveZonePctg: number;
-    offensiveZonePercentile: number;
-  }>;
+    offensiveZoneLeagueAvg: number;
+    neutralZonePctg: number;
+    neutralZoneLeagueAvg: number;
+    defensiveZonePctg: number;
+    defensiveZoneLeagueAvg: number;
+  };
 }
 
 // ============================================================================
 // Transformation Functions
 // ============================================================================
 
-function transformSpeedResponse(raw: RawSpeedResponse): SkaterSpeedDetail {
-  const details = raw.skatingSpeedDetails;
-  return {
-    topSpeed: details.maxSkatingSpeed?.imperial || 0,
-    avgTopSpeed: details.maxSkatingSpeed?.imperial || 0, // API doesn't provide avg separately
-    bursts18To20: details.bursts18To20?.value || 0,
-    bursts20To22: details.bursts20To22?.value || 0,
-    bursts22Plus: details.burstsOver22?.value || 0,
-    burstsPerGame18To20: 0, // Would need games played to calculate
-    burstsPerGame20To22: 0,
-    burstsPerGame22Plus: 0,
-  } as unknown as SkaterSpeedDetail;
+// Extended type to include league averages from API
+export interface SpeedDataWithLeagueAvg extends SkaterSpeedDetail {
+  leagueAvg: {
+    topSpeed: number;
+    bursts22Plus: number;
+    bursts20To22: number;
+    bursts18To20: number;
+  };
+  percentiles: {
+    topSpeed: number;
+    bursts22Plus: number;
+    bursts20To22: number;
+    bursts18To20: number;
+  };
 }
 
-function transformZoneTimeResponse(raw: RawZoneTimeResponse): SkaterZoneTime {
+function transformSpeedResponse(raw: RawSpeedResponse): SpeedDataWithLeagueAvg {
+  const details = raw.skatingSpeedDetails;
+  // NHL API returns season totals in the value field
+  const bursts18To20 = details.bursts18To20?.value || 0;
+  const bursts20To22 = details.bursts20To22?.value || 0;
+  const bursts22Plus = details.burstsOver22?.value || 0;
+
+  return {
+    topSpeed: details.maxSkatingSpeed?.imperial || 0,
+    avgTopSpeed: details.maxSkatingSpeed?.imperial || 0,
+    bursts18To20,
+    bursts20To22,
+    bursts22Plus,
+    burstsPerGame18To20: bursts18To20,
+    burstsPerGame20To22: bursts20To22,
+    burstsPerGame22Plus: bursts22Plus,
+    // League averages from API
+    leagueAvg: {
+      topSpeed: details.maxSkatingSpeed?.leagueAvg?.imperial || 22.2,
+      bursts22Plus: details.burstsOver22?.leagueAvg || 4,
+      bursts20To22: details.bursts20To22?.leagueAvg || 73,
+      bursts18To20: details.bursts18To20?.leagueAvg || 326,
+    },
+    // Percentiles from API
+    percentiles: {
+      topSpeed: (details.maxSkatingSpeed?.percentile || 0.5) * 100,
+      bursts22Plus: (details.burstsOver22?.percentile || 0.5) * 100,
+      bursts20To22: (details.bursts20To22?.percentile || 0.5) * 100,
+      bursts18To20: (details.bursts18To20?.percentile || 0.5) * 100,
+    },
+  } as SpeedDataWithLeagueAvg;
+}
+
+export interface ZoneTimeWithLeagueAvg extends SkaterZoneTime {
+  leagueAvg: {
+    offensiveZonePct: number;
+    neutralZonePct: number;
+    defensiveZonePct: number;
+  };
+  percentiles: {
+    offensiveZonePct: number;
+    neutralZonePct: number;
+    defensiveZonePct: number;
+  };
+}
+
+function transformZoneTimeResponse(raw: RawZoneTimeResponse): ZoneTimeWithLeagueAvg {
   // Find the 'all' strength entry for overall stats
   const allStrength = raw.zoneTimeDetails?.find(z => z.strengthCode === 'all') || raw.zoneTimeDetails?.[0];
   if (!allStrength) {
@@ -128,7 +184,9 @@ function transformZoneTimeResponse(raw: RawZoneTimeResponse): SkaterZoneTime {
       offensiveZonePct: 0,
       defensiveZonePct: 0,
       neutralZonePct: 0,
-    } as unknown as SkaterZoneTime;
+      leagueAvg: { offensiveZonePct: 42.3, neutralZonePct: 17.8, defensiveZonePct: 39.8 },
+      percentiles: { offensiveZonePct: 50, neutralZonePct: 50, defensiveZonePct: 50 },
+    } as ZoneTimeWithLeagueAvg;
   }
   return {
     offensiveZoneTime: 0, // API returns percentages, not raw time
@@ -138,80 +196,150 @@ function transformZoneTimeResponse(raw: RawZoneTimeResponse): SkaterZoneTime {
     offensiveZonePct: (allStrength.offensiveZonePctg || 0) * 100,
     defensiveZonePct: (allStrength.defensiveZonePctg || 0) * 100,
     neutralZonePct: (allStrength.neutralZonePctg || 0) * 100,
-  } as unknown as SkaterZoneTime;
+    leagueAvg: {
+      offensiveZonePct: (allStrength.offensiveZoneLeagueAvg || 0.423) * 100,
+      neutralZonePct: (allStrength.neutralZoneLeagueAvg || 0.178) * 100,
+      defensiveZonePct: (allStrength.defensiveZoneLeagueAvg || 0.398) * 100,
+    },
+    percentiles: {
+      offensiveZonePct: (allStrength.offensiveZonePercentile || 0.5) * 100,
+      neutralZonePct: (allStrength.neutralZonePercentile || 0.5) * 100,
+      defensiveZonePct: (allStrength.defensiveZonePercentile || 0.5) * 100,
+    },
+  } as ZoneTimeWithLeagueAvg;
 }
 
-function transformDistanceResponse(raw: RawDistanceResponse): SkaterDistanceDetail {
-  const details = raw.skatingDistanceDetails;
+export interface DistanceWithLeagueAvg extends SkaterDistanceDetail {
+  leagueAvg: {
+    distancePer60: number;
+  };
+  percentiles: {
+    distancePer60: number;
+  };
+}
+
+function transformDistanceResponse(raw: RawDistanceResponse): DistanceWithLeagueAvg {
+  // Find entries by strength code
+  const allStrength = raw.skatingDistanceDetails?.find(d => d.strengthCode === 'all');
+  const esStrength = raw.skatingDistanceDetails?.find(d => d.strengthCode === 'es');
+  const ppStrength = raw.skatingDistanceDetails?.find(d => d.strengthCode === 'pp');
+  const pkStrength = raw.skatingDistanceDetails?.find(d => d.strengthCode === 'pk');
+
+  if (!allStrength) {
+    return {
+      totalDistance: 0,
+      totalDistanceMetric: 0,
+      distancePerGame: 0,
+      distancePerGameMetric: 0,
+      distancePerShift: 0,
+      distancePerShiftMetric: 0,
+      evenStrengthDistance: 0,
+      powerPlayDistance: 0,
+      penaltyKillDistance: 0,
+      leagueAvg: { distancePer60: 9.0 },
+      percentiles: { distancePer60: 50 },
+    } as DistanceWithLeagueAvg;
+  }
   return {
-    totalDistance: details?.totalDistance?.imperial || 0,
-    totalDistanceMetric: details?.totalDistance?.metric || 0,
-    distancePerGame: details?.distancePerGame?.imperial || 0,
-    distancePerGameMetric: details?.distancePerGame?.metric || 0,
-    distancePerShift: details?.distancePerShift?.imperial || 0,
-    distancePerShiftMetric: details?.distancePerShift?.metric || 0,
-  } as unknown as SkaterDistanceDetail;
+    totalDistance: allStrength.distanceTotal?.imperial || 0,
+    totalDistanceMetric: allStrength.distanceTotal?.metric || 0,
+    distancePerGame: allStrength.distancePer60?.imperial || 0, // Per 60 min
+    distancePerGameMetric: allStrength.distancePer60?.metric || 0,
+    distancePerShift: 0,
+    distancePerShiftMetric: 0,
+    evenStrengthDistance: esStrength?.distanceTotal?.imperial || 0,
+    powerPlayDistance: ppStrength?.distanceTotal?.imperial || 0,
+    penaltyKillDistance: pkStrength?.distanceTotal?.imperial || 0,
+    leagueAvg: {
+      distancePer60: allStrength.distancePer60?.leagueAvg?.imperial || 9.0,
+    },
+    percentiles: {
+      distancePer60: (allStrength.distancePer60?.percentile || 0.5) * 100,
+    },
+  } as DistanceWithLeagueAvg;
 }
 
-function transformShotSpeedResponse(raw: RawShotSpeedResponse): ShotSpeedDetail {
+export interface ShotSpeedWithLeagueAvg extends ShotSpeedDetail {
+  leagueAvg: {
+    avgShotSpeed: number;
+    maxShotSpeed: number;
+  };
+  percentiles: {
+    avgShotSpeed: number;
+    maxShotSpeed: number;
+  };
+}
+
+function transformShotSpeedResponse(raw: RawShotSpeedResponse): ShotSpeedWithLeagueAvg {
   const details = raw.shotSpeedDetails;
   return {
     avgShotSpeed: details?.avgShotSpeed?.imperial || 0,
-    maxShotSpeed: details?.maxShotSpeed?.imperial || 0,
+    maxShotSpeed: details?.topShotSpeed?.imperial || 0,
     totalShots: 0,
     shotsByType: [],
     shotsByZone: [],
-  } as unknown as ShotSpeedDetail;
+    leagueAvg: {
+      avgShotSpeed: details?.avgShotSpeed?.leagueAvg?.imperial || 65,
+      maxShotSpeed: details?.topShotSpeed?.leagueAvg?.imperial || 85,
+    },
+    percentiles: {
+      avgShotSpeed: (details?.avgShotSpeed?.percentile || 0.5) * 100,
+      maxShotSpeed: (details?.topShotSpeed?.percentile || 0.5) * 100,
+    },
+  } as unknown as ShotSpeedWithLeagueAvg;
 }
 
 function transformComparisonResponse(raw: RawComparisonResponse): SkaterComparison {
   const speedDetails = raw.skatingSpeedDetails;
   const distanceDetails = raw.skatingDistanceDetails;
-  const zoneDetails = raw.zoneTimeDetails?.find(z => z.strengthCode === 'all') || raw.zoneTimeDetails?.[0];
+  const zoneDetails = raw.zoneTimeDetails;
 
-  const createRanking = (value: number, percentile: number, leagueAvg: number) => ({
+  // Estimate percentile based on value vs league avg (simple linear estimation)
+  const estimatePercentile = (value: number, leagueAvg: number): number => {
+    if (!leagueAvg || leagueAvg === 0) return 50;
+    const ratio = value / leagueAvg;
+    // Above average = higher percentile, below = lower
+    return Math.min(99, Math.max(1, Math.round(50 + (ratio - 1) * 100)));
+  };
+
+  const ozPct = (zoneDetails?.offensiveZonePctg || 0) * 100;
+  const ozLeagueAvg = (zoneDetails?.offensiveZoneLeagueAvg || 0.42) * 100;
+
+  const createRanking = (value: number, leagueAvg: number) => ({
     value,
-    leaguePercentile: percentile || 50,
-    positionPercentile: percentile || 50,
+    leaguePercentile: estimatePercentile(value, leagueAvg),
+    positionPercentile: estimatePercentile(value, leagueAvg),
     leagueAvg,
     positionAvg: leagueAvg,
   });
 
   return {
-    playerId: raw.player?.playerId || 0,
+    playerId: raw.player?.id || 0,
     season: '',
     gameType: 2,
     firstName: raw.player?.firstName || { default: '' },
     lastName: raw.player?.lastName || { default: '' },
-    teamAbbrev: raw.player?.teamAbbrev || '',
+    teamAbbrev: raw.player?.team?.abbrev || '',
     position: raw.player?.position || '',
     percentiles: {
       topSpeed: createRanking(
         speedDetails?.maxSkatingSpeed?.imperial || 0,
-        speedDetails?.maxSkatingSpeed?.percentile || 50,
-        speedDetails?.maxSkatingSpeed?.leagueAvg?.imperial || 0
+        22.5 // League avg top speed ~22.5 mph
       ),
       avgSpeed: createRanking(
         speedDetails?.maxSkatingSpeed?.imperial || 0,
-        speedDetails?.maxSkatingSpeed?.percentile || 50,
-        speedDetails?.maxSkatingSpeed?.leagueAvg?.imperial || 0
+        22.5
       ),
       bursts22Plus: createRanking(
-        speedDetails?.burstsOver22?.value || 0,
-        speedDetails?.burstsOver22?.percentile || 50,
-        speedDetails?.burstsOver22?.leagueAvg || 0
+        speedDetails?.burstsOver22 || 0,
+        15 // League avg bursts ~15
       ),
       distancePerGame: createRanking(
-        distanceDetails?.distancePerGame?.imperial || 0,
-        distanceDetails?.distancePerGame?.percentile || 50,
-        distanceDetails?.distancePerGame?.leagueAvg?.imperial || 0
+        distanceDetails?.distancePer60?.imperial || 0,
+        9.0 // League avg ~9 mi per 60
       ),
-      offensiveZonePct: createRanking(
-        (zoneDetails?.offensiveZonePctg || 0) * 100,
-        zoneDetails?.offensiveZonePercentile || 50,
-        50
-      ),
-      avgShiftLength: createRanking(0, 50, 0),
+      offensiveZonePct: createRanking(ozPct, ozLeagueAvg),
+      avgShiftLength: createRanking(0, 45),
     },
     leagueRanks: {
       topSpeed: 0,

@@ -360,6 +360,8 @@
 
 .cc-direction.up { color: #22c55e; }
 .cc-direction.down { color: #ef4444; }
+.cc-direction.positive { color: #22c55e; }
+.cc-direction.negative { color: #ef4444; }
 
 .cc-values {
   font-size: 0.85rem;
@@ -438,6 +440,8 @@
 
 .mc-direction.up { color: #22c55e; }
 .mc-direction.down { color: #ef4444; }
+.mc-direction.positive { color: #22c55e; }
+.mc-direction.negative { color: #ef4444; }
 
 /* Player Trends Table */
 .player-trends-table {

@@ -191,12 +191,44 @@ function findZoneEntry(
     // Transition from non-offensive to offensive zone
     if (getZone(prev.xCoord) !== 'offensive' && getZone(curr.xCoord) === 'offensive') {
       // Classify entry type based on events
+      // Conservative zone entry classification
+      // Dump-ins: shots, blocks, giveaways are clearly not controlled carries
       const isDump = curr.eventType === 'shot-on-goal' ||
                      curr.eventType === 'blocked-shot' ||
+                     curr.eventType === 'missed-shot' ||
                      curr.eventType === 'giveaway';
 
+      // Controlled entries: takeaways and faceoff wins indicate possession
+      const isControlled = curr.eventType === 'takeaway' ||
+                           curr.eventType === 'faceoff-won';
+
+      // For ambiguous events, check if next event is a quick shot (suggests carry-in)
+      let entryType: 'controlled' | 'dump' | 'pass' = 'dump'; // default conservative
+      if (isDump) {
+        entryType = 'dump';
+      } else if (isControlled) {
+        entryType = 'controlled';
+      } else if (i + 1 < waypoints.length) {
+        const next = waypoints[i + 1];
+        const currTime = parseTimeToSeconds(curr.timeInPeriod);
+        const nextTime = parseTimeToSeconds(next.timeInPeriod);
+        const timeDiff = Math.abs(nextTime - currTime);
+        // If next event is a shot within 3s, likely a controlled entry
+        const nextIsShot = next.eventType === 'shot-on-goal' ||
+                           next.eventType === 'missed-shot' ||
+                           next.eventType === 'blocked-shot';
+        const nextIsTurnover = next.eventType === 'giveaway' ||
+                               next.eventType === 'stoppage';
+        if (nextIsShot && timeDiff <= 3) {
+          entryType = 'controlled';
+        } else if (nextIsTurnover || timeDiff > 5) {
+          entryType = 'dump';
+        }
+        // else stays 'dump' (conservative default)
+      }
+
       return {
-        type: isDump ? 'dump' : 'controlled',
+        type: entryType,
         xCoord: curr.xCoord,
         yCoord: curr.yCoord,
         success: true,

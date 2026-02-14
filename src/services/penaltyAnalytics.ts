@@ -146,9 +146,9 @@ export function analyzeSpecialTeams(
     xG: number;
   }> = {};
 
-  let ppShots: ShotEvent[] = [];
-  let pkShotsAgainst: ShotEvent[] = [];
-  let evenStrengthShots: ShotEvent[] = [];
+  const ppShots: ShotEvent[] = [];
+  const pkShotsAgainst: ShotEvent[] = [];
+  const evenStrengthShots: ShotEvent[] = [];
 
   shots.forEach((shot) => {
     const situation = parseSituation(shot.situation.strength);
