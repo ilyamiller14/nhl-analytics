@@ -126,10 +126,11 @@ export function detectRoyalRoadPasses(
 
 /**
  * Check if shot is from the slot (high-danger area)
- * Slot definition: x between 69-89, y between -10 and 10
+ * Handles both ends of the ice (positive and negative x)
  */
 function isSlotShot(xCoord: number, yCoord: number): boolean {
-  return xCoord >= 69 && xCoord <= 89 && Math.abs(yCoord) <= 10;
+  const absX = Math.abs(xCoord);
+  return absX >= 69 && absX <= 89 && Math.abs(yCoord) <= 10;
 }
 
 
@@ -185,16 +186,19 @@ export function classifyPass(
   // Classify pass type
   let type: PassClassification['type'];
 
-  if (isCrossIce && toX > 69) {
+  const absToX = Math.abs(toX);
+  const absFromX = Math.abs(fromX);
+
+  if (isCrossIce && absToX > 69) {
     // Cross-ice to offensive zone
     type = 'royal-road';
   } else if (verticalDistance > 50) {
     // Long vertical pass
     type = 'stretch';
-  } else if (horizontalDistance < 10 && fromX < 25) {
+  } else if (horizontalDistance < 10 && absFromX < 25) {
     // Short pass in defensive zone (likely D-to-D)
     type = 'd-to-d';
-  } else if (fromX < 25 && toX > 25) {
+  } else if (absFromX < 25 && absToX > 25) {
     // Pass from D-zone to neutral/offensive zone
     type = 'breakout';
   } else {

@@ -128,11 +128,10 @@ export function useAdvancedPlayerAnalytics(
         }
 
         // Collect all events and shots across all games
-        const allEvents: any[] = [];
         const allShots: ShotEvent[] = [];
-        const allPasses: any[] = [];
         const playerOnIceShotsFor: ShotEvent[] = [];
         const playerOnIceShotsAgainst: ShotEvent[] = [];
+        const allRoyalRoadPasses: import('../services/advancedPassAnalytics').RoyalRoadPass[] = [];
 
         // Per-game data for rolling metrics
         const perGameMetrics: GameMetrics[] = [];
@@ -144,9 +143,7 @@ export function useAdvancedPlayerAnalytics(
           try {
             const playByPlay = await fetchGamePlayByPlay(gameId);
 
-            allEvents.push(...playByPlay.allEvents);
             allShots.push(...playByPlay.shots);
-            allPasses.push(...playByPlay.passes);
 
             // Filter shots using actual on-ice data
             // This uses homePlayersOnIce/awayPlayersOnIce from the NHL API
@@ -159,6 +156,13 @@ export function useAdvancedPlayerAnalytics(
             );
             playerOnIceShotsFor.push(...shotsFor);
             playerOnIceShotsAgainst.push(...shotsAgainst);
+
+            // Detect royal road passes per-game (eventIds are only unique within a game)
+            const gamePasses = playByPlay.passes.filter(
+              (p: any) => p.fromPlayerId === playerId || p.toPlayerId === playerId
+            );
+            const gameRoyalRoad = detectRoyalRoadPasses(playByPlay.allEvents, shotsFor, gamePasses);
+            allRoyalRoadPasses.push(...gameRoyalRoad);
 
             // Compute per-game metrics for rolling analytics
             const gamePlayerShots = playByPlay.shots.filter(
@@ -248,11 +252,6 @@ export function useAdvancedPlayerAnalytics(
         // Calculate player on-ice xG metrics using actual on-ice data
         const xGMetrics = calculateXGDifferential(shotsForFeatures, shotsAgainstFeatures);
 
-        // Filter passes for player involvement (either passer or receiver)
-        const playerPasses = allPasses.filter(
-          (pass: any) => pass.fromPlayerId === playerId || pass.toPlayerId === playerId
-        );
-
         // Filter shots for player's personal shots (not on-ice, but actually taken by player)
         const playerPersonalShots = allShots.filter(
           (shot) => shot.shootingPlayerId === playerId
@@ -289,10 +288,8 @@ export function useAdvancedPlayerAnalytics(
         const personalGoals = playerPersonalShots.filter((s) => s.result === 'goal').length;
         const goalsAboveExpected = personalGoals - totalIxG;
 
-        // Royal road passes — use all on-ice team shots (not just personal shots)
-        // so we find passes where the player assisted a teammate's shot too
-        const royalRoadPassesData = detectRoyalRoadPasses(allEvents, playerOnIceShotsFor, playerPasses);
-        const royalRoadAnalytics = calculateRoyalRoadAnalytics(royalRoadPassesData);
+        // Royal road passes — aggregated from per-game detection above
+        const royalRoadAnalytics = calculateRoyalRoadAnalytics(allRoyalRoadPasses);
 
         // Zone/Rush stubs — no real API data exists for these
         const zoneAnalytics = {
