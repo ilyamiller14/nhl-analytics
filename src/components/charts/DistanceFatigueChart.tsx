@@ -136,17 +136,10 @@ export default function DistanceFatigueChart({
           </span>
         </div>
         <div className="metric-card">
-          <span className="metric-label">Distance/Game</span>
+          <span className="metric-label">Distance/60 min</span>
           <span className="metric-value">{(distanceData.distancePerGame || 0).toFixed(2)} mi</span>
           <span className="metric-sublabel">
             ({(distanceData.distancePerGameMetric || 0).toFixed(2)} km)
-          </span>
-        </div>
-        <div className="metric-card">
-          <span className="metric-label">Distance/Shift</span>
-          <span className="metric-value">{(distanceData.distancePerShift || 0).toFixed(0)} ft</span>
-          <span className="metric-sublabel">
-            ({(distanceData.distancePerShiftMetric || 0).toFixed(0)} m)
           </span>
         </div>
         <div className="metric-card">

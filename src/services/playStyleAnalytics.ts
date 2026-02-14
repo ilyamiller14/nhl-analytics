@@ -1220,9 +1220,11 @@ export function calculateAttackMetrics(
     ? shots.reduce((sum, s) => sum + s.distanceFromGoal, 0) / totalShots
     : 30;
 
-  // Timing metrics (from sequences)
-  const avgTimeToShot = sequences.length > 0
-    ? sequences.reduce((sum, s) => sum + s.durationSeconds, 0) / sequences.length
+  // Timing metrics (from sequences, capping outliers at 30s)
+  const MAX_SEQUENCE_DURATION = 30;
+  const validSequences = sequences.filter((s) => s.durationSeconds > 0 && s.durationSeconds <= MAX_SEQUENCE_DURATION);
+  const avgTimeToShot = validSequences.length > 0
+    ? validSequences.reduce((sum, s) => sum + s.durationSeconds, 0) / validSequences.length
     : 7.5;
 
   // Entry metrics
@@ -1361,8 +1363,9 @@ export function calculateGameMetrics(
   const avgShotDistance = shots.length > 0
     ? shots.reduce((sum, s) => sum + s.distanceFromGoal, 0) / totalShots
     : 30;
-  const avgTimeToShot = sequences.length > 0
-    ? sequences.reduce((sum, s) => sum + s.durationSeconds, 0) / sequences.length
+  const cappedSequences = sequences.filter((s) => s.durationSeconds > 0 && s.durationSeconds <= 30);
+  const avgTimeToShot = cappedSequences.length > 0
+    ? cappedSequences.reduce((sum, s) => sum + s.durationSeconds, 0) / cappedSequences.length
     : 7.5;
 
   return {
@@ -1526,8 +1529,23 @@ export function computeAttackDNAv2(
     allSequences = allSequences.concat(gameSequences);
   });
 
+  // Extract zone entries from sequences if none provided externally
+  const effectiveZoneEntries = zoneEntries.length > 0 ? zoneEntries : allSequences
+    .filter((s) => s.zoneEntry)
+    .map((s, idx) => ({
+      eventId: idx,
+      playerId: s.playerId || 0,
+      teamId: s.teamId,
+      period: s.period,
+      timeInPeriod: s.startTime,
+      entryType: s.zoneEntry!.type as EntryType,
+      xCoord: s.zoneEntry!.xCoord,
+      yCoord: s.zoneEntry!.yCoord,
+      success: s.zoneEntry!.success,
+    }));
+
   // Calculate direct metrics
-  const metrics = calculateAttackMetrics(shots, allSequences, zoneEntries);
+  const metrics = calculateAttackMetrics(shots, allSequences, effectiveZoneEntries);
 
   // Calculate attack profile
   const profile = calculateAttackProfile(metrics, teamId, playerId, games.length);

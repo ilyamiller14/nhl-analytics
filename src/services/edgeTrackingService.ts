@@ -74,6 +74,10 @@ interface RawShotSpeedResponse {
   shotSpeedDetails: {
     topShotSpeed?: { imperial: number; metric: number; percentile: number; leagueAvg: { imperial: number } };
     avgShotSpeed?: { imperial: number; metric: number; percentile: number; leagueAvg: { imperial: number } };
+    shotAttemptsOver100?: { value: number; percentile: number; leagueAvg: number };
+    shotAttempts90To100?: { value: number; percentile: number; leagueAvg: number };
+    shotAttempts80To90?: { value: number; percentile: number; leagueAvg: number };
+    shotAttempts70To80?: { value: number; percentile: number; leagueAvg: number };
   };
   hardestShots: unknown[];
 }
@@ -139,6 +143,8 @@ function transformSpeedResponse(raw: RawSpeedResponse): SpeedDataWithLeagueAvg {
     bursts18To20,
     bursts20To22,
     bursts22Plus,
+    // Note: per-game values are initially set to totals here as a placeholder.
+    // getAllSkaterData() corrects them by dividing by actual gamesPlayed.
     burstsPerGame18To20: bursts18To20,
     burstsPerGame20To22: bursts20To22,
     burstsPerGame22Plus: bursts22Plus,
@@ -272,12 +278,26 @@ export interface ShotSpeedWithLeagueAvg extends ShotSpeedDetail {
 
 function transformShotSpeedResponse(raw: RawShotSpeedResponse): ShotSpeedWithLeagueAvg {
   const details = raw.shotSpeedDetails;
+
+  // Map shot attempt distributions from real API fields
+  const over100 = details?.shotAttemptsOver100?.value || 0;
+  const s90to100 = details?.shotAttempts90To100?.value || 0;
+  const s80to90 = details?.shotAttempts80To90?.value || 0;
+  const s70to80 = details?.shotAttempts70To80?.value || 0;
+  const totalTracked = over100 + s90to100 + s80to90 + s70to80;
+
   return {
     avgShotSpeed: details?.avgShotSpeed?.imperial || 0,
     maxShotSpeed: details?.topShotSpeed?.imperial || 0,
-    totalShots: 0,
+    totalShots: totalTracked,
+    // API doesn't provide shot type or zone breakdowns
     shotsByType: [],
     shotsByZone: [],
+    // Map API tiers to our fields
+    shotsUnder70: 0, // Not tracked by EDGE API
+    shots70To80: s70to80,
+    shots80To90: s80to90,
+    shots90Plus: s90to100 + over100,
     leagueAvg: {
       avgShotSpeed: details?.avgShotSpeed?.leagueAvg?.imperial || 65,
       maxShotSpeed: details?.topShotSpeed?.leagueAvg?.imperial || 85,
@@ -648,6 +668,14 @@ class EdgeTrackingService {
       this.getSkaterComparison(playerId, season, gameType),
       this.getShotSpeedDetail(playerId, season, gameType),
     ]);
+
+    // Fix per-game burst values: transformSpeedResponse sets them to season totals
+    // because the raw speed API doesn't include gamesPlayed. Divide by actual GP.
+    const gp = detail.gamesPlayed || 1;
+    speed.gamesPlayed = gp;
+    speed.burstsPerGame18To20 = speed.bursts18To20 / gp;
+    speed.burstsPerGame20To22 = speed.bursts20To22 / gp;
+    speed.burstsPerGame22Plus = speed.bursts22Plus / gp;
 
     return {
       detail,

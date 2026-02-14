@@ -909,7 +909,7 @@ function PlayerProfile() {
                 <div style={{ marginTop: '2rem' }}>
                   <RollingAnalyticsChart
                     data={rollingData}
-                    windowSize={5}
+                    windowSize={10}
                     playerName={`${player.firstName.default} ${player.lastName.default}`}
                   />
                 </div>
@@ -1016,24 +1016,24 @@ function PlayerProfile() {
                       {edgeData.distance && (
                         <>
                           <div className="stat-card" style={{ padding: '1rem', background: '#f9fafb', borderRadius: '8px' }}>
-                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Distance/Game</div>
+                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Distance/60 min</div>
                             <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{edgeData.distance.distancePerGame.toFixed(2)} mi</div>
                           </div>
                           <div className="stat-card" style={{ padding: '1rem', background: '#f9fafb', borderRadius: '8px' }}>
-                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Distance/Shift</div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{edgeData.distance.distancePerShift.toFixed(0)} ft</div>
+                            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Season Distance</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{edgeData.distance.totalDistance.toFixed(1)} mi</div>
                           </div>
                         </>
                       )}
                       {edgeData.zoneTime && (
                         <>
                           <div className="stat-card" style={{ padding: '1rem', background: '#fef2f2', borderRadius: '8px' }}>
-                            <div style={{ fontSize: '0.875rem', color: '#991b1b' }}>Offensive Zone Time</div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{Math.round(edgeData.zoneTime.offensiveZoneTime / 60)}m</div>
+                            <div style={{ fontSize: '0.875rem', color: '#991b1b' }}>Offensive Zone %</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{edgeData.zoneTime.offensiveZonePct.toFixed(1)}%</div>
                           </div>
                           <div className="stat-card" style={{ padding: '1rem', background: '#eff6ff', borderRadius: '8px' }}>
-                            <div style={{ fontSize: '0.875rem', color: '#1e40af' }}>Defensive Zone Time</div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{Math.round(edgeData.zoneTime.defensiveZoneTime / 60)}m</div>
+                            <div style={{ fontSize: '0.875rem', color: '#1e40af' }}>Defensive Zone %</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: '600' }}>{edgeData.zoneTime.defensiveZonePct.toFixed(1)}%</div>
                           </div>
                         </>
                       )}

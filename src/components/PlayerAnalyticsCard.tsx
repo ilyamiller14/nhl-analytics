@@ -61,13 +61,11 @@ interface MetricGaugeProps {
 function MetricGauge({ label, value, percentile, format = 'decimal', colorScale = 'standard' }: MetricGaugeProps) {
   const getColor = (pct: number) => {
     if (colorScale === 'pdo') {
-      // PDO: 100 is average, deviation is luck
       const deviation = Math.abs(pct - 50);
       if (deviation < 10) return 'var(--gauge-neutral)';
-      if (pct > 50) return 'var(--gauge-warning)'; // Running hot
-      return 'var(--gauge-cool)'; // Running cold
+      if (pct > 50) return 'var(--gauge-warning)';
+      return 'var(--gauge-cool)';
     }
-    // Standard: higher is better
     if (pct >= 80) return 'var(--gauge-elite)';
     if (pct >= 60) return 'var(--gauge-good)';
     if (pct >= 40) return 'var(--gauge-average)';
@@ -107,11 +105,12 @@ function MetricGauge({ label, value, percentile, format = 'decimal', colorScale 
   );
 }
 
-function StatBlock({ label, value, highlight = false }: { label: string; value: string | number; highlight?: boolean }) {
+function HeroStat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className={`stat-block ${highlight ? 'highlight' : ''}`}>
-      <span className="stat-block-value">{value}</span>
-      <span className="stat-block-label">{label}</span>
+    <div className="hero-stat">
+      <span className="hero-stat-value">{value}</span>
+      <span className="hero-stat-label">{label}</span>
+      {sub && <span className="hero-stat-sub">{sub}</span>}
     </div>
   );
 }
@@ -144,12 +143,10 @@ export default function PlayerAnalyticsCard({
   const latestRolling = rollingMetrics && rollingMetrics.length > 0
     ? rollingMetrics[rollingMetrics.length - 1]
     : null;
-  // Calculate percentiles (in production, these would come from league-wide comparisons)
+
   const percentiles = useMemo(() => {
-    // Estimate percentiles based on typical NHL distributions
     const estimatePercentile = (value: number, average: number, stdDev: number) => {
       const zScore = (value - average) / stdDev;
-      // Convert z-score to percentile using normal distribution approximation
       const percentile = 50 * (1 + Math.tanh(zScore * 0.7));
       return Math.min(99, Math.max(1, percentile));
     };
@@ -163,9 +160,13 @@ export default function PlayerAnalyticsCard({
     };
   }, [pointsPerGame, goalsPerGame, analytics]);
 
+  const ppg = pointsPerGame || points / gamesPlayed;
+  const gpg = goalsPerGame || goals / gamesPlayed;
+  const shPct = shots && shots > 0 ? ((goals / shots) * 100) : null;
+
   return (
     <div className="player-analytics-card">
-      {/* Header with player info */}
+      {/* Header: player identity + hero stats side by side */}
       <div className="card-header">
         <div className="player-identity">
           {headshot ? (
@@ -182,6 +183,7 @@ export default function PlayerAnalyticsCard({
               <span className="player-position">{position}</span>
               <span className="player-team">{teamAbbrev}</span>
             </div>
+            <div className="season-badge">{season}</div>
           </div>
         </div>
         {teamLogo && (
@@ -189,197 +191,199 @@ export default function PlayerAnalyticsCard({
         )}
       </div>
 
-      {/* Season indicator */}
-      <div className="season-badge">{season} Season</div>
-
-      {/* Core Stats Grid */}
-      <div className="core-stats-grid">
-        <StatBlock label="GP" value={gamesPlayed} />
-        <StatBlock label="G" value={goals} highlight />
-        <StatBlock label="A" value={assists} highlight />
-        <StatBlock label="PTS" value={points} highlight />
-        <StatBlock label="+/-" value={plusMinus >= 0 ? `+${plusMinus}` : plusMinus} />
-        {avgToi && <StatBlock label="TOI" value={avgToi} />}
+      {/* Hero Stats Row - big bold numbers */}
+      <div className="hero-stats-row">
+        <HeroStat label="G" value={goals} />
+        <HeroStat label="A" value={assists} />
+        <HeroStat label="PTS" value={points} sub={`${ppg.toFixed(2)} P/GP`} />
+        <HeroStat label="+/-" value={plusMinus >= 0 ? `+${plusMinus}` : plusMinus} />
+        <HeroStat label="GP" value={gamesPlayed} sub={avgToi ? `${avgToi} TOI` : undefined} />
       </div>
 
-      {/* Rate Stats */}
-      <div className="rate-stats">
-        <div className="rate-stat">
-          <span className="rate-value">{(pointsPerGame || points / gamesPlayed).toFixed(2)}</span>
-          <span className="rate-label">P/GP</span>
-        </div>
-        <div className="rate-stat">
-          <span className="rate-value">{(goalsPerGame || goals / gamesPlayed).toFixed(2)}</span>
-          <span className="rate-label">G/GP</span>
-        </div>
-        {shots && shots > 0 && (
-          <div className="rate-stat">
-            <span className="rate-value">{((goals / shots) * 100).toFixed(1)}%</span>
-            <span className="rate-label">SH%</span>
+      {/* Two-column body */}
+      <div className="card-body-columns">
+        {/* Left column: rolling metrics + rates */}
+        <div className="card-col-left">
+          {/* Rate bar */}
+          <div className="rate-stats">
+            <div className="rate-stat">
+              <span className="rate-value">{ppg.toFixed(2)}</span>
+              <span className="rate-label">P/GP</span>
+            </div>
+            <div className="rate-stat">
+              <span className="rate-value">{gpg.toFixed(2)}</span>
+              <span className="rate-label">G/GP</span>
+            </div>
+            {shPct !== null && (
+              <div className="rate-stat">
+                <span className="rate-value">{shPct.toFixed(1)}%</span>
+                <span className="rate-label">SH%</span>
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Rolling 10-Game Metrics */}
+          {latestRolling && (
+            <div className="rolling-section">
+              <h3 className="section-title">10-Game Rolling</h3>
+              <div className="rolling-metrics-grid">
+                <div className="rolling-metric">
+                  <span className={`rolling-value ${latestRolling.rollingPDO >= 100 ? 'hot' : 'cold'}`}>
+                    {latestRolling.rollingPDO.toFixed(1)}
+                  </span>
+                  <span className="rolling-label">PDO</span>
+                </div>
+                <div className="rolling-metric">
+                  <span className={`rolling-value ${latestRolling.rollingCorsiPct >= 50 ? 'positive' : 'negative'}`}>
+                    {latestRolling.rollingCorsiPct.toFixed(1)}%
+                  </span>
+                  <span className="rolling-label">CF%</span>
+                </div>
+                <div className="rolling-metric">
+                  <span className={`rolling-value ${latestRolling.rollingXGPct >= 50 ? 'positive' : 'negative'}`}>
+                    {latestRolling.rollingXGPct.toFixed(1)}%
+                  </span>
+                  <span className="rolling-label">xG%</span>
+                </div>
+                <div className="rolling-metric">
+                  <span className="rolling-value">{latestRolling.rollingPointsPerGame.toFixed(2)}</span>
+                  <span className="rolling-label">P/GP</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right column: visualizations */}
+        <div className="card-col-right">
+          {(() => {
+            const shotsToShow = shotEvents || analytics?.playerShots;
+            const metricsToShow = (rollingMetrics && rollingMetrics.length > 0)
+              ? rollingMetrics
+              : analytics?.rollingMetrics;
+
+            return (
+              <>
+                {metricsToShow && metricsToShow.length > 1 && (
+                  <XGTimeSeriesChart
+                    rollingMetrics={metricsToShow}
+                    width={220}
+                    height={100}
+                    showLabels={true}
+                  />
+                )}
+                {shotsToShow && shotsToShow.length > 0 && (
+                  <MiniShotMap
+                    shots={shotsToShow}
+                    width={220}
+                    height={120}
+                  />
+                )}
+              </>
+            );
+          })()}
+        </div>
       </div>
-
-      {/* Rolling 5-Game Metrics */}
-      {latestRolling && (
-        <div className="rolling-section">
-          <h3 className="section-title">5-Game Rolling</h3>
-          <div className="rolling-metrics-grid">
-            <div className="rolling-metric">
-              <span className={`rolling-value ${latestRolling.rollingPDO >= 100 ? 'hot' : 'cold'}`}>
-                {latestRolling.rollingPDO.toFixed(1)}
-              </span>
-              <span className="rolling-label">PDO</span>
-              <span className="rolling-trend">{latestRolling.rollingPDO >= 100 ? '🔥' : '❄️'}</span>
-            </div>
-            <div className="rolling-metric">
-              <span className={`rolling-value ${latestRolling.rollingCorsiPct >= 50 ? 'positive' : 'negative'}`}>
-                {latestRolling.rollingCorsiPct.toFixed(1)}%
-              </span>
-              <span className="rolling-label">CF%</span>
-            </div>
-            <div className="rolling-metric">
-              <span className={`rolling-value ${latestRolling.rollingXGPct >= 50 ? 'positive' : 'negative'}`}>
-                {latestRolling.rollingXGPct.toFixed(1)}%
-              </span>
-              <span className="rolling-label">xG%</span>
-            </div>
-            <div className="rolling-metric">
-              <span className="rolling-value">{latestRolling.rollingPointsPerGame.toFixed(2)}</span>
-              <span className="rolling-label">P/GP</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Visualizations Row - Show shot map and time series */}
-      {(() => {
-        const shotsToShow = shotEvents || analytics?.playerShots;
-        // Use rolling metrics from props or from analytics
-        const metricsToShow = (rollingMetrics && rollingMetrics.length > 0)
-          ? rollingMetrics
-          : analytics?.rollingMetrics;
-        const hasVisualizations = (metricsToShow && metricsToShow.length > 1) || (shotsToShow && shotsToShow.length > 0);
-
-        if (!hasVisualizations) return null;
-
-        return (
-          <div className="visualizations-row">
-            {/* xG% Time Series Chart */}
-            {metricsToShow && metricsToShow.length > 1 && (
-              <XGTimeSeriesChart
-                rollingMetrics={metricsToShow}
-                width={160}
-                height={100}
-                showLabels={true}
-              />
-            )}
-
-            {/* Mini Shot Map */}
-            {shotsToShow && shotsToShow.length > 0 && (
-              <MiniShotMap
-                shots={shotsToShow}
-                width={160}
-                height={120}
-              />
-            )}
-          </div>
-        );
-      })()}
 
       {/* Advanced Analytics Section */}
       {analytics && (analytics.onIceXG || analytics.xGMetrics) && (
         <div className="advanced-section">
-          <h3 className="section-title">Season Analytics</h3>
-
-          {/* Individual xG Section - Player's own shot production */}
-          {analytics.individualXG && (
-            <div className="xg-section individual-xg">
-              <div className="xg-section-header">Individual xG</div>
-              <div className="xg-summary">
-                <div className="xg-item">
-                  <span className="xg-value">{analytics.individualXG.ixG.toFixed(2)}</span>
-                  <span className="xg-label">ixG</span>
-                </div>
-                <div className="xg-item">
-                  <span className={`xg-value ${analytics.individualXG.goalsAboveExpected >= 0 ? 'positive' : 'negative'}`}>
-                    {analytics.individualXG.goalsAboveExpected >= 0 ? '+' : ''}
-                    {analytics.individualXG.goalsAboveExpected.toFixed(2)}
-                  </span>
-                  <span className="xg-label">G-ixG</span>
-                </div>
-                <div className="xg-item">
-                  <span className="xg-value">{analytics.individualXG.ixGPerGame.toFixed(3)}</span>
-                  <span className="xg-label">ixG/GP</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* On-Ice xG Section - Team performance with player on ice */}
-          {(analytics.onIceXG || analytics.xGMetrics) && (
-            <div className="xg-section on-ice-xg">
-              <div className="xg-section-header">On-Ice xG%</div>
-              <div className="gauges-grid">
-                <MetricGauge
-                  label="xG%"
-                  value={(analytics.onIceXG || analytics.xGMetrics).xGPercent}
-                  percentile={percentiles.xg}
-                  format="percent"
-                />
-                <MetricGauge
-                  label="P/GP"
-                  value={pointsPerGame || points / gamesPlayed}
-                  percentile={percentiles.ppg}
-                  format="decimal"
-                />
-              </div>
-
-              <div className="xg-summary">
-                <div className="xg-item">
-                  <span className="xg-value">{(analytics.onIceXG || analytics.xGMetrics).xGF.toFixed(2)}</span>
-                  <span className="xg-label">xGF</span>
-                </div>
-                <div className="xg-item">
-                  <span className="xg-value">{(analytics.onIceXG || analytics.xGMetrics).xGA.toFixed(2)}</span>
-                  <span className="xg-label">xGA</span>
-                </div>
-                <div className="xg-item xg-diff">
-                  <span className={`xg-value ${(analytics.onIceXG || analytics.xGMetrics).xGDiff >= 0 ? 'positive' : 'negative'}`}>
-                    {(analytics.onIceXG || analytics.xGMetrics).xGDiff >= 0 ? '+' : ''}
-                    {(analytics.onIceXG || analytics.xGMetrics).xGDiff.toFixed(2)}
-                  </span>
-                  <span className="xg-label">xG+/-</span>
+          <div className="advanced-columns">
+            {/* Individual xG */}
+            {analytics.individualXG && (
+              <div className="xg-section individual-xg">
+                <div className="xg-section-header">Individual xG</div>
+                <div className="xg-summary">
+                  <div className="xg-item">
+                    <span className="xg-value">{analytics.individualXG.ixG.toFixed(2)}</span>
+                    <span className="xg-label">ixG</span>
+                  </div>
+                  <div className="xg-item">
+                    <span className={`xg-value ${analytics.individualXG.goalsAboveExpected >= 0 ? 'positive' : 'negative'}`}>
+                      {analytics.individualXG.goalsAboveExpected >= 0 ? '+' : ''}
+                      {analytics.individualXG.goalsAboveExpected.toFixed(2)}
+                    </span>
+                    <span className="xg-label">G-ixG</span>
+                  </div>
+                  <div className="xg-item">
+                    <span className="xg-value">{analytics.individualXG.ixGPerGame.toFixed(3)}</span>
+                    <span className="xg-label">ixG/GP</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Royal Road Stats */}
-          {analytics.royalRoadPasses && analytics.royalRoadPasses.totalRoyalRoadPasses > 0 && (
-            <div className="zone-rush-row">
+            {/* On-Ice xG */}
+            {(analytics.onIceXG || analytics.xGMetrics) && (
+              <div className="xg-section on-ice-xg">
+                <div className="xg-section-header">On-Ice xG%</div>
+                <div className="gauges-grid">
+                  <MetricGauge
+                    label="xG%"
+                    value={(analytics.onIceXG || analytics.xGMetrics).xGPercent}
+                    percentile={percentiles.xg}
+                    format="percent"
+                  />
+                  <MetricGauge
+                    label="P/GP"
+                    value={ppg}
+                    percentile={percentiles.ppg}
+                    format="decimal"
+                  />
+                </div>
+                <div className="xg-summary">
+                  <div className="xg-item">
+                    <span className="xg-value">{(analytics.onIceXG || analytics.xGMetrics).xGF.toFixed(2)}</span>
+                    <span className="xg-label">xGF</span>
+                  </div>
+                  <div className="xg-item">
+                    <span className="xg-value">{(analytics.onIceXG || analytics.xGMetrics).xGA.toFixed(2)}</span>
+                    <span className="xg-label">xGA</span>
+                  </div>
+                  <div className="xg-item xg-diff">
+                    <span className={`xg-value ${(analytics.onIceXG || analytics.xGMetrics).xGDiff >= 0 ? 'positive' : 'negative'}`}>
+                      {(analytics.onIceXG || analytics.xGMetrics).xGDiff >= 0 ? '+' : ''}
+                      {(analytics.onIceXG || analytics.xGMetrics).xGDiff.toFixed(2)}
+                    </span>
+                    <span className="xg-label">xG+/-</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Extra stats row */}
+          <div className="extra-stats-row">
+            {analytics.royalRoadPasses && analytics.royalRoadPasses.totalRoyalRoadPasses > 0 && (
               <div className="mini-stat-group">
                 <span className="mini-stat-value">{analytics.royalRoadPasses.totalRoyalRoadPasses}</span>
                 <span className="mini-stat-label">Royal Road</span>
               </div>
+            )}
+            {powerPlayGoals !== undefined && powerPlayGoals > 0 && (
+              <div className="mini-stat-group">
+                <span className="mini-stat-value">{powerPlayGoals}</span>
+                <span className="mini-stat-label">PPG</span>
+              </div>
+            )}
+            {gameWinningGoals !== undefined && gameWinningGoals > 0 && (
+              <div className="mini-stat-group">
+                <span className="mini-stat-value">{gameWinningGoals}</span>
+                <span className="mini-stat-label">GWG</span>
+              </div>
+            )}
+            <div className="mini-stat-group">
+              <span className="mini-stat-value">{analytics.totalShots}</span>
+              <span className="mini-stat-label">Shots</span>
             </div>
-          )}
-
-          {/* Games & Shots Summary */}
-          <div className="games-summary">
-            <span className="games-info">
-              {analytics.totalGames} games | {analytics.totalShots} shots | {analytics.totalGoals} goals
-              {powerPlayGoals !== undefined && powerPlayGoals > 0 && ` | ${powerPlayGoals} PPG`}
-              {gameWinningGoals !== undefined && gameWinningGoals > 0 && ` | ${gameWinningGoals} GWG`}
-            </span>
           </div>
         </div>
       )}
 
       {/* Footer */}
       <div className="card-footer">
-        <span className="branding">NHL Analytics</span>
-        <span className="data-note">Data via NHL API</span>
+        <span className="branding">DeepDive NHL</span>
+        <span className="data-note">{gamesPlayed} GP | Data via NHL API</span>
       </div>
     </div>
   );

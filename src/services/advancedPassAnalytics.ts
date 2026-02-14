@@ -7,7 +7,8 @@
  * - Entry Assists
  */
 
-import type { ShotEvent, PassEvent } from './playByPlayService';
+import type { ShotEvent } from './playByPlayService';
+import { calculateShotMetrics } from './playByPlayService';
 import { calculateXG } from './xgModel';
 
 export interface RoyalRoadPass {
@@ -35,89 +36,82 @@ export interface PassAnalytics {
 /**
  * Detect royal road passes from play-by-play events
  *
+ * Uses event-based detection: looks at sequential events before each slot shot
+ * to detect cross-ice movement from coordinates. The NHL PBP API doesn't include
+ * explicit pass events, so we infer cross-ice passes from the coordinate trail
+ * of sequential events by the same team.
+ *
  * Royal road pass criteria:
- * - Pass crosses significant horizontal distance (>20 feet / y-coord change >20)
- * - Results in a shot from high-danger area (slot)
- * - Occurs within 3 seconds of the pass
+ * - Shot is from the slot (high-danger scoring area)
+ * - A preceding same-team event has coordinates on the opposite side of the ice
+ *   (y-coordinate difference > 20 feet = cross-ice movement)
+ * - The preceding event involves a different player (the passer)
  */
 export function detectRoyalRoadPasses(
   allEvents: any[],
   shots: ShotEvent[],
-  passes: PassEvent[]
 ): RoyalRoadPass[] {
   const royalRoadPasses: RoyalRoadPass[] = [];
 
-  // For each shot, check if it was preceded by a cross-ice pass
+  // For each shot, check if it was preceded by a cross-ice event
   shots.forEach((shot) => {
     // Only consider shots from high-danger areas (slot)
-    const isInSlot = isSlotShot(shot.xCoord, shot.yCoord);
-    if (!isInSlot) return;
+    if (!isSlotShot(shot.xCoord, shot.yCoord)) return;
 
-    // Find events just before this shot
+    // Find this shot in allEvents by eventId
     const shotIndex = allEvents.findIndex((e) => e.eventId === shot.eventId);
     if (shotIndex <= 0) return;
 
-    // Look back up to 5 events or 3 seconds
+    // Look back up to 5 events for a cross-ice setup by the same team
     for (let i = shotIndex - 1; i >= Math.max(0, shotIndex - 5); i--) {
       const prevEvent = allEvents[i];
 
-      // Check if this was a pass event
-      const matchingPass = passes.find((p) => p.eventId === prevEvent.eventId);
-      if (!matchingPass) continue;
-
       // Must be same team
-      if (matchingPass.teamId !== shot.teamId) continue;
+      const prevTeamId = prevEvent.details?.eventOwnerTeamId;
+      if (prevTeamId !== shot.teamId) continue;
 
-      // Check if pass recipient is the shooter
-      if (matchingPass.toPlayerId !== shot.shootingPlayerId) continue;
+      // Need coordinates on the previous event
+      const prevY = prevEvent.details?.yCoord;
+      const prevX = prevEvent.details?.xCoord;
+      if (prevY === undefined || prevX === undefined) continue;
 
-      // Calculate horizontal distance of pass
-      // We need coordinates of both pass points, but API doesn't always provide them
-      // For now, we'll use a heuristic: if the pass details indicate cross-ice movement
-      const passStartY = prevEvent.details?.yCoord;
-      const passEndY = shot.yCoord;
+      // Identify the player involved in the previous event
+      const fromPlayerId =
+        prevEvent.details?.playerId ||
+        prevEvent.details?.shootingPlayerId ||
+        prevEvent.details?.scoringPlayerId ||
+        prevEvent.details?.hittingPlayerId ||
+        prevEvent.details?.winningPlayerId || 0;
 
-      if (passStartY !== undefined && passEndY !== undefined) {
-        const horizontalDistance = Math.abs(passEndY - passStartY);
+      // Must be a different player from the shooter (they passed it)
+      if (fromPlayerId === shot.shootingPlayerId || fromPlayerId === 0) continue;
 
-        // Royal road threshold: horizontal movement > 20 feet
-        if (horizontalDistance > 20) {
-          // Calculate shot xG using corrected angle formula
-          const netX = shot.xCoord >= 0 ? 89 : -89;
-          const shotDistance = Math.sqrt(
-            Math.pow(shot.xCoord - netX, 2) + Math.pow(shot.yCoord, 2)
-          );
-          // Correct angle: 0 = center, higher = more to the side
-          const distFromGoalLine = Math.abs(netX - shot.xCoord);
-          const latDist = Math.abs(shot.yCoord);
-          const shotAngle = distFromGoalLine > 0
-            ? Math.atan(latDist / distFromGoalLine) * (180 / Math.PI)
-            : 90;
-          const shotXGResult = calculateXG({
-                    distance: shotDistance,
-                    angle: shotAngle,
-                    shotType: 'wrist',
-                    strength: '5v5',
-                  });
-          const shotXG = shotXGResult.xGoal;
+      // Check cross-ice distance (y-coordinate change)
+      const horizontalDistance = Math.abs(shot.yCoord - prevY);
+      if (horizontalDistance <= 20) continue;
 
-          royalRoadPasses.push({
-            passEventId: matchingPass.eventId,
-            fromPlayerId: matchingPass.fromPlayerId,
-            toPlayerId: matchingPass.toPlayerId,
-            fromPlayerName: matchingPass.fromPlayerName,
-            toPlayerName: matchingPass.toPlayerName,
-            horizontalDistance,
-            shotEventId: shot.eventId,
-            shotXG,
-            wasGoal: shot.result === 'goal',
-            period: shot.period,
-            timeInPeriod: shot.timeInPeriod,
-          });
+      // Calculate shot xG using canonical model
+      const { distance, angle } = calculateShotMetrics(shot.xCoord, shot.yCoord);
+      const shotXG = calculateXG({
+        distance,
+        angle,
+        shotType: 'wrist',
+        strength: '5v5',
+      }).xGoal;
 
-          break; // Found the royal road pass for this shot
-        }
-      }
+      royalRoadPasses.push({
+        passEventId: prevEvent.eventId,
+        fromPlayerId,
+        toPlayerId: shot.shootingPlayerId,
+        horizontalDistance,
+        shotEventId: shot.eventId,
+        shotXG,
+        wasGoal: shot.result === 'goal',
+        period: shot.period,
+        timeInPeriod: shot.timeInPeriod,
+      });
+
+      break; // Found the royal road pass for this shot
     }
   });
 
@@ -127,10 +121,13 @@ export function detectRoyalRoadPasses(
 /**
  * Check if shot is from the slot (high-danger area)
  * Handles both ends of the ice (positive and negative x)
+ *
+ * Slot = goal line (89) to top of circles (~54), between faceoff dots (y ±22)
+ * This captures both low slot and high slot shots
  */
 function isSlotShot(xCoord: number, yCoord: number): boolean {
   const absX = Math.abs(xCoord);
-  return absX >= 69 && absX <= 89 && Math.abs(yCoord) <= 10;
+  return absX >= 54 && absX <= 89 && Math.abs(yCoord) <= 22;
 }
 
 

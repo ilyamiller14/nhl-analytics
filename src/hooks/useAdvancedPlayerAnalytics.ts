@@ -158,10 +158,8 @@ export function useAdvancedPlayerAnalytics(
             playerOnIceShotsAgainst.push(...shotsAgainst);
 
             // Detect royal road passes per-game (eventIds are only unique within a game)
-            const gamePasses = playByPlay.passes.filter(
-              (p: any) => p.fromPlayerId === playerId || p.toPlayerId === playerId
-            );
-            const gameRoyalRoad = detectRoyalRoadPasses(playByPlay.allEvents, shotsFor, gamePasses);
+            // Uses event-based detection — no dependency on explicit pass events
+            const gameRoyalRoad = detectRoyalRoadPasses(playByPlay.allEvents, shotsFor);
             allRoyalRoadPasses.push(...gameRoyalRoad);
 
             // Compute per-game metrics for rolling analytics
@@ -206,7 +204,7 @@ export function useAdvancedPlayerAnalytics(
         }
 
         // Calculate rolling metrics from per-game data
-        const rollingMetricsData = calculateRollingMetrics(perGameMetrics, 5);
+        const rollingMetricsData = calculateRollingMetrics(perGameMetrics, 10);
 
         if (isCancelled) return;
 
