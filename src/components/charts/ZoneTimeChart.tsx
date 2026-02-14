@@ -191,28 +191,48 @@ export default function ZoneTimeChart({
           </div>
         </div>
 
-        {/* Per-Game Averages */}
+        {/* Per-Game Averages — EDGE returns %, not seconds, so show % when per-game times are 0 */}
         <div className="per-game-section">
           <h4 className="section-title">Average Per Game</h4>
           <div className="per-game-grid">
-            <div className="per-game-stat" style={{ borderLeftColor: ZONE_COLORS.OZ }}>
-              <span className="pg-label">OZ Time</span>
-              <span className="pg-value">
-                {formatTime(zoneData.offensiveZoneTimePerGame || 0)}
-              </span>
-            </div>
-            <div className="per-game-stat" style={{ borderLeftColor: ZONE_COLORS.NZ }}>
-              <span className="pg-label">NZ Time</span>
-              <span className="pg-value">
-                {formatTime(zoneData.neutralZoneTimePerGame || 0)}
-              </span>
-            </div>
-            <div className="per-game-stat" style={{ borderLeftColor: ZONE_COLORS.DZ }}>
-              <span className="pg-label">DZ Time</span>
-              <span className="pg-value">
-                {formatTime(zoneData.defensiveZoneTimePerGame || 0)}
-              </span>
-            </div>
+            {(() => {
+              const hasPerGame = (zoneData.offensiveZoneTimePerGame || 0) > 0;
+              if (hasPerGame) {
+                return (
+                  <>
+                    <div className="per-game-stat" style={{ borderLeftColor: ZONE_COLORS.OZ }}>
+                      <span className="pg-label">OZ Time</span>
+                      <span className="pg-value">{formatTime(zoneData.offensiveZoneTimePerGame)}</span>
+                    </div>
+                    <div className="per-game-stat" style={{ borderLeftColor: ZONE_COLORS.NZ }}>
+                      <span className="pg-label">NZ Time</span>
+                      <span className="pg-value">{formatTime(zoneData.neutralZoneTimePerGame)}</span>
+                    </div>
+                    <div className="per-game-stat" style={{ borderLeftColor: ZONE_COLORS.DZ }}>
+                      <span className="pg-label">DZ Time</span>
+                      <span className="pg-value">{formatTime(zoneData.defensiveZoneTimePerGame)}</span>
+                    </div>
+                  </>
+                );
+              }
+              // Fallback: show zone percentages when raw time unavailable
+              return (
+                <>
+                  <div className="per-game-stat" style={{ borderLeftColor: ZONE_COLORS.OZ }}>
+                    <span className="pg-label">OZ%</span>
+                    <span className="pg-value">{(zoneData.offensiveZonePct || 0).toFixed(1)}%</span>
+                  </div>
+                  <div className="per-game-stat" style={{ borderLeftColor: ZONE_COLORS.NZ }}>
+                    <span className="pg-label">NZ%</span>
+                    <span className="pg-value">{(zoneData.neutralZonePct || 0).toFixed(1)}%</span>
+                  </div>
+                  <div className="per-game-stat" style={{ borderLeftColor: ZONE_COLORS.DZ }}>
+                    <span className="pg-label">DZ%</span>
+                    <span className="pg-value">{(zoneData.defensiveZonePct || 0).toFixed(1)}%</span>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
 

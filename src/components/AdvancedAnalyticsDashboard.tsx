@@ -3,8 +3,6 @@
  *
  * Comprehensive display of all advanced analytics:
  * - xG metrics
- * - Zone entries/exits
- * - Rush attacks
  * - Royal road passes
  * - Defensive coverage
  */
@@ -27,8 +25,6 @@ export default function AdvancedAnalyticsDashboard({
     xGMetrics,
     individualXG,
     royalRoadPasses,
-    zoneAnalytics,
-    rushAnalytics,
     defensiveAnalytics,
     totalGames,
     totalShots,
@@ -40,13 +36,10 @@ export default function AdvancedAnalyticsDashboard({
     return {
       shotsPerGame: totalGames > 0 ? (totalShots / totalGames).toFixed(1) : '0.0',
       goalsPerGame: totalGames > 0 ? (totalGoals / totalGames).toFixed(2) : '0.00',
-      // Use individual xG (player's own shots) for per-game xG
       ixGPerGame: individualXG?.ixGPerGame?.toFixed(2) || '0.00',
-      // On-ice xG per game (team performance when player on ice)
       onIceXGPerGame: totalGames > 0 ? (xGMetrics.xGF / totalGames).toFixed(2) : '0.00',
-      rushesPerGame: totalGames > 0 ? (rushAnalytics.totalRushes / totalGames).toFixed(1) : '0.0',
     };
-  }, [totalGames, totalShots, totalGoals, xGMetrics.xGF, individualXG, rushAnalytics.totalRushes]);
+  }, [totalGames, totalShots, totalGoals, xGMetrics.xGF, individualXG]);
 
   return (
     <div className="advanced-analytics-dashboard">
@@ -110,99 +103,6 @@ export default function AdvancedAnalyticsDashboard({
             <div className="metric-sublabel">
               {(individualXG?.goalsAboveExpected ?? 0) >= 0 ? 'Above' : 'Below'} expected (ixG: {(individualXG?.ixG ?? 0).toFixed(2)})
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Zone Entry/Exit Section */}
-      <section className="analytics-section">
-        <h3 className="section-title">Zone Transitions</h3>
-        <div className="metrics-grid-2col">
-          <div className="zone-card entry-card">
-            <h4>Offensive Zone Entries</h4>
-            <div className="zone-stats">
-              <div className="zone-stat">
-                <span className="stat-label">Total Entries:</span>
-                <span className="stat-value">{zoneAnalytics.totalEntries}</span>
-              </div>
-              <div className="zone-stat">
-                <span className="stat-label">Controlled:</span>
-                <span className="stat-value">{zoneAnalytics.controlledEntries}</span>
-              </div>
-              <div className="zone-stat">
-                <span className="stat-label">Dump-ins:</span>
-                <span className="stat-value">{zoneAnalytics.dumpIns}</span>
-              </div>
-              <div className="zone-stat-highlight">
-                <span className="stat-label">Controlled Entry Rate:</span>
-                <span className="stat-value-large">{zoneAnalytics.controlledEntryRate}%</span>
-              </div>
-            </div>
-            <div className="zone-rating">
-              {zoneAnalytics.controlledEntryRate >= 60 ? '🟢 Elite' :
-               zoneAnalytics.controlledEntryRate >= 50 ? '🟡 Good' :
-               zoneAnalytics.controlledEntryRate >= 40 ? '🟠 Average' : '🔴 Below Average'}
-            </div>
-          </div>
-
-          <div className="zone-card exit-card">
-            <h4>Defensive Zone Exits</h4>
-            <div className="zone-stats">
-              <div className="zone-stat">
-                <span className="stat-label">Total Exits:</span>
-                <span className="stat-value">{zoneAnalytics.totalExits}</span>
-              </div>
-              <div className="zone-stat">
-                <span className="stat-label">Successful:</span>
-                <span className="stat-value">{zoneAnalytics.successfulExits}</span>
-              </div>
-              <div className="zone-stat-highlight">
-                <span className="stat-label">Exit Success Rate:</span>
-                <span className="stat-value-large">{zoneAnalytics.exitSuccessRate}%</span>
-              </div>
-            </div>
-            <div className="zone-rating">
-              {zoneAnalytics.exitSuccessRate >= 75 ? '🟢 Elite' :
-               zoneAnalytics.exitSuccessRate >= 65 ? '🟡 Good' :
-               zoneAnalytics.exitSuccessRate >= 55 ? '🟠 Average' : '🔴 Below Average'}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Rush Attack Section */}
-      <section className="analytics-section">
-        <h3 className="section-title">Rush Attacks</h3>
-        <div className="metrics-grid">
-          <div className="metric-card">
-            <div className="metric-label">Total Rushes</div>
-            <div className="metric-value">{rushAnalytics.totalRushes}</div>
-            <div className="metric-sublabel">{perGameStats.rushesPerGame}/game</div>
-          </div>
-          <div className="metric-card">
-            <div className="metric-label">Rush Goals</div>
-            <div className="metric-value">{rushAnalytics.rushGoals}</div>
-            <div className="metric-sublabel">{rushAnalytics.rushConversionRate}% conversion</div>
-          </div>
-          <div className="metric-card">
-            <div className="metric-label">Breakaways</div>
-            <div className="metric-value">{rushAnalytics.breakaways}</div>
-            <div className="metric-sublabel">Isolated rushes</div>
-          </div>
-          <div className="metric-card">
-            <div className="metric-label">Odd-Man Rushes</div>
-            <div className="metric-value">{rushAnalytics.oddManRushes}</div>
-            <div className="metric-sublabel">Outnumbered defense</div>
-          </div>
-        </div>
-        <div className="rush-details">
-          <div className="detail-item">
-            <span className="detail-label">Average Transition Time:</span>
-            <span className="detail-value">{rushAnalytics.averageTransitionTime}s</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Total Rush xG:</span>
-            <span className="detail-value">{rushAnalytics.totalRushXG}</span>
           </div>
         </div>
       </section>

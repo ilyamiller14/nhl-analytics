@@ -261,8 +261,9 @@ npm run build  # Creates dist/
 
 ### Deploy to Cloudflare Pages
 ```bash
-wrangler pages deploy dist --project-name=nhl-analytics
+wrangler pages deploy dist --project-name=nhl-analytics --branch=production
 ```
+**IMPORTANT**: Must use `--branch=production` to deploy to the production environment. Without it, deploys go to Preview and the live site won't update.
 
 ### Cloudflare Worker (API Proxy)
 Located in `workers/`. Handles CORS and routes to NHL APIs.

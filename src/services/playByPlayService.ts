@@ -317,10 +317,10 @@ export async function fetchGamePlayByPlay(gameId: number): Promise<GamePlayByPla
       shifts,
     };
 
-    // Cache for 24 hours - historical game data doesn't change
-    // Store in both IndexedDB (persistent) and localStorage (quick access)
-    await setInCache(cacheKey, result, ANALYTICS_CACHE.PLAY_BY_PLAY);
-    CacheManager.set(cacheKey, result, ANALYTICS_CACHE.PLAY_BY_PLAY);
+    // Cache for 30 days - completed game PBP data never changes
+    const LONG_TTL = 30 * 24 * 60 * 60 * 1000;
+    await setInCache(cacheKey, result, LONG_TTL);
+    CacheManager.set(cacheKey, result, LONG_TTL);
 
     return result;
   } catch (error) {

@@ -2,10 +2,8 @@
  * Advanced Player Analytics Hook
  *
  * Calculates comprehensive analytics from play-by-play data:
- * - xG metrics
+ * - xG metrics (using canonical xgModel.ts)
  * - Royal road passes
- * - Zone entries/exits
- * - Rush attacks
  * - Defensive coverage
  */
 
@@ -14,13 +12,12 @@ import {
   fetchGamePlayByPlay,
   fetchPlayerSeasonGames,
   filterPlayerShots,
+  calculateShotMetrics,
   type ShotEvent,
 } from '../services/playByPlayService';
 import { calculateRoyalRoadAnalytics, detectRoyalRoadPasses } from '../services/advancedPassAnalytics';
-import { detectZoneEntries, detectZoneExits, calculateZoneAnalytics } from '../services/zoneTracking';
-import { detectRushAttacks, calculateRushAnalytics } from '../services/rushAnalytics';
 import { analyzeDefensiveCoverage } from '../services/defensiveAnalytics';
-import { calculateXGDifferential } from '../services/xgModel';
+import { calculateXG, calculateXGDifferential } from '../services/xgModel';
 import { calculateRollingMetrics, type GameMetrics, type RollingMetrics } from '../services/rollingAnalytics';
 import { getCurrentSeason } from '../utils/seasonUtils';
 
@@ -57,11 +54,27 @@ export interface AdvancedPlayerAnalytics {
   // Royal Road Passes
   royalRoadPasses: ReturnType<typeof calculateRoyalRoadAnalytics>;
 
-  // Zone Entries/Exits
-  zoneAnalytics: ReturnType<typeof calculateZoneAnalytics>;
+  // Zone Entries/Exits (stub for backward compatibility)
+  zoneAnalytics: {
+    totalEntries: number;
+    controlledEntries: number;
+    dumpIns: number;
+    controlledEntryRate: number;
+    totalExits: number;
+    successfulExits: number;
+    exitSuccessRate: number;
+  };
 
-  // Rush Attacks
-  rushAnalytics: ReturnType<typeof calculateRushAnalytics>;
+  // Rush Attacks (stub for backward compatibility)
+  rushAnalytics: {
+    totalRushes: number;
+    rushGoals: number;
+    rushConversionRate: number;
+    breakaways: number;
+    oddManRushes: number;
+    averageTransitionTime: number;
+    totalRushXG: number;
+  };
 
   // Defensive Coverage
   defensiveAnalytics: ReturnType<typeof analyzeDefensiveCoverage>;
@@ -170,22 +183,14 @@ export function useAdvancedPlayerAnalytics(
               unblockedFor: shotsFor.filter((s) => s.result !== 'blocked-shot').length,
               unblockedAgainst: shotsAgainst.filter((s) => s.result !== 'blocked-shot').length,
               xGFor: shotsFor.reduce((sum, s) => {
-                const netX = s.xCoord >= 0 ? 89 : -89;
-                const dist = Math.sqrt(Math.pow(s.xCoord - netX, 2) + Math.pow(s.yCoord, 2));
-                const angle = Math.abs(netX - s.xCoord) > 0
-                  ? Math.atan(Math.abs(s.yCoord) / Math.abs(netX - s.xCoord)) * (180 / Math.PI)
-                  : 90;
-                const xg = 1 / (1 + Math.exp(0.5 + 0.045 * dist + 0.025 * angle));
-                return sum + Math.max(0.005, Math.min(0.60, xg));
+                const { distance, angle } = calculateShotMetrics(s.xCoord, s.yCoord);
+                const result = calculateXG({ distance, angle, shotType: 'wrist', strength: '5v5' });
+                return sum + result.xGoal;
               }, 0),
               xGAgainst: shotsAgainst.reduce((sum, s) => {
-                const netX = s.xCoord >= 0 ? 89 : -89;
-                const dist = Math.sqrt(Math.pow(s.xCoord - netX, 2) + Math.pow(s.yCoord, 2));
-                const angle = Math.abs(netX - s.xCoord) > 0
-                  ? Math.atan(Math.abs(s.yCoord) / Math.abs(netX - s.xCoord)) * (180 / Math.PI)
-                  : 90;
-                const xg = 1 / (1 + Math.exp(0.5 + 0.045 * dist + 0.025 * angle));
-                return sum + Math.max(0.005, Math.min(0.60, xg));
+                const { distance, angle } = calculateShotMetrics(s.xCoord, s.yCoord);
+                const result = calculateXG({ distance, angle, shotType: 'wrist', strength: '5v5' });
+                return sum + result.xGoal;
               }, 0),
               goalsFor: shotsFor.filter((s) => s.result === 'goal').length,
               goalsAgainst: shotsAgainst.filter((s) => s.result === 'goal').length,
@@ -288,25 +293,15 @@ export function useAdvancedPlayerAnalytics(
         const royalRoadPassesData = detectRoyalRoadPasses(allEvents, playerPersonalShots, playerPasses);
         const royalRoadAnalytics = calculateRoyalRoadAnalytics(royalRoadPassesData);
 
-        // Zone entries/exits - filter for player involvement
-        const allZoneEntries = detectZoneEntries(allEvents);
-        const allZoneExits = detectZoneExits(allEvents);
-
-        // Filter zone entries where the player was the one entering
-        const playerZoneEntries = allZoneEntries.filter(
-          (entry) => entry.playerId === playerId
-        );
-        const playerZoneExits = allZoneExits.filter(
-          (exit) => exit.playerId === playerId
-        );
-        const zoneAnalytics = calculateZoneAnalytics(playerZoneEntries, playerZoneExits);
-
-        // Rush attacks - filter for player's rushes only
-        const allRushAttacks = detectRushAttacks(allEvents, allShots);
-        const playerRushAttacks = allRushAttacks.filter(
-          (rush) => rush.playerId === playerId
-        );
-        const rushAnalytics = calculateRushAnalytics(playerRushAttacks);
+        // Zone/Rush stubs — no real API data exists for these
+        const zoneAnalytics = {
+          totalEntries: 0, controlledEntries: 0, dumpIns: 0,
+          controlledEntryRate: 0, totalExits: 0, successfulExits: 0, exitSuccessRate: 0,
+        };
+        const rushAnalytics = {
+          totalRushes: 0, rushGoals: 0, rushConversionRate: 0,
+          breakaways: 0, oddManRushes: 0, averageTransitionTime: 0, totalRushXG: 0,
+        };
 
         // Defensive coverage (using actual on-ice shots against)
         const defensiveAnalytics = analyzeDefensiveCoverage(playerOnIceShotsAgainst);

@@ -10,6 +10,7 @@
  */
 
 import type { GamePlayByPlay, ShotEvent, PlayerShift } from './playByPlayService';
+import { fetchGameShifts } from './playByPlayService';
 import { parseTimeToSeconds } from '../utils/timeUtils';
 
 // ============================================================================
@@ -187,13 +188,14 @@ function getPlayersOnIceForShot(
 
 /**
  * Calculate pair chemistry from a set of games
+ * Fetches real shift data on demand when not already present.
  */
-export function calculatePairChemistry(
+export async function calculatePairChemistry(
   gamesPlayByPlay: GamePlayByPlay[],
   player1Id: number,
   player2Id: number,
   teamId: number
-): PlayerPairChemistry {
+): Promise<PlayerPairChemistry> {
   const pairKey = getPairKey(player1Id, player2Id);
   const [sortedP1, sortedP2] = pairKey.split('-').map(Number);
 
@@ -205,14 +207,22 @@ export function calculatePairChemistry(
   const player2Only = { shots: 0, goals: 0 };
 
   for (const game of gamesPlayByPlay) {
-    const { shifts, shots, homeTeamId } = game;
+    let { shifts } = game;
+    const { shots, homeTeamId } = game;
     const opponentTeamId = homeTeamId === teamId ? game.awayTeamId : homeTeamId;
+
+    // Fetch real shift data on demand if not present
+    if (!shifts || shifts.length === 0) {
+      try {
+        shifts = await fetchGameShifts(game.gameId);
+      } catch {
+        shifts = [];
+      }
+    }
+
     const hasShifts = shifts && shifts.length > 0;
 
-    // Track events together per game for TOI estimation
-    let gameEventsTogether = 0;
-
-    // If shifts available, calculate overlapping time precisely
+    // Calculate overlapping time precisely from real shifts
     if (hasShifts) {
       const player1Shifts = shifts.filter((s) => s.playerId === sortedP1 && s.teamId === teamId);
       const player2Shifts = shifts.filter((s) => s.playerId === sortedP2 && s.teamId === teamId);
@@ -228,7 +238,7 @@ export function calculatePairChemistry(
       }
     }
 
-    // Analyze shots - uses embedded on-ice data when shifts unavailable
+    // Analyze shots - uses embedded on-ice data
     for (const shot of shots) {
       const playersOnIce = getPlayersOnIceForShot(shot, shifts, shot.teamId, homeTeamId);
       const ourPlayersOnIce = getPlayersOnIceForShot(shot, shifts, teamId, homeTeamId);
@@ -241,7 +251,6 @@ export function calculatePairChemistry(
       if (shot.teamId === teamId) {
         if (p1OnIce && p2OnIce) {
           together.shots++;
-          gameEventsTogether++;
           if (shot.result === 'goal') together.goals++;
           if (isHighDangerShot(shot.xCoord, shot.yCoord)) together.highDangerShots++;
         } else if (p1OnIce && !p2OnIce) {
@@ -252,21 +261,13 @@ export function calculatePairChemistry(
           if (shot.result === 'goal') player2Only.goals++;
         }
       }
-      // Shots against - check if our players were on ice
+      // Shots against
       else if (shot.teamId === opponentTeamId) {
         if (p1OnIceOurs && p2OnIceOurs) {
           together.shotsAgainst++;
-          gameEventsTogether++;
           if (shot.result === 'goal') together.goalsAgainst++;
         }
       }
-    }
-
-    // Estimate TOI from events when shifts unavailable
-    // Rough estimate: each event with both on ice ≈ 30 seconds of shared ice time
-    if (!hasShifts && gameEventsTogether > 0) {
-      toiTogether += gameEventsTogether * 30;
-      shiftsOverlapping += Math.ceil(gameEventsTogether / 3); // ~3 events per shift overlap
     }
   }
 
@@ -320,12 +321,12 @@ export function calculatePairChemistry(
 /**
  * Build a full chemistry matrix for a roster
  */
-export function buildChemistryMatrix(
+export async function buildChemistryMatrix(
   gamesPlayByPlay: GamePlayByPlay[],
   teamId: number,
   playerIds: number[],
   playerNames: Map<number, string>
-): ChemistryMatrix {
+): Promise<ChemistryMatrix> {
   const matrix = new Map<string, PlayerPairChemistry>();
 
   // Calculate chemistry for each pair
@@ -333,7 +334,7 @@ export function buildChemistryMatrix(
     for (let j = i + 1; j < playerIds.length; j++) {
       const p1 = playerIds[i];
       const p2 = playerIds[j];
-      const chemistry = calculatePairChemistry(gamesPlayByPlay, p1, p2, teamId);
+      const chemistry = await calculatePairChemistry(gamesPlayByPlay, p1, p2, teamId);
 
       // Add player names
       chemistry.player1Name = playerNames.get(chemistry.player1Id);

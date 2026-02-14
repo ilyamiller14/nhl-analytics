@@ -10,7 +10,6 @@
  */
 
 import type { GamePlayByPlay } from './playByPlayService';
-import type { ZoneEntry } from './zoneTracking';
 import type {
   AttackSequence,
   AttackWaypoint,
@@ -28,6 +27,22 @@ import type {
 } from '../types/playStyle';
 import { ZONES, COORDINATES, GOALS } from '../constants/rink';
 import { parseTimeToSeconds, calculateDuration } from '../utils/timeUtils';
+
+// Zone entry type (previously from zoneTracking.ts)
+export type EntryType = 'controlled' | 'dump' | 'pass';
+export interface ZoneEntry {
+  eventId: number;
+  playerId: number;
+  playerName?: string;
+  teamId: number;
+  period: number;
+  timeInPeriod: string;
+  entryType: EntryType;
+  xCoord: number;
+  yCoord: number;
+  success: boolean;
+  shotWithin5Seconds?: boolean;
+}
 
 // ============================================================================
 // CONSTANTS

@@ -8,6 +8,7 @@
  */
 
 import type { ShotEvent, PassEvent } from './playByPlayService';
+import { calculateXG } from './xgModel';
 
 export interface RoyalRoadPass {
   passEventId: number;
@@ -92,7 +93,13 @@ export function detectRoyalRoadPasses(
           const shotAngle = distFromGoalLine > 0
             ? Math.atan(latDist / distFromGoalLine) * (180 / Math.PI)
             : 90;
-          const shotXG = estimateXG(shotDistance, shotAngle);
+          const shotXGResult = calculateXG({
+                    distance: shotDistance,
+                    angle: shotAngle,
+                    shotType: 'wrist',
+                    strength: '5v5',
+                  });
+          const shotXG = shotXGResult.xGoal;
 
           royalRoadPasses.push({
             passEventId: matchingPass.eventId,
@@ -125,15 +132,6 @@ function isSlotShot(xCoord: number, yCoord: number): boolean {
   return xCoord >= 69 && xCoord <= 89 && Math.abs(yCoord) <= 10;
 }
 
-/**
- * Simplified xG estimation for royal road analysis
- */
-function estimateXG(distance: number, angle: number): number {
-  // Simplified logistic regression
-  const logit = 2.5 - 0.08 * distance - 0.015 * angle;
-  const xg = 1 / (1 + Math.exp(-logit));
-  return Math.max(0.01, Math.min(0.95, xg));
-}
 
 /**
  * Calculate royal road pass analytics for a player/team

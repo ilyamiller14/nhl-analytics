@@ -28,8 +28,8 @@ export const NHL_TEAMS = [
   'SEA', 'STL', 'TBL', 'TOR', 'UTA', 'VAN', 'VGK', 'WSH', 'WPG',
 ];
 
-// Cache TTL: 24 hours
-const CACHE_TTL = 24 * 60 * 60 * 1000;
+// Cache TTL: 30 days for completed games (data never changes)
+const CACHE_TTL = 30 * 24 * 60 * 60 * 1000;
 
 // Rate limiting: delay between API calls (ms)
 const API_DELAY = 100;

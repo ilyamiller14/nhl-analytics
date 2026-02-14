@@ -355,27 +355,13 @@ export default function PlayerAnalyticsCard({
             </div>
           )}
 
-          {/* Zone & Rush Stats */}
-          {(analytics.zoneAnalytics || analytics.rushAnalytics) && (
+          {/* Royal Road Stats */}
+          {analytics.royalRoadPasses && analytics.royalRoadPasses.totalRoyalRoadPasses > 0 && (
             <div className="zone-rush-row">
-              {analytics.zoneAnalytics && (
-                <div className="mini-stat-group">
-                  <span className="mini-stat-value">{analytics.zoneAnalytics.controlledEntryRate}%</span>
-                  <span className="mini-stat-label">Controlled Entry</span>
-                </div>
-              )}
-              {analytics.rushAnalytics && analytics.rushAnalytics.totalRushes > 0 && (
-                <div className="mini-stat-group">
-                  <span className="mini-stat-value">{analytics.rushAnalytics.totalRushes}</span>
-                  <span className="mini-stat-label">Rush Attacks</span>
-                </div>
-              )}
-              {analytics.royalRoadPasses && analytics.royalRoadPasses.totalRoyalRoadPasses > 0 && (
-                <div className="mini-stat-group">
-                  <span className="mini-stat-value">{analytics.royalRoadPasses.totalRoyalRoadPasses}</span>
-                  <span className="mini-stat-label">Royal Road</span>
-                </div>
-              )}
+              <div className="mini-stat-group">
+                <span className="mini-stat-value">{analytics.royalRoadPasses.totalRoyalRoadPasses}</span>
+                <span className="mini-stat-label">Royal Road</span>
+              </div>
             </div>
           )}
 

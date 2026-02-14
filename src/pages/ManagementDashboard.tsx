@@ -247,7 +247,7 @@ export default function ManagementDashboard() {
         setLoadingProgress('Computing chemistry metrics...');
 
         // Build chemistry matrix
-        const matrix = buildChemistryMatrix(
+        const matrix = await buildChemistryMatrix(
           pbpWithShifts,
           teamData!.info.teamId,
           playerInfo!.ids,

@@ -22,7 +22,6 @@ import {
   buildSeasonTrend,
 } from '../services/playStyleAnalytics';
 import { fetchGamePlayByPlay, fetchPlayerSeasonGames } from '../services/playByPlayService';
-import { detectZoneEntries } from '../services/zoneTracking';
 import { API_CONFIG } from '../config/api';
 import { getCurrentSeason, formatSeasonString } from '../utils/seasonUtils';
 import type { AttackDNAv2 as AttackDNAv2Type, SeasonTrend, GameMetrics } from '../types/playStyle';
@@ -219,19 +218,12 @@ export default function AttackDNAPage() {
       gamesToUse.map((gameId) => fetchGamePlayByPlay(gameId))
     );
 
-    // Extract zone entries from all games
-    const allZoneEntries = playByPlayData.flatMap((game) =>
-      detectZoneEntries(game.allEvents).filter((entry) =>
-        entry.teamId === data.teamId
-      )
-    );
-
-    // Compute v2 Attack DNA with zone entries
+    // Compute v2 Attack DNA
     const dna = computeAttackDNAv2(
       playByPlayData,
       data.teamId,
       playerId ? parseInt(playerId, 10) : undefined,
-      allZoneEntries
+      []
     );
 
     setAnalytics(dna);

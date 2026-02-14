@@ -8,7 +8,7 @@ import {
   calculateAttackProfile,
 } from '../services/playStyleAnalytics';
 import type { AttackSequence, AttackOrigin, AttackOutcome } from '../types/playStyle';
-import type { ZoneEntry } from '../services/zoneTracking';
+import type { ZoneEntry } from '../services/playStyleAnalytics';
 
 function makeSequence(overrides: Partial<AttackSequence> = {}): AttackSequence {
   return {

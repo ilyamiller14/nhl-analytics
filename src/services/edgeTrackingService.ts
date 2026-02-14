@@ -294,21 +294,18 @@ function transformComparisonResponse(raw: RawComparisonResponse): SkaterComparis
   const distanceDetails = raw.skatingDistanceDetails;
   const zoneDetails = raw.zoneTimeDetails;
 
-  // Estimate percentile based on value vs league avg (simple linear estimation)
-  const estimatePercentile = (value: number, leagueAvg: number): number => {
-    if (!leagueAvg || leagueAvg === 0) return 50;
-    const ratio = value / leagueAvg;
-    // Above average = higher percentile, below = lower
-    return Math.min(99, Math.max(1, Math.round(50 + (ratio - 1) * 100)));
-  };
-
+  // The comparison endpoint does NOT return real percentiles.
+  // Real percentiles are available from the detailed endpoints
+  // (skater-skating-speed-detail, skater-zone-time, skater-skating-distance-detail).
+  // Set percentile to 0 here — consuming code should use detailed endpoint data
+  // from SpeedDataWithLeagueAvg.percentiles, ZoneTimeWithLeagueAvg.percentiles, etc.
   const ozPct = (zoneDetails?.offensiveZonePctg || 0) * 100;
   const ozLeagueAvg = (zoneDetails?.offensiveZoneLeagueAvg || 0.42) * 100;
 
   const createRanking = (value: number, leagueAvg: number) => ({
     value,
-    leaguePercentile: estimatePercentile(value, leagueAvg),
-    positionPercentile: estimatePercentile(value, leagueAvg),
+    leaguePercentile: 0, // Use detailed endpoint for real percentiles
+    positionPercentile: 0,
     leagueAvg,
     positionAvg: leagueAvg,
   });
