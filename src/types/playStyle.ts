@@ -403,23 +403,9 @@ export interface AttackMetrics {
   // Timing metrics
   avgTimeToShot: number;        // Avg seconds from zone entry to shot
 
-  // Entry metrics
-  controlledEntryPct: number;   // % controlled entries (vs dump)
-
   // Outcome metrics
   shootingPct: number;          // Goals / Shots on Goal (standard hockey stat)
   shotEfficiency: number;       // Goals / All Shot Attempts (includes misses/blocks)
-  conversionRate: number;       // Goals / Zone entries
-
-  // Comparison to league
-  vsLeagueAvg: {
-    highDangerShotPct: number;
-    avgShotDistance: number;
-    avgTimeToShot: number;
-    controlledEntryPct: number;
-    shootingPct: number;
-    shotEfficiency: number;
-  };
 }
 
 /**
@@ -433,7 +419,7 @@ export interface AttackProfile {
   // Four axes (all 0-100, centered at 50 = league average)
   dangerZoneFocus: number;      // High-danger shot % (normalized)
   attackSpeed: number;          // Inverted time-to-shot (faster = higher)
-  entryControl: number;         // Controlled entry % (normalized)
+  shootingAccuracy: number;     // Shooting % (normalized)
   shootingDepth: number;        // Inverted shot distance (closer = higher)
 
   // Classification
@@ -456,12 +442,8 @@ export interface GameMetrics {
   highDangerShots: number;
   avgShotDistance: number;
   avgTimeToShot: number;
-  controlledEntries: number;
-  totalEntries: number;
-
   // Derived
   highDangerPct: number;
-  controlledEntryPct: number;
   shootingPct: number;
 }
 
@@ -476,7 +458,6 @@ export interface TrendWindow {
   // Aggregated metrics
   highDangerPct: number;
   avgTimeToShot: number;
-  controlledEntryPct: number;
   avgShotDistance: number;
   shootingPct: number;
 
@@ -552,14 +533,7 @@ export const SHOT_ZONE_COLORS: Record<ShotZone, string> = {
  * League average values for comparison (can be updated with real data)
  */
 export const LEAGUE_AVERAGES_V2 = {
-  highDangerShotPct: 28,       // 28% of shots from high-danger
-  avgShotDistance: 32,         // 32 feet average
-  avgTimeToShot: 7.5,          // 7.5 seconds from entry
-  controlledEntryPct: 52,      // 52% controlled entries
-  shootingPct: 10.5,           // 10.5% shooting percentage (goals/SOG)
-  shotEfficiency: 5.5,         // 5.5% shot efficiency (goals/all attempts)
-
-  // Zone distribution
+  // Zone distribution (used for bar chart reference lines)
   zoneDistribution: {
     'high-slot': 22,
     'low-slot': 18,

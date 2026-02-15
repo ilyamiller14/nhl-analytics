@@ -42,6 +42,12 @@ API_CONFIG.NHL_SEARCH // Search API
 | `/gamecenter/{gameId}/play-by-play` | Full play-by-play for a game |
 | `/shiftcharts?cayenneExp=gameId={id}` | Player shift data (NHL Stats API) |
 
+### Shareable Player Card
+- **Component**: `PlayerAnalyticsCard.tsx` (560px wide, dark gradient design)
+- **Layout**: Hero stats row (G/A/PTS/+/-/GP), two-column body (rates+rolling | visualizations), advanced xG section
+- **Rolling window**: 10-game rolling (PDO, CF%, xG%, P/GP)
+- **Branded**: "DeepDive NHL" footer
+
 ### Season Format
 **ALWAYS use 8-digit format**: `YYYYYYYY` (start year + end year)
 - 2025-26 season: `20252026`
@@ -150,12 +156,17 @@ type ShotZone =
 ```typescript
 interface AttackProfile {
   dangerZoneFocus: number;  // 0-100, 50 = league avg
-  attackSpeed: number;      // Higher = faster attacks
+  attackSpeed: number;      // Higher = faster attacks (capped at 30s max per sequence)
   entryControl: number;     // Higher = more controlled entries
   shootingDepth: number;    // Higher = shoots from closer
   primaryStyle: 'Speed' | 'Cycle' | 'Perimeter' | 'Slot-Focused' | 'Balanced';
 }
 ```
+
+**Key implementation notes:**
+- Zone entries are extracted from built attack sequences (not passed externally)
+- Sequence durations are capped at 30s to filter outlier origin detections
+- `computeAttackDNAv2` auto-extracts zone entries from sequence waypoints when none provided
 
 ### League Averages (for comparison)
 ```typescript
@@ -172,7 +183,7 @@ LEAGUE_AVERAGES_V2 = {
 
 ## Season Trends
 
-Rolling 5-game averages with inflection point detection (>15% change threshold).
+Rolling 10-game averages with inflection point detection (>15% change threshold).
 
 ```typescript
 interface SeasonTrend {

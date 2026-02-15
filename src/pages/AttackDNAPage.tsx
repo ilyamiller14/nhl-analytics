@@ -222,8 +222,7 @@ export default function AttackDNAPage() {
     const dna = computeAttackDNAv2(
       playByPlayData,
       data.teamId,
-      playerId ? parseInt(playerId, 10) : undefined,
-      []
+      playerId ? parseInt(playerId, 10) : undefined
     );
 
     setAnalytics(dna);

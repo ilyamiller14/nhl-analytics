@@ -1204,8 +1204,7 @@ export function computeZoneDistribution(shots: ShotLocation[]): ShotZoneDistribu
  */
 export function calculateAttackMetrics(
   shots: ShotLocation[],
-  sequences: AttackSequence[],
-  zoneEntries: ZoneEntry[]
+  sequences: AttackSequence[]
 ): AttackMetrics {
   const totalShots = shots.length || 1;
   const totalGoals = shots.filter((s) => s.result === 'goal').length;
@@ -1218,43 +1217,25 @@ export function calculateAttackMetrics(
   const highDangerShotPct = (highDangerShots / totalShots) * 100;
   const avgShotDistance = shots.length > 0
     ? shots.reduce((sum, s) => sum + s.distanceFromGoal, 0) / totalShots
-    : 30;
+    : 0;
 
   // Timing metrics (from sequences, capping outliers at 30s)
   const MAX_SEQUENCE_DURATION = 30;
   const validSequences = sequences.filter((s) => s.durationSeconds > 0 && s.durationSeconds <= MAX_SEQUENCE_DURATION);
   const avgTimeToShot = validSequences.length > 0
     ? validSequences.reduce((sum, s) => sum + s.durationSeconds, 0) / validSequences.length
-    : 7.5;
-
-  // Entry metrics
-  const controlledEntries = zoneEntries.filter((e) => e.entryType === 'controlled').length;
-  const totalEntries = zoneEntries.length || 1;
-  const controlledEntryPct = (controlledEntries / totalEntries) * 100;
+    : 0;
 
   // Outcome metrics
-  // shootingPct = Goals / Shots on Goal (standard hockey shooting percentage)
   const shootingPct = (totalGoals / shotsOnGoal) * 100;
-  // shotEfficiency = Goals / All shot attempts (includes misses and blocks)
   const shotEfficiency = (totalGoals / totalShots) * 100;
-  const conversionRate = totalEntries > 0 ? (totalGoals / totalEntries) * 100 : 0;
 
   return {
     highDangerShotPct,
     avgShotDistance,
     avgTimeToShot,
-    controlledEntryPct,
     shootingPct,
     shotEfficiency,
-    conversionRate,
-    vsLeagueAvg: {
-      highDangerShotPct: highDangerShotPct - LEAGUE_AVERAGES_V2.highDangerShotPct,
-      avgShotDistance: avgShotDistance - LEAGUE_AVERAGES_V2.avgShotDistance,
-      avgTimeToShot: avgTimeToShot - LEAGUE_AVERAGES_V2.avgTimeToShot,
-      controlledEntryPct: controlledEntryPct - LEAGUE_AVERAGES_V2.controlledEntryPct,
-      shootingPct: shootingPct - LEAGUE_AVERAGES_V2.shootingPct,
-      shotEfficiency: shotEfficiency - LEAGUE_AVERAGES_V2.shotEfficiency,
-    },
   };
 }
 
@@ -1264,6 +1245,7 @@ export function calculateAttackMetrics(
 
 /**
  * Calculate 4-axis attack profile
+ * All values computed directly from actual data - no assumed league averages
  */
 export function calculateAttackProfile(
   metrics: AttackMetrics,
@@ -1271,31 +1253,25 @@ export function calculateAttackProfile(
   playerId?: number,
   sampleGames: number = 0
 ): AttackProfile {
-  // Normalize each metric to 0-100 scale (50 = league average)
-  // Using min-max normalization with reasonable bounds
+  // Direct 0-100 scaling from actual computed metrics
+  // Each axis uses a physical scale, not comparison to assumed averages
 
-  // Danger zone focus: higher % = higher score
-  // Range: 15-45%, normalized so 28% = 50
-  const dangerZoneFocus = Math.max(0, Math.min(100,
-    50 + (metrics.highDangerShotPct - LEAGUE_AVERAGES_V2.highDangerShotPct) * 2
-  ));
+  // Danger zone focus: high-danger shot % (0-100 naturally)
+  const dangerZoneFocus = Math.max(0, Math.min(100, metrics.highDangerShotPct));
 
-  // Attack speed: lower time = higher score
-  // Range: 4-12s, normalized so 7.5s = 50
+  // Attack speed: inverse of time-to-shot (0s=100, 20s=0)
   const attackSpeed = Math.max(0, Math.min(100,
-    50 - (metrics.avgTimeToShot - LEAGUE_AVERAGES_V2.avgTimeToShot) * 5
+    (1 - metrics.avgTimeToShot / 20) * 100
   ));
 
-  // Entry control: higher % = higher score
-  // Range: 35-70%, normalized so 52% = 50
-  const entryControl = Math.max(0, Math.min(100,
-    50 + (metrics.controlledEntryPct - LEAGUE_AVERAGES_V2.controlledEntryPct) * 1.5
+  // Shooting accuracy: shooting % scaled (0%=0, 25%+=100)
+  const shootingAccuracy = Math.max(0, Math.min(100,
+    (metrics.shootingPct / 25) * 100
   ));
 
-  // Shooting depth: lower distance = higher score
-  // Range: 20-45ft, normalized so 32ft = 50
+  // Shooting depth: inverse of distance (0ft=100, 60ft=0)
   const shootingDepth = Math.max(0, Math.min(100,
-    50 - (metrics.avgShotDistance - LEAGUE_AVERAGES_V2.avgShotDistance) * 2
+    (1 - metrics.avgShotDistance / 60) * 100
   ));
 
   // Classify primary style
@@ -1328,7 +1304,7 @@ export function calculateAttackProfile(
     sampleGames,
     dangerZoneFocus: Math.round(dangerZoneFocus),
     attackSpeed: Math.round(attackSpeed),
-    entryControl: Math.round(entryControl),
+    shootingAccuracy: Math.round(shootingAccuracy),
     shootingDepth: Math.round(shootingDepth),
     primaryStyle,
     styleStrength,
@@ -1351,22 +1327,16 @@ export function calculateGameMetrics(
   const shots = extractShotLocations(playByPlay, teamId);
   const sequences = buildAttackSequences(playByPlay, teamId);
 
-  // Count zone entries from sequences
-  const entriesWithEntry = sequences.filter((s) => s.zoneEntry).length;
-  const controlledEntries = sequences.filter(
-    (s) => s.zoneEntry?.type === 'controlled'
-  ).length;
-
   const totalShots = shots.length || 1;
   const goals = shots.filter((s) => s.result === 'goal').length;
   const highDangerShots = shots.filter((s) => s.isHighDanger).length;
   const avgShotDistance = shots.length > 0
     ? shots.reduce((sum, s) => sum + s.distanceFromGoal, 0) / totalShots
-    : 30;
+    : 0;
   const cappedSequences = sequences.filter((s) => s.durationSeconds > 0 && s.durationSeconds <= 30);
   const avgTimeToShot = cappedSequences.length > 0
     ? cappedSequences.reduce((sum, s) => sum + s.durationSeconds, 0) / cappedSequences.length
-    : 7.5;
+    : 0;
 
   return {
     gameId: playByPlay.gameId,
@@ -1378,10 +1348,7 @@ export function calculateGameMetrics(
     highDangerShots,
     avgShotDistance,
     avgTimeToShot,
-    controlledEntries,
-    totalEntries: entriesWithEntry,
     highDangerPct: (highDangerShots / totalShots) * 100,
-    controlledEntryPct: entriesWithEntry > 0 ? (controlledEntries / entriesWithEntry) * 100 : 50,
     shootingPct: (goals / totalShots) * 100,
   };
 }
@@ -1408,7 +1375,6 @@ export function calculateRollingAverages(
 
     const avgHighDangerPct = windowGames.reduce((sum, g) => sum + g.highDangerPct, 0) / windowSize;
     const avgTimeToShot = windowGames.reduce((sum, g) => sum + g.avgTimeToShot, 0) / windowSize;
-    const avgControlledEntryPct = windowGames.reduce((sum, g) => sum + g.controlledEntryPct, 0) / windowSize;
     const avgShotDistance = windowGames.reduce((sum, g) => sum + g.avgShotDistance, 0) / windowSize;
     const avgShootingPct = windowGames.reduce((sum, g) => sum + g.shootingPct, 0) / windowSize;
 
@@ -1418,7 +1384,6 @@ export function calculateRollingAverages(
       gameCount: windowSize,
       highDangerPct: avgHighDangerPct,
       avgTimeToShot,
-      controlledEntryPct: avgControlledEntryPct,
       avgShotDistance,
       shootingPct: avgShootingPct,
       // Zone distribution would need per-game zone data
@@ -1442,7 +1407,6 @@ export function detectInflectionPoints(
   const metrics: Array<keyof TrendWindow> = [
     'highDangerPct',
     'avgTimeToShot',
-    'controlledEntryPct',
     'avgShotDistance',
     'shootingPct',
   ];
@@ -1508,8 +1472,7 @@ export function buildSeasonTrend(
 export function computeAttackDNAv2(
   playByPlay: GamePlayByPlay | GamePlayByPlay[],
   teamId: number,
-  playerId?: number,
-  zoneEntries: ZoneEntry[] = []
+  playerId?: number
 ): AttackDNAv2 {
   const games = Array.isArray(playByPlay) ? playByPlay : [playByPlay];
 
@@ -1529,23 +1492,8 @@ export function computeAttackDNAv2(
     allSequences = allSequences.concat(gameSequences);
   });
 
-  // Extract zone entries from sequences if none provided externally
-  const effectiveZoneEntries = zoneEntries.length > 0 ? zoneEntries : allSequences
-    .filter((s) => s.zoneEntry)
-    .map((s, idx) => ({
-      eventId: idx,
-      playerId: s.playerId || 0,
-      teamId: s.teamId,
-      period: s.period,
-      timeInPeriod: s.startTime,
-      entryType: s.zoneEntry!.type as EntryType,
-      xCoord: s.zoneEntry!.xCoord,
-      yCoord: s.zoneEntry!.yCoord,
-      success: s.zoneEntry!.success,
-    }));
-
   // Calculate direct metrics
-  const metrics = calculateAttackMetrics(shots, allSequences, effectiveZoneEntries);
+  const metrics = calculateAttackMetrics(shots, allSequences);
 
   // Calculate attack profile
   const profile = calculateAttackProfile(metrics, teamId, playerId, games.length);

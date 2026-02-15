@@ -283,7 +283,6 @@ export default function SeasonTrends({ trend, maxWidth }: SeasonTrendsProps) {
   const metricOptions: Array<{ key: keyof TrendWindow; label: string }> = [
     { key: 'highDangerPct', label: 'High-Danger %' },
     { key: 'avgTimeToShot', label: 'Time to Shot' },
-    { key: 'controlledEntryPct', label: 'Controlled Entry %' },
     { key: 'avgShotDistance', label: 'Shot Distance' },
     { key: 'shootingPct', label: 'Shooting %' },
   ];
@@ -298,7 +297,6 @@ export default function SeasonTrends({ trend, maxWidth }: SeasonTrendsProps) {
     return {
       highDangerPct: last.highDangerPct - first.highDangerPct,
       avgTimeToShot: last.avgTimeToShot - first.avgTimeToShot,
-      controlledEntryPct: last.controlledEntryPct - first.controlledEntryPct,
       avgShotDistance: last.avgShotDistance - first.avgShotDistance,
       shootingPct: last.shootingPct - first.shootingPct,
     };

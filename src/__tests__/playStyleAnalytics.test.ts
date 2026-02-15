@@ -118,11 +118,9 @@ describe('calculateAttackMetrics', () => {
       { x: 80, y: 0, result: 'save' as const, distanceFromGoal: 10, isHighDanger: true },
       { x: 40, y: 0, result: 'miss' as const, distanceFromGoal: 50, isHighDanger: false },
     ];
-    const entries = [makeEntry('controlled'), makeEntry('dump')];
-    const result = calculateAttackMetrics(shots as any, [makeSequence()], entries);
+    const result = calculateAttackMetrics(shots as any, [makeSequence()]);
     expect(result.highDangerShotPct).toBeCloseTo(66.7, 0);
     expect(result.shootingPct).toBe(50); // 1 goal / 2 SOG
-    expect(result.controlledEntryPct).toBe(50);
   });
 });
 
@@ -132,19 +130,16 @@ describe('calculateAttackProfile', () => {
       highDangerShotPct: 30,
       avgShotDistance: 30,
       avgTimeToShot: 6,
-      controlledEntryPct: 55,
       shootingPct: 12,
       shotEfficiency: 6,
-      conversionRate: 5,
-      vsLeagueAvg: { highDangerShotPct: 2, avgShotDistance: -2, avgTimeToShot: -1.5, controlledEntryPct: 3, shootingPct: 1.5, shotEfficiency: 0.5 },
     };
     const profile = calculateAttackProfile(metrics, 10);
     expect(profile.dangerZoneFocus).toBeGreaterThanOrEqual(0);
     expect(profile.dangerZoneFocus).toBeLessThanOrEqual(100);
     expect(profile.attackSpeed).toBeGreaterThanOrEqual(0);
     expect(profile.attackSpeed).toBeLessThanOrEqual(100);
-    expect(profile.entryControl).toBeGreaterThanOrEqual(0);
-    expect(profile.entryControl).toBeLessThanOrEqual(100);
+    expect(profile.shootingAccuracy).toBeGreaterThanOrEqual(0);
+    expect(profile.shootingAccuracy).toBeLessThanOrEqual(100);
     expect(profile.shootingDepth).toBeGreaterThanOrEqual(0);
     expect(profile.shootingDepth).toBeLessThanOrEqual(100);
   });

@@ -176,7 +176,7 @@ export default function AttackDNAv2({
       { key: 'attackSpeed', label: 'Speed', angle: -90 },
       { key: 'dangerZoneFocus', label: 'Danger', angle: 0 },
       { key: 'shootingDepth', label: 'Depth', angle: 90 },
-      { key: 'entryControl', label: 'Entry', angle: 180 },
+      { key: 'shootingAccuracy', label: 'Shooting', angle: 180 },
     ];
 
     // Calculate polygon points
@@ -354,37 +354,26 @@ export default function AttackDNAv2({
       {
         label: 'High-Danger %',
         value: `${metrics.highDangerShotPct.toFixed(1)}%`,
-        deviation: metrics.vsLeagueAvg.highDangerShotPct,
         description: 'Shots from slot/crease',
       },
       {
         label: 'Avg Distance',
         value: `${metrics.avgShotDistance.toFixed(1)} ft`,
-        deviation: -metrics.vsLeagueAvg.avgShotDistance, // Negate so closer is better
         description: 'From goal',
       },
       {
         label: 'Time to Shot',
         value: `${metrics.avgTimeToShot.toFixed(1)}s`,
-        deviation: -metrics.vsLeagueAvg.avgTimeToShot, // Negate so faster is better
-        description: 'From zone entry',
-      },
-      {
-        label: 'Controlled Entry',
-        value: `${metrics.controlledEntryPct.toFixed(1)}%`,
-        deviation: metrics.vsLeagueAvg.controlledEntryPct,
-        description: 'vs dump-ins',
+        description: 'Avg sequence duration',
       },
       {
         label: 'Shooting %',
         value: `${metrics.shootingPct.toFixed(1)}%`,
-        deviation: metrics.vsLeagueAvg.shootingPct,
         description: 'Goals / SOG',
       },
       {
         label: 'Shot Efficiency',
         value: `${metrics.shotEfficiency.toFixed(1)}%`,
-        deviation: metrics.vsLeagueAvg.shotEfficiency,
         description: 'Goals / All attempts',
       },
     ];
@@ -395,10 +384,7 @@ export default function AttackDNAv2({
           <div key={metric.label} className="metric-card">
             <div className="metric-value">{metric.value}</div>
             <div className="metric-label">{metric.label}</div>
-            <div className={`metric-deviation ${metric.deviation > 0 ? 'positive' : metric.deviation < 0 ? 'negative' : ''}`}>
-              {metric.deviation > 0 ? '↑' : metric.deviation < 0 ? '↓' : '–'}
-              {Math.abs(metric.deviation).toFixed(1)} vs avg
-            </div>
+            <div className="metric-description">{metric.description}</div>
           </div>
         ))}
       </div>
