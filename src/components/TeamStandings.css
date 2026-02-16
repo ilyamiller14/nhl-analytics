@@ -191,6 +191,24 @@
   }
 }
 
+@media (max-width: 640px) {
+  .team-col {
+    min-width: 140px;
+  }
+
+  .team-name {
+    max-width: 100px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .team-logo-small {
+    width: 24px;
+    height: 24px;
+  }
+}
+
 /* Team Link */
 .team-link {
   text-decoration: none;

@@ -287,10 +287,10 @@ export async function fetchTeamData(teamAbbrev: string): Promise<TeamData | null
         // Use real shots per game from team summary stats API
         shotsForPerGame: teamSummary?.shotsForPerGame
           ? Math.round(teamSummary.shotsForPerGame * 10) / 10
-          : 31,
+          : 0,
         shotsAgainstPerGame: teamSummary?.shotsAgainstPerGame
           ? Math.round(teamSummary.shotsAgainstPerGame * 10) / 10
-          : 31,
+          : 0,
         // Use real faceoff % from team summary stats API
         faceoffWinPercentage: teamSummary?.faceoffWinPct
           ? teamSummary.faceoffWinPct * 100

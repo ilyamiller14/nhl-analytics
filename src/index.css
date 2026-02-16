@@ -157,7 +157,7 @@ textarea:focus,
 select:focus {
   outline: none;
   border-color: var(--primary-blue);
-  box-shadow: 0 0 0 3px rgba(0, 48, 135, 0.1);
+  box-shadow: 0 0 0 3px rgba(0, 48, 135, 0.3);
 }
 
 /* Tables */
@@ -250,6 +250,39 @@ li {
   outline-offset: 2px;
 }
 
+/* Global Mobile Utilities */
+
+/* Touch scroll momentum for all scrollable containers */
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+/* Text truncation utility */
+.text-truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Touch feedback for interactive elements */
+@media (hover: none) {
+  .nav-link:active,
+  .btn:active,
+  button:active {
+    transform: scale(0.98);
+    opacity: 0.9;
+  }
+}
+
+/* Safe area insets for notched devices */
+@supports (padding: env(safe-area-inset-top)) {
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
 /* Responsive Typography */
 @media (max-width: 768px) {
   html {
@@ -266,5 +299,11 @@ li {
 
   h3 {
     font-size: 1.35rem;
+  }
+}
+
+@media (max-width: 375px) {
+  h1 {
+    font-size: 1.75rem;
   }
 }

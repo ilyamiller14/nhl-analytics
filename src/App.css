@@ -23,8 +23,8 @@
 }
 
 .loading-spinner {
-  width: 50px;
-  height: 50px;
+  width: min(50px, 10vw);
+  height: min(50px, 10vw);
   border: 4px solid #f3f3f3;
   border-top: 4px solid #003087;
   border-radius: 50%;
@@ -71,6 +71,16 @@
   font-size: 4rem;
   margin-bottom: 1rem;
   opacity: 0.5;
+}
+
+@media (max-width: 480px) {
+  .empty-state {
+    padding: 2rem 1rem;
+  }
+
+  .empty-state-icon {
+    font-size: 3rem;
+  }
 }
 
 .empty-state-title {

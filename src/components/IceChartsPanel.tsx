@@ -14,6 +14,7 @@ import ShotQualityHeatMap from './charts/ShotQualityHeatMap';
 import AttackDNA from './charts/AttackDNA';
 import TurnoverMap, { type Turnover } from './charts/TurnoverMap';
 import ZoneHeatMap, { type IceTimeEvent } from './charts/ZoneHeatMap';
+import ConversionZoneChart from './charts/ConversionZoneChart';
 import type { AttackDNAAnalytics, PlayStyleFingerprint } from '../types/playStyle';
 import './IceChartsPanel.css';
 
@@ -44,7 +45,7 @@ export default function IceChartsPanel({
   gamesAnalyzed = 0,
   isLoading = false,
 }: IceChartsPanelProps) {
-  const [activeView, setActiveView] = useState<'shots' | 'heatmap' | 'hits' | 'faceoffs' | 'passes' | 'attack-dna' | 'turnovers' | 'zone-heat'>('shots');
+  const [activeView, setActiveView] = useState<'shots' | 'heatmap' | 'hits' | 'faceoffs' | 'passes' | 'attack-dna' | 'turnovers' | 'zone-heat' | 'conversion'>('shots');
 
   // Generate turnovers from hits if not provided (giveaways near hits, takeaways elsewhere)
   const turnovers: Turnover[] = propTurnovers || hits.map((hit, i) => ({
@@ -119,6 +120,15 @@ export default function IceChartsPanel({
           >
             Shot Quality
             <span className="tab-count">xG</span>
+          </button>
+        )}
+        {hasShots && (
+          <button
+            className={`chart-tab ${activeView === 'conversion' ? 'active' : ''}`}
+            onClick={() => setActiveView('conversion')}
+          >
+            Zone Conversion
+            <span className="tab-count">%</span>
           </button>
         )}
         {hasHits && (
@@ -412,6 +422,15 @@ export default function IceChartsPanel({
                 <p className="insight-label">Shots, hits, faceoffs</p>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeView === 'conversion' && hasShots && (
+          <div className="chart-view">
+            <ConversionZoneChart
+              shots={shots}
+              playerName={playerName}
+            />
           </div>
         )}
       </div>

@@ -529,17 +529,6 @@ export const SHOT_ZONE_COLORS: Record<ShotZone, string> = {
   'behind-net': '#6b7280',     // Gray
 };
 
-/**
- * League average values for comparison (can be updated with real data)
- */
-export const LEAGUE_AVERAGES_V2 = {
-  // Zone distribution (used for bar chart reference lines)
-  zoneDistribution: {
-    'high-slot': 22,
-    'low-slot': 18,
-    'point': 25,
-    'left-boards': 15,
-    'right-boards': 15,
-    'behind-net': 5,
-  } as Record<ShotZone, number>,
-};
+// No hardcoded league averages — all comparisons use computed data from NHL API.
+// Zone distribution league averages are not available from any API endpoint,
+// so zone distribution only shows the player/team's own data without comparison.

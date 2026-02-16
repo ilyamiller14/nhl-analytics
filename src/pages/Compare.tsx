@@ -1,17 +1,39 @@
-import { useComparison } from '../context/ComparisonContext';
+import { useComparison, type ComparisonEntry } from '../context/ComparisonContext';
 import { useComparisonMetrics, DEFAULT_METRICS } from '../hooks/useComparison';
 import PlayerSearch from '../components/PlayerSearch';
 import MetricSelector from '../components/MetricSelector';
 import PlayerComparison from '../components/PlayerComparison';
 import type { PlayerSearchResult } from '../types/player';
 import { usePlayerStats } from '../hooks/usePlayerStats';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import './Compare.css';
 
+function formatSeasonDisplay(season: number): string {
+  const startYear = Math.floor(season / 10000);
+  const endYear = season % 10000;
+  return `${startYear}-${String(endYear).slice(2)}`;
+}
+
+function getAvailableSeasons(entry: ComparisonEntry): number[] {
+  const seasons = entry.player.seasonTotals
+    ?.filter((s) => s.leagueAbbrev === 'NHL' && s.gameTypeId === 2)
+    .map((s) => s.season)
+    .filter((v, i, a) => a.indexOf(v) === i) // deduplicate
+    .sort((a, b) => b - a) || [];
+
+  // Make sure current featured season is included
+  if (entry.player.featuredStats?.season && !seasons.includes(entry.player.featuredStats.season)) {
+    seasons.unshift(entry.player.featuredStats.season);
+  }
+
+  return seasons;
+}
+
 function Compare() {
-  const { players, addPlayer, removePlayer, clearPlayers } = useComparison();
+  const { entries, addPlayer, removeEntry, clearPlayers, updateSeason, getEntryStats } = useComparison();
   const { selectedMetrics, toggleMetric } = useComparisonMetrics();
   const [searchPlayerId, setSearchPlayerId] = useState<number | null>(null);
+  const [maxPlayersMessage, setMaxPlayersMessage] = useState(false);
 
   // Fetch player data when selected from search
   const { data: searchedPlayer } = usePlayerStats(searchPlayerId, searchPlayerId !== null);
@@ -24,19 +46,24 @@ function Compare() {
   }, [searchedPlayer, addPlayer]);
 
   const handlePlayerSelect = (player: PlayerSearchResult) => {
-    // Check if already in comparison
-    if (players.some((p) => p.playerId === player.playerId)) {
-      return;
-    }
-
-    // Check max players
-    if (players.length >= 4) {
-      alert('Maximum 4 players can be compared at once');
+    // Check max entries
+    if (entries.length >= 4) {
+      setMaxPlayersMessage(true);
+      setTimeout(() => setMaxPlayersMessage(false), 3000);
       return;
     }
 
     setSearchPlayerId(player.playerId);
   };
+
+  // Build comparison data: entries with their resolved season stats
+  const comparisonEntries = useMemo(() => {
+    return entries.map((entry) => ({
+      player: entry.player,
+      season: entry.season,
+      stats: getEntryStats(entry),
+    }));
+  }, [entries, getEntryStats]);
 
   return (
     <div className="compare-page">
@@ -44,7 +71,7 @@ function Compare() {
         <div className="compare-header">
           <h1 className="compare-title">Player Comparison</h1>
           <p className="compare-subtitle">
-            Compare up to 4 players side-by-side with customizable metrics
+            Compare up to 4 players side-by-side. You can compare the same player across different seasons.
           </p>
         </div>
 
@@ -55,14 +82,19 @@ function Compare() {
               onPlayerSelect={handlePlayerSelect}
               placeholder="Search and add players to compare..."
             />
+            {maxPlayersMessage && (
+              <div role="status" aria-live="polite" style={{ color: '#b45309', marginTop: '0.5rem', fontSize: '0.875rem' }}>
+                Maximum 4 players can be compared at once. Remove a player to add another.
+              </div>
+            )}
           </div>
 
           {/* Selected Players */}
-          {players.length > 0 && (
+          {entries.length > 0 && (
             <div className="selected-players">
               <div className="selected-players-header">
-                <h3>Selected Players ({players.length}/4)</h3>
-                {players.length > 0 && (
+                <h3>Selected Players ({entries.length}/4)</h3>
+                {entries.length > 0 && (
                   <button onClick={clearPlayers} className="btn-clear">
                     Clear All
                   </button>
@@ -70,58 +102,89 @@ function Compare() {
               </div>
 
               <div className="selected-players-grid">
-                {players.map((player) => (
-                  <div key={player.playerId} className="selected-player-card">
-                    <button
-                      onClick={() => removePlayer(player.playerId)}
-                      className="remove-player-btn"
-                      title="Remove player"
-                    >
-                      ×
-                    </button>
-                    {player.headshot && (
-                      <img
-                        src={player.headshot}
-                        alt={player.firstName.default}
-                        className="selected-player-headshot"
-                      />
-                    )}
-                    <div className="selected-player-info">
-                      <div className="selected-player-name">
-                        {player.firstName.default} {player.lastName.default}
-                      </div>
-                      <div className="selected-player-meta">
-                        {player.position} • {player.currentTeamAbbrev || 'Free Agent'}
+                {entries.map((entry) => {
+                  const availableSeasons = getAvailableSeasons(entry);
+                  return (
+                    <div key={entry.key} className="selected-player-card">
+                      <button
+                        onClick={() => removeEntry(entry.key)}
+                        className="remove-player-btn"
+                        title="Remove player"
+                      >
+                        ×
+                      </button>
+                      {entry.player.headshot && (
+                        <img
+                          src={entry.player.headshot}
+                          alt={`${entry.player.firstName.default} ${entry.player.lastName.default}`}
+                          className="selected-player-headshot"
+                        />
+                      )}
+                      <div className="selected-player-info">
+                        <div className="selected-player-name">
+                          {entry.player.firstName.default} {entry.player.lastName.default}
+                        </div>
+                        <div className="selected-player-meta">
+                          {entry.player.position} • {entry.player.currentTeamAbbrev || 'Free Agent'}
+                        </div>
+                        {/* Season Selector */}
+                        {availableSeasons.length > 1 ? (
+                          <select
+                            value={entry.season}
+                            onChange={(e) => updateSeason(entry.key, Number(e.target.value))}
+                            style={{
+                              marginTop: '0.375rem',
+                              padding: '0.25rem 0.5rem',
+                              fontSize: '0.75rem',
+                              borderRadius: '4px',
+                              border: '1px solid #d1d5db',
+                              background: '#f9fafb',
+                              color: '#374151',
+                              cursor: 'pointer',
+                              width: '100%',
+                            }}
+                          >
+                            {availableSeasons.map((s) => (
+                              <option key={s} value={s}>
+                                {formatSeasonDisplay(s)}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div style={{ marginTop: '0.25rem', fontSize: '0.7rem', color: '#9ca3af' }}>
+                            {formatSeasonDisplay(entry.season)}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
         </div>
 
         {/* Instructions when no players */}
-        {players.length === 0 && (
+        {entries.length === 0 && (
           <div className="empty-state">
             <div className="empty-state-icon">⚖️</div>
             <h2 className="empty-state-title">Start Comparing Players</h2>
             <p className="empty-state-message">
               Search for players above and add them to start comparing their stats. You can compare
-              up to 4 players at once.
+              up to 4 players at once, including the same player across different seasons.
             </p>
           </div>
         )}
 
         {/* Goalie vs Skater Warning */}
-        {players.length >= 2 && players.some(p => p.position === 'G') && players.some(p => p.position !== 'G') && (
+        {entries.length >= 2 && entries.some(e => e.player.position === 'G') && entries.some(e => e.player.position !== 'G') && (
           <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: '8px', padding: '1rem', marginBottom: '1rem' }}>
             <strong>⚠️ Mixed position comparison:</strong> You are comparing goalies and skaters. Some metrics may not be directly comparable between positions.
           </div>
         )}
 
         {/* Comparison Interface */}
-        {players.length >= 2 && (
+        {entries.length >= 2 && (
           <>
             {/* Metric Selector */}
             <div className="compare-metrics-section">
@@ -136,14 +199,17 @@ function Compare() {
             {/* Comparison Charts */}
             {selectedMetrics.length > 0 && (
               <div className="compare-charts-section">
-                <PlayerComparison players={players} selectedMetrics={selectedMetrics} />
+                <PlayerComparison
+                  entries={comparisonEntries}
+                  selectedMetrics={selectedMetrics}
+                />
               </div>
             )}
           </>
         )}
 
         {/* Prompt to add more players */}
-        {players.length === 1 && (
+        {entries.length === 1 && (
           <div className="comparison-prompt">
             <p>Add at least one more player to start comparing</p>
           </div>

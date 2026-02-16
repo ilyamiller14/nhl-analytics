@@ -20,13 +20,10 @@ import {
 } from '../utils/indexedDBCache';
 import { getCurrentSeason } from '../utils/seasonUtils';
 
-// All NHL team abbreviations (UTA = Utah Hockey Club, formerly ARI)
-export const NHL_TEAMS = [
-  'ANA', 'BOS', 'BUF', 'CGY', 'CAR', 'CHI', 'COL',
-  'CBJ', 'DAL', 'DET', 'EDM', 'FLA', 'LAK', 'MIN', 'MTL',
-  'NSH', 'NJD', 'NYI', 'NYR', 'OTT', 'PHI', 'PIT', 'SJS',
-  'SEA', 'STL', 'TBL', 'TOR', 'UTA', 'VAN', 'VGK', 'WSH', 'WPG',
-];
+import { NHL_TEAM_ABBREVS } from '../constants/teams';
+
+// Re-export for backward compatibility
+export const NHL_TEAMS = NHL_TEAM_ABBREVS;
 
 // Cache TTL: 30 days for completed games (data never changes)
 const CACHE_TTL = 30 * 24 * 60 * 60 * 1000;

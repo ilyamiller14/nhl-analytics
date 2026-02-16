@@ -104,7 +104,7 @@ function PlayerSearch({ onPlayerSelect, placeholder, autoFocus }: PlayerSearchPr
 
   return (
     <div className="player-search">
-      <div className="search-input-container">
+      <div className="search-input-container" role="combobox" aria-expanded={showResults} aria-haspopup="listbox">
         <input
           ref={inputRef}
           type="text"
@@ -117,17 +117,24 @@ function PlayerSearch({ onPlayerSelect, placeholder, autoFocus }: PlayerSearchPr
           placeholder={placeholder || 'Search players...'}
           className="search-input"
           autoFocus={autoFocus}
+          aria-label="Search NHL players"
+          aria-autocomplete="list"
+          aria-controls="player-search-results"
+          aria-activedescendant={selectedIndex >= 0 ? `player-option-${results[selectedIndex]?.playerId}` : undefined}
         />
-        {isLoading && <div className="search-spinner"></div>}
+        {isLoading && <div className="search-spinner" role="status" aria-label="Searching"></div>}
       </div>
 
       {showResults && (
         <div ref={resultsRef} className="search-results">
           {results.length > 0 ? (
-            <ul className="results-list">
+            <ul className="results-list" id="player-search-results" role="listbox" aria-label="Player search results">
               {results.map((player, index) => (
                 <li
                   key={player.playerId}
+                  id={`player-option-${player.playerId}`}
+                  role="option"
+                  aria-selected={index === selectedIndex}
                   className={`result-item ${index === selectedIndex ? 'selected' : ''}`}
                   onClick={() => handlePlayerClick(player)}
                   onMouseEnter={() => setSelectedIndex(index)}
@@ -173,7 +180,7 @@ function PlayerSearch({ onPlayerSelect, placeholder, autoFocus }: PlayerSearchPr
         </div>
       )}
 
-      {error && <div className="search-error">Error searching players: {error.message}</div>}
+      {error && <div className="search-error" role="alert">Error searching players: {error.message}</div>}
     </div>
   );
 }

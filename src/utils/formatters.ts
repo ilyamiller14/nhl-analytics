@@ -178,6 +178,21 @@ export function formatPlusMinus(value: number | undefined): string {
 }
 
 /**
+ * Format save percentage for goalies
+ * NHL API may return savePctg as a decimal (e.g., 0.915) or as a value >= 1 (e.g., 91.5)
+ * Displays as ".915" format (standard goalie SV% display)
+ */
+export function formatSavePct(value: number | null | undefined): string {
+  if (value == null || isNaN(value)) {
+    return '-';
+  }
+
+  // If value >= 1, it's already in percentage form (e.g., 91.5) — convert to decimal
+  const decimal = value >= 1 ? value / 100 : value;
+  return decimal.toFixed(3);
+}
+
+/**
  * Format shooting percentage
  * NHL API returns shootingPctg as a decimal (e.g., 0.0945 for 9.45%)
  */
@@ -187,8 +202,8 @@ export function formatShootingPct(value: number | undefined): string {
   }
 
   // NHL API returns as decimal (0.0945), convert to percentage display
-  // If value is already > 1, it's already a percentage
-  const pct = value > 1 ? value : value * 100;
+  // If value is already >= 1, it's already a percentage
+  const pct = value >= 1 ? value : value * 100;
   return `${pct.toFixed(1)}%`;
 }
 

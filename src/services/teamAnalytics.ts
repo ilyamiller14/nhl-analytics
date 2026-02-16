@@ -5,6 +5,7 @@
  */
 
 import type { TeamStats } from './teamStatsService';
+import type { LeagueAverages } from './leagueAveragesService';
 
 export interface TeamAdvancedAnalytics {
   // Scoring Efficiency
@@ -50,7 +51,7 @@ export interface TeamAdvancedAnalytics {
  * using league averages and goal-based proxies. These should be considered
  * approximations rather than precise values.
  */
-export function calculateTeamAnalytics(stats: TeamStats): TeamAdvancedAnalytics {
+export function calculateTeamAnalytics(stats: TeamStats, leagueAvg?: LeagueAverages | null): TeamAdvancedAnalytics {
   const gp = stats.gamesPlayed || 1;
 
   // Basic per-game stats
@@ -58,29 +59,30 @@ export function calculateTeamAnalytics(stats: TeamStats): TeamAdvancedAnalytics 
   const gaPerGame = stats.goalsAgainst / gp;
   const gdPerGame = gfPerGame - gaPerGame;
 
-  // League averages for reference (2024-25 season)
-  const LEAGUE_AVG_SHOTS_PER_GAME = 31.0;
-  const LEAGUE_AVG_GOALS_PER_GAME = 3.10;
-  const LEAGUE_AVG_SHOOTING_PCT = 10.2; // ~10.2%
-  const LEAGUE_AVG_SAVE_PCT = 89.8; // ~89.8%
+  // Use real league averages from API (computed by leagueAveragesService)
+  // If unavailable, use the team's own stats (no comparison possible, but no fake data)
+  const leagueShotsPerGame = leagueAvg?.shotsPerGame || stats.shotsForPerGame || 0;
+  const leagueGoalsPerGame = leagueAvg?.goalsPerGame || gfPerGame;
+  const leagueShootingPct = leagueAvg?.shootingPct || 0;
+  const leagueSavePct = leagueAvg?.savePct || 0;
 
-  // Calculate shooting and save percentages
-  // Since NHL standings API doesn't provide shot data, we estimate based on goals
-  // Estimate shots based on team's offensive/defensive performance relative to league average
-  // Teams that score more tend to generate more shots, but not perfectly correlated
-  const estimatedShotsFor = LEAGUE_AVG_SHOTS_PER_GAME * (0.7 + 0.3 * (gfPerGame / LEAGUE_AVG_GOALS_PER_GAME));
-  const estimatedShotsAgainst = LEAGUE_AVG_SHOTS_PER_GAME * (0.7 + 0.3 * (gaPerGame / LEAGUE_AVG_GOALS_PER_GAME));
+  // Use real shots data if available from team stats, otherwise estimate from league averages
+  const estimatedShotsFor = stats.shotsForPerGame > 0
+    ? stats.shotsForPerGame
+    : leagueShotsPerGame * (0.7 + 0.3 * (gfPerGame / Math.max(leagueGoalsPerGame, 0.1)));
+  const estimatedShotsAgainst = stats.shotsAgainstPerGame > 0
+    ? stats.shotsAgainstPerGame
+    : leagueShotsPerGame * (0.7 + 0.3 * (gaPerGame / Math.max(leagueGoalsPerGame, 0.1)));
 
   // Calculate shooting% and save% from estimated shots
   // Shooting% = Goals / Shots (typical range: 7-13%)
   const shootingPct = gfPerGame > 0 && estimatedShotsFor > 0
-    ? Math.min(14, Math.max(6, (gfPerGame / estimatedShotsFor) * 100))
-    : LEAGUE_AVG_SHOOTING_PCT;
+    ? (gfPerGame / estimatedShotsFor) * 100
+    : leagueShootingPct;
 
-  // Save% = (Shots Against - Goals Against) / Shots Against (typical range: 88-93%)
   const savePct = estimatedShotsAgainst > 0
-    ? Math.min(94, Math.max(86, ((estimatedShotsAgainst - gaPerGame) / estimatedShotsAgainst) * 100))
-    : LEAGUE_AVG_SAVE_PCT;
+    ? ((estimatedShotsAgainst - gaPerGame) / estimatedShotsAgainst) * 100
+    : leagueSavePct;
 
   // PDO (shooting% + save%) - league average is exactly 100
   // Range typically 97-103, with extremes indicating luck/unsustainability
@@ -122,27 +124,26 @@ export function calculateTeamAnalytics(stats: TeamStats): TeamAdvancedAnalytics 
   const pkPct = stats.penaltyKillPercentage || 0;
   const specialTeamsIndex = ppPct + pkPct;
 
-  // Ratings (0-100 scale)
-  // Calibrated for modern NHL (2024-25 season):
-  // - League average: ~3.1-3.2 GF/game
-  // - Elite offense (Colorado, Florida): 3.8-4.2+ GF/game
-  // - Poor offense: ~2.5-2.7 GF/game
-  //
-  // Scale: 3.2 GF/game = 55 (average), 4.0 = 87 (elite), 2.5 = 27 (poor)
+  // Ratings (0-100 scale) - centered on computed league average
+  const leagueGFPG = leagueAvg?.goalsPerGame || gfPerGame;
+  const leagueGAPG = leagueAvg?.goalsAgainstPerGame || gaPerGame;
+  const leaguePPAvg = leagueAvg?.powerPlayPct || ppPct;
+  const leaguePKAvg = leagueAvg?.penaltyKillPct || pkPct;
+  const leagueSTIndex = leaguePPAvg + leaguePKAvg;
+
+  // Offense: team GF/game vs league average, scaled so avg=55, ±0.5 G/GP = ±20pts
   const offenseRating = Math.min(100, Math.max(0,
-    ((gfPerGame - 3.2) / 0.5) * 20 + 55
+    ((gfPerGame - leagueGFPG) / 0.5) * 20 + 55
   ));
 
-  // Defense rating: lower GA = higher rating
-  // Scale: 3.0 GA/game = 55 (average), 2.4 = 79 (elite), 3.6 = 31 (poor)
+  // Defense: league GA/game vs team GA/game (lower = better)
   const defenseRating = Math.min(100, Math.max(0,
-    ((3.0 - gaPerGame) / 0.5) * 20 + 55
+    ((leagueGAPG - gaPerGame) / 0.5) * 20 + 55
   ));
 
-  // Special teams: PP% + PK% (league avg ~20% + ~80% = 100%)
-  // Scale: Index of 100 = 55 (average), 112 = 79 (elite), 88 = 31 (poor)
+  // Special teams: PP% + PK% vs league average index
   const specialTeamsRating = Math.min(100, Math.max(0,
-    ((specialTeamsIndex - 100) / 10) * 20 + 55
+    ((specialTeamsIndex - leagueSTIndex) / 10) * 20 + 55
   ));
 
   // Overall rating weighted by importance (5v5 performance matters most)

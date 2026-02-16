@@ -1,436 +1,162 @@
-# NHL Analytics - Project Instructions
+# NHL Analytics
 
-## Project Overview
-
-NHL Analytics dashboard providing advanced hockey statistics, visualizations, and play style analysis. The app fetches data from NHL's public APIs and computes advanced metrics like xG (expected goals), Corsi, and Attack DNA profiles.
+NHL analytics dashboard with advanced stats, EDGE tracking, and Attack DNA profiles. React 19 + TypeScript + Vite, hosted on Cloudflare Pages.
 
 **Live URL**: https://nhl-analytics.pages.dev
-**Domain**: deepdivenhl.com (via Cloudflare)
 
 ---
 
-## Tech Stack
+## Hard Rules
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | React 19 + TypeScript + Vite |
-| State | React Query (@tanstack/react-query) |
-| Charts | Recharts + Custom SVG (NHLRink) |
-| Styling | CSS (no framework) |
-| Hosting | Cloudflare Pages |
-| API Proxy | Cloudflare Workers (`workers/`) |
+1. **NO MOCK DATA.** Every value displayed must come from a real API response or be computed from real data. No `Math.random()`, no synthetic events, no fabricated stats. If data isn't available, show an empty state.
+
+2. **NO HARDCODED LEAGUE AVERAGES.** All league comparisons use computed values from `leagueAveragesService.ts`, which fetches real team/skater data from the NHL Stats API. If an API doesn't provide a benchmark, don't show a comparison — never guess.
+
+3. **NO ASSUMED PERCENTILES.** Percentiles are computed from real skater distributions (mean + stdDev from all qualified skaters). If distribution data isn't available, hide the percentile display.
+
+4. **SEASON FORMAT**: Always 8-digit: `20252026` (not `2025-26`). Current season as of Feb 2026 is `20252026`.
+
+---
+
+## Architecture
+
+```
+src/
+  config/api.ts           # API URL config (Web, Stats, Search, EDGE)
+  services/
+    leagueAveragesService.ts  # Computed league averages from NHL Stats API (12hr cache)
+    playByPlayService.ts      # Fetches + parses play-by-play data
+    playStyleAnalytics.ts     # Attack DNA v2 engine (shots, zones, profiles)
+    edgeTrackingService.ts    # NHL EDGE tracking data
+    penaltyAnalytics.ts       # Special teams analysis
+    teamAnalytics.ts          # Team-level analytics (uses computed league avg)
+    rollingAnalytics.ts       # 10-game rolling metrics
+    xgModel.ts                # Expected Goals model
+  types/
+    edge.ts                   # EDGE tracking types
+    playStyle.ts              # Attack DNA types
+  pages/
+    PlayerProfile.tsx         # Player stats, charts, EDGE, share card
+    TeamProfile.tsx           # Team stats + analytics
+    AttackDNAPage.tsx         # Attack DNA visualization
+  components/
+    charts/AttackDNAv2.tsx    # 4-axis radar + shot scatter + zone bars
+    charts/SpeedProfileChart.tsx
+    charts/TrackingRadarChart.tsx
+    charts/ShotVelocityChart.tsx
+    charts/DistanceFatigueChart.tsx
+    charts/ZoneTimeChart.tsx
+    PlayerAnalyticsCard.tsx   # Shareable 560px card (uses real skater distributions)
+```
 
 ---
 
 ## NHL API Endpoints
 
-All requests go through our Cloudflare Worker proxy in production.
+All requests proxy through Cloudflare Worker in production (`src/config/api.ts`).
 
-### API Configuration (`src/config/api.ts`)
-```typescript
-API_CONFIG.NHL_WEB   // Main NHL Web API
-API_CONFIG.NHL_STATS // NHL Stats API (shift data)
-API_CONFIG.NHL_SEARCH // Search API
-```
-
-### Common Endpoints
-| Endpoint | Purpose |
-|----------|---------|
-| `/player/{id}/landing` | Player info, current team, position |
-| `/player/{id}/game-log/{season}/2` | Player's games in a season (2 = regular season) |
-| `/club-schedule-season/{abbrev}/{season}` | Team's full season schedule |
-| `/gamecenter/{gameId}/play-by-play` | Full play-by-play for a game |
-| `/shiftcharts?cayenneExp=gameId={id}` | Player shift data (NHL Stats API) |
-
-### Shareable Player Card
-- **Component**: `PlayerAnalyticsCard.tsx` (560px wide, dark gradient design)
-- **Layout**: Hero stats row (G/A/PTS/+/-/GP), two-column body (rates+rolling | visualizations), advanced xG section
-- **Rolling window**: 10-game rolling (PDO, CF%, xG%, P/GP)
-- **Branded**: "DeepDive NHL" footer
-
-### Season Format
-**ALWAYS use 8-digit format**: `YYYYYYYY` (start year + end year)
-- 2025-26 season: `20252026`
-- 2024-25 season: `20242025`
-
-**CRITICAL**: Default season in code should be current season (`20252026` as of Feb 2026)
+| API | Endpoint | Purpose |
+|-----|----------|---------|
+| Web | `/player/{id}/landing` | Player info + current stats |
+| Web | `/player/{id}/game-log/{season}/2` | Game log (2 = regular season) |
+| Web | `/gamecenter/{gameId}/play-by-play` | Full play-by-play |
+| Web | `/club-schedule-season/{abbrev}/{season}` | Team schedule |
+| Stats | `/team/summary?cayenneExp=seasonId={season}` | All 32 teams (for league averages) |
+| Stats | `/skater/summary?limit=-1&cayenneExp=seasonId={season} and gameTypeId=2` | All skaters (for distributions) |
+| Stats | `/shiftcharts?cayenneExp=gameId={id}` | Player shift data |
+| EDGE | `/web/edge/skater-skating-speed-detail/{id}/{season}/2` | Speed + bursts |
+| EDGE | `/web/edge/skater-skating-distance-detail/{id}/{season}/2` | Distance traveled |
+| EDGE | `/web/edge/skater-zone-time/{id}/{season}/2` | Zone time breakdown |
+| EDGE | `/web/edge/skater-shot-speed-detail/{id}/{season}/2` | Shot velocities |
+| EDGE | `/web/edge/skater-comparison/{id}/{season}/2` | League percentile comparisons |
 
 ---
 
-## Key Services
+## League Averages System
 
-### `playByPlayService.ts`
-Fetches and parses NHL play-by-play data.
+`leagueAveragesService.ts` is the single source of truth for all league benchmarks:
 
-**Key Types:**
-```typescript
-interface GamePlayByPlay {
-  gameId: number;
-  gameDate?: string;
-  homeTeamId: number;
-  awayTeamId: number;
-  shots: ShotEvent[];
-  passes: PassEvent[];
-  allEvents: any[];
-  shifts: PlayerShift[];
-}
+- **`getLeagueAverages()`** — Fetches team summary for all 32 teams, computes: goals/game, shots/game, shooting%, save%, PP%, PK%, faceoff%
+- **`getSkaterAverages()`** — Fetches all qualified skaters (10+ GP), computes mean + stdDev for: P/GP, G/GP, A/GP, SH%
+- **`computePercentile(value, mean, stdDev)`** — Real percentile from actual distributions
 
-interface ShotEvent {
-  xCoord: number;  // NHL coords: -100 to 100
-  yCoord: number;  // NHL coords: -42.5 to 42.5
-  result: 'goal' | 'shot-on-goal' | 'missed-shot' | 'blocked-shot';
-  shootingPlayerId: number;
-  teamId: number;
-  period: number;
-  timeInPeriod: string;
-}
-```
-
-### `playStyleAnalytics.ts`
-Attack DNA v2 analytics engine. Computes shot patterns, zone distribution, and attack profiles.
-
-**Key Functions:**
-```typescript
-// Main entry point - computes complete Attack DNA v2
-computeAttackDNAv2(playByPlay, teamId, playerId?, zoneEntries?)
-
-// Individual components
-extractShotLocations(playByPlay, teamId, playerId?)
-computeShotDensityMap(shots)
-computeZoneDistribution(shots)
-calculateAttackMetrics(shots, sequences, zoneEntries)
-calculateAttackProfile(metrics, teamId, playerId?, sampleGames?)
-
-// Trend analysis
-calculateGameMetrics(playByPlay, teamId, opponent, isHome)
-buildSeasonTrend(gameMetrics, teamId, season, windowSize?)
-```
-
-### `xgModel.ts`
-Expected Goals (xG) model based on shot distance, angle, type, and situation.
+Cached 12 hours via `CacheManager`. Used by: `TeamProfile`, `PlayerAnalyticsCard`, `penaltyAnalytics`, `teamAnalytics`.
 
 ---
 
-## Attack DNA v2 System
+## Attack DNA v2
 
-### Philosophy
-Shows **actual data, not averaged phantoms**. Every dot is a real shot, every metric is directly measured.
+4-axis radar profile computed from real play-by-play shot data:
 
-### Data Structures (`src/types/playStyle.ts`)
+| Axis | Metric | Scale |
+|------|--------|-------|
+| Speed | Inverted time-to-shot | 0s=100, 20s=0 |
+| Danger | High-danger shot % | Direct 0-100 |
+| Depth | Inverted shot distance | 0ft=100, 60ft=0 |
+| Shooting | Shooting % | 0%=0, 25%=100 |
 
-```typescript
-interface ShotLocation {
-  x: number;              // NHL coordinate (-100 to 100)
-  y: number;              // NHL coordinate (-42.5 to 42.5)
-  result: 'goal' | 'save' | 'miss' | 'block';
-  distanceFromGoal: number;
-  isHighDanger: boolean;  // <25ft from net AND in slot
-  gameId: number;
-  gameDate: string;
-}
+All axes use **direct physical scaling** — no normalization against assumed averages.
 
-interface AttackDNAv2 {
-  shots: ShotLocation[];
-  densityMap: ShotDensityMap;
-  zoneDistribution: ShotZoneDistribution[];
-  metrics: AttackMetrics;
-  profile: AttackProfile;
-  totalShots: number;
-  totalGoals: number;
-  gamesAnalyzed: number;
-}
-```
-
-### Shot Zones
-```typescript
-type ShotZone =
-  | 'high-slot'     // Near net, center - RED (highest danger)
-  | 'low-slot'      // Slightly back, center - ORANGE
-  | 'point'         // Blue line area - PURPLE
-  | 'left-boards'   // Left wing boards - BLUE
-  | 'right-boards'  // Right wing boards - LIGHT BLUE
-  | 'behind-net'    // Behind the goal - GRAY
-```
-
-### 4-Axis Attack Profile
-```typescript
-interface AttackProfile {
-  dangerZoneFocus: number;  // 0-100, 50 = league avg
-  attackSpeed: number;      // Higher = faster attacks (capped at 30s max per sequence)
-  entryControl: number;     // Higher = more controlled entries
-  shootingDepth: number;    // Higher = shoots from closer
-  primaryStyle: 'Speed' | 'Cycle' | 'Perimeter' | 'Slot-Focused' | 'Balanced';
-}
-```
-
-**Key implementation notes:**
-- Zone entries are extracted from built attack sequences (not passed externally)
-- Sequence durations are capped at 30s to filter outlier origin detections
-- `computeAttackDNAv2` auto-extracts zone entries from sequence waypoints when none provided
-
-### League Averages (for comparison)
-```typescript
-LEAGUE_AVERAGES_V2 = {
-  highDangerShotPct: 28,    // 28% of shots from high-danger
-  avgShotDistance: 32,       // 32 feet
-  avgTimeToShot: 7.5,        // 7.5 seconds from zone entry
-  controlledEntryPct: 52,    // 52% controlled entries
-  shootingPct: 10.5,         // 10.5% shooting percentage
-}
-```
+Key details:
+- Sequence durations capped at 30s to filter outliers
+- High-danger = <25ft from net AND in the slot (|Y| < 20)
+- Half-rink normalization: negative X shots get Y flipped when mirroring to offensive zone
 
 ---
 
-## Season Trends
+## EDGE Tracking
 
-Rolling 10-game averages with inflection point detection (>15% change threshold).
+NHL EDGE provides real-time optical tracking (2023-24 season onward, skaters only).
 
-```typescript
-interface SeasonTrend {
-  teamId: number;
-  season: string;
-  gameMetrics: GameMetrics[];
-  windows: TrendWindow[];      // Rolling averages
-  inflectionPoints: InflectionPoint[];
-}
-
-interface TrendWindow {
-  startDate: string;
-  endDate: string;
-  highDangerPct: number;
-  avgTimeToShot: number;
-  controlledEntryPct: number;
-  avgShotDistance: number;
-  shootingPct: number;
-}
-```
-
----
-
-## NHL Coordinate System
-
-```
-     Y
-     ^
-     |
--42.5|←────────────────────────────────→ +42.5
-     |           (center ice)
-     |
-   -100 ←──────── X ──────────→ +100
-
-Net at X = ±89, Y = 0
-```
-
-**Half-Rink Normalization**: For visualization, all shots are mirrored to positive X (offensive zone).
-
----
-
-## Key Components
-
-### `AttackDNAv2.tsx`
-Main Attack DNA visualization component.
-- Shot scatter plot with density heat map
-- Zone distribution bar chart
-- 4-axis radar profile
-- Direct metrics display
-
-### `SeasonTrends.tsx`
-Trend analysis visualization.
-- Line charts with rolling averages
-- Sparklines for each metric
-- Inflection point markers
-
-### `NHLRink.tsx`
-SVG ice rink component with coordinate conversion helpers.
-```typescript
-convertToSVGCoords(x, y)        // Full rink
-convertToHalfRinkSVGCoords(x, y) // Half rink (offensive zone only)
-```
-
----
-
-## Routes
-
-| Route | Component | Purpose |
-|-------|-----------|---------|
-| `/` | Home | Dashboard with standings, leaders |
-| `/player/:id` | PlayerProfile | Individual player stats |
-| `/team/:abbrev` | TeamProfile | Team stats and roster |
-| `/compare` | Compare | Player comparison tool |
-| `/attack-dna/player/:playerId` | AttackDNAPage | Player attack analysis |
-| `/attack-dna/team/:teamAbbrev` | AttackDNAPage | Team attack analysis |
-| `/trends` | Trends | League-wide trends |
+- EDGE API returns `leagueAvg` and `percentile` fields — use those directly
+- All fallback values are 0 (not assumed league averages)
+- Charts show empty state when data unavailable
+- All speeds in mph, distances in miles
 
 ---
 
 ## Deployment
 
-### Build
 ```bash
-npm run build  # Creates dist/
+# Build + deploy
+npm run build && npx wrangler pages deploy dist --project-name=nhl-analytics --branch=production
 ```
 
-### Deploy to Cloudflare Pages
-```bash
-wrangler pages deploy dist --project-name=nhl-analytics --branch=production
-```
-**IMPORTANT**: Must use `--branch=production` to deploy to the production environment. Without it, deploys go to Preview and the live site won't update.
+**MUST use `--branch=production`** or it deploys to preview only.
 
-### Cloudflare Worker (API Proxy)
-Located in `workers/`. Handles CORS and routes to NHL APIs.
-```bash
-cd workers && wrangler deploy
-```
+Worker (API proxy): `cd workers && wrangler deploy`
 
 ---
 
-## Common Gotchas
+## Routes
 
-1. **Season format**: Use `20252026`, not `2025-26` or `2025`
-2. **Coordinate mirroring**: Shots from negative X need Y flipped when normalizing to half-rink
-3. **High-danger definition**: <25ft from net AND |Y| < 20 (in the slot, not wide angle)
-4. **Game states**: Use `g.gameState === 'OFF' || g.gameState === 'FINAL'` for completed games
-5. **Player game log**: Endpoint uses `/2` suffix for regular season games
-
----
-
-## File Naming Conventions
-
-- Pages: `src/pages/{Name}.tsx` + `{Name}.css`
-- Components: `src/components/{Name}.tsx` or `src/components/charts/{Name}.tsx`
-- Services: `src/services/{name}Service.ts` or `src/services/{name}Analytics.ts`
-- Types: `src/types/{domain}.ts`
-- Hooks: `src/hooks/use{Name}.ts`
+| Route | Page |
+|-------|------|
+| `/` | Home (standings, leaders) |
+| `/player/:id` | Player profile (stats, charts, analytics, EDGE, share card) |
+| `/team/:abbrev` | Team profile |
+| `/compare` | Player comparison |
+| `/attack-dna/player/:playerId` | Player Attack DNA |
+| `/attack-dna/team/:teamAbbrev` | Team Attack DNA |
+| `/trends` | League trends |
 
 ---
 
 ## Testing
 
 ```bash
-npm run test:api    # API connectivity tests
-npm run test:e2e    # Playwright E2E tests
-npm run test:all    # Run all tests
+npx vitest run         # Unit tests
+npm run test:api       # API connectivity
+npm run test:e2e       # Playwright E2E
 ```
 
 ---
 
-## Environment Variables
+## Gotchas
 
-```env
-VITE_API_WORKER_URL=https://nhl-api-proxy.deepdivenhl.workers.dev
-```
-
-In dev, Vite proxy handles API calls (see `vite.config.ts`).
-
----
-
-## NHL EDGE Tracking Architecture
-
-### Overview
-
-NHL EDGE is the league's optical player tracking system. This integration provides skating analytics using **REAL EDGE API data only** - no mock data or synthetic generation.
-
-### EDGE API Service (`src/services/edgeTrackingService.ts`)
-
-Primary service for EDGE tracking data.
-
-**Endpoints:**
-| Endpoint | Purpose |
-|----------|---------|
-| `/web/edge/skater-detail/{id}/{season}/2` | Player skating overview |
-| `/web/edge/skater-skating-speed-detail/{id}/{season}/2` | Speed metrics (bursts, top speed) |
-| `/web/edge/skater-skating-distance-detail/{id}/{season}/2` | Distance traveled |
-| `/web/edge/skater-zone-time/{id}/{season}/2` | Zone time breakdown |
-| `/web/edge/skater-comparison/{id}/{season}/2` | League percentile comparisons |
-| `/web/edge/skater-shot-speed-detail/{id}/{season}/2` | Shot velocity data |
-
-**Key Types (`src/types/edge.ts`):**
-```typescript
-interface SkaterSpeedDetail {
-  topSpeed: number;
-  avgTopSpeed: number;
-  bursts18To20: number;
-  bursts20To22: number;
-  bursts22Plus: number;
-  burstsPerGame18To20: number;
-  burstsPerGame20To22: number;
-  burstsPerGame22Plus: number;
-}
-
-interface SkaterDistanceDetail {
-  totalDistance: number;
-  distancePerGame: number;
-  distancePerShift: number;
-  offensiveZoneDistance: number;
-  defensiveZoneDistance: number;
-  neutralZoneDistance: number;
-  evenStrengthDistance: number;
-  powerPlayDistance: number;
-  penaltyKillDistance: number;
-}
-
-interface SkaterZoneTime {
-  offensiveZoneTime: number;
-  neutralZoneTime: number;
-  defensiveZoneTime: number;
-  offensiveZonePct: number;
-  neutralZonePct: number;
-  defensiveZonePct: number;
-}
-
-interface ShotSpeedDetail {
-  avgShotSpeed: number;
-  maxShotSpeed: number;
-  totalShots: number;
-  shotsByType: ShotTypeSpeed[];
-  shotsUnder70: number;
-  shots70To80: number;
-  shots80To90: number;
-  shots90Plus: number;
-}
-```
-
-### EDGE Chart Components (`src/components/charts/`)
-
-All charts use REAL EDGE data directly - no synthetic events:
-
-| Component | Props Interface | Data |
-|-----------|-----------------|------|
-| `SpeedProfileChart.tsx` | `{ speedData: SkaterSpeedDetail }` | Burst counts, top speed |
-| `DistanceFatigueChart.tsx` | `{ distanceData: SkaterDistanceDetail }` | Zone/situation breakdown |
-| `ZoneTimeChart.tsx` | `{ zoneData: SkaterZoneTime }` | Time percentages |
-| `ShotVelocityChart.tsx` | `{ shotData: ShotSpeedDetail }` | Shot speeds by type |
-| `TrackingRadarChart.tsx` | `{ playerData: PlayerTrackingData }` | Multi-metric radar |
-
-### EDGE Routes
-
-| Route | Component | Purpose |
-|-------|-----------|---------|
-| `/movement/:playerId` | MovementAnalysis | Player movement + EDGE analysis |
-| `/player/:id` (EDGE tab) | PlayerProfile | EDGE tracking tab |
-
-### EDGE Data Caching
-
-```typescript
-EDGE_CACHE = {
-  EDGE_PLAYER_DETAIL: 24 hours,
-  EDGE_SPEED_DATA: 24 hours,
-  EDGE_TEAM_DATA: 24 hours,
-}
-```
-
----
-
-## EDGE Gotchas
-
-1. **Data Availability**: EDGE data only exists for 2023-24 season onward.
-
-2. **Goalie Exclusion**: EDGE charts disabled for goalies (position === 'G').
-
-3. **NO MOCK DATA**: All charts use real EDGE aggregate data. Empty states shown when data unavailable.
-
-4. **Aggregate Data Only**: EDGE API provides season aggregates, not per-event arrays. Charts are designed for this.
-
-5. **Coordinate System**: EDGE uses same coordinate system as play-by-play (-100 to 100, -42.5 to 42.5).
-
-6. **Speed Units**: All speeds are in mph (miles per hour).
+1. **Season format**: `20252026`, not `2025-26`
+2. **Coordinate mirroring**: Shots from negative X need Y flipped for half-rink
+3. **Game states**: Completed games = `gameState === 'OFF' || gameState === 'FINAL'`
+4. **Game log suffix**: `/2` = regular season, `/3` = playoffs
+5. **EDGE**: Only 2023-24+, disabled for goalies
+6. **Caching**: League averages 12hr, EDGE data 24hr, play-by-play 4hr

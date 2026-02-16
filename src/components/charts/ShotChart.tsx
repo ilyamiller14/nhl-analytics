@@ -126,7 +126,10 @@ export default function ShotChart({
           height={height}
           viewBox={halfRink ? "100 0 100 85" : "0 0 200 85"}
           className="shot-chart-svg"
+          style={{ maxWidth: '100%', height: 'auto' }}
           onMouseMove={handleMouseMove}
+          role="img"
+          aria-label="Shot location chart on ice rink"
         >
           {/* Rink background */}
           <NHLRink
@@ -185,8 +188,8 @@ export default function ShotChart({
           <div
             className="shot-tooltip"
             style={{
-              left: `${mousePos.x + 10}px`,
-              top: `${mousePos.y + 10}px`,
+              left: `${Math.min(mousePos.x + 10, window.innerWidth - 180)}px`,
+              top: `${Math.min(mousePos.y + 10, window.innerHeight - 120)}px`,
             }}
           >
             <div className="tooltip-row">

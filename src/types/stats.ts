@@ -45,6 +45,13 @@ export interface GoalieStats {
   timeOnIce?: string;
 }
 
+/**
+ * Career regular season stats — union of skater and goalie fields.
+ * The NHL API returns different fields depending on position,
+ * so goalie-specific fields are optional.
+ */
+export type CareerRegularSeasonStats = SeasonStats & Partial<GoalieStats>;
+
 export interface GameLog {
   gameId: number;
   gameDate: string;

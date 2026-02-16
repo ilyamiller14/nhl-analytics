@@ -64,11 +64,10 @@ export default function PenaltyImpactAnalysis({
     }));
   }, [pkShots]);
 
-  // Calculate league average benchmarks
-  const leaguePPRate = 20.0;
-  const leaguePKRate = 80.0;
-  const leaguePPShotsPerOpp = 3.5;
-  const leaguePKShotsAllowedPerOpp = 3.2;
+  // Use computed league averages from the analytics object (set by the service layer)
+  // If not available, no comparison is shown
+  const leaguePPRate = analytics.leaguePPPct ?? null;
+  const leaguePKRate = analytics.leaguePKPct ?? null;
 
   // Get situation data
   const situationData = useMemo(() => {
@@ -130,13 +129,15 @@ export default function PenaltyImpactAnalysis({
             <div className="stat-card primary">
               <div className="stat-value">{powerPlay.powerPlayConversionRate.toFixed(1)}%</div>
               <div className="stat-label">Conversion Rate</div>
-              <div className="stat-comparison">
-                League Avg: {leaguePPRate.toFixed(1)}%
-                <span className={powerPlay.powerPlayConversionRate > leaguePPRate ? 'positive' : 'negative'}>
-                  {' '}({powerPlay.powerPlayConversionRate > leaguePPRate ? '+' : ''}
-                  {(powerPlay.powerPlayConversionRate - leaguePPRate).toFixed(1)}%)
-                </span>
-              </div>
+              {leaguePPRate !== null && (
+                <div className="stat-comparison">
+                  League Avg: {leaguePPRate.toFixed(1)}%
+                  <span className={powerPlay.powerPlayConversionRate > leaguePPRate ? 'positive' : 'negative'}>
+                    {' '}({powerPlay.powerPlayConversionRate > leaguePPRate ? '+' : ''}
+                    {(powerPlay.powerPlayConversionRate - leaguePPRate).toFixed(1)}%)
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="stat-card">
@@ -148,13 +149,6 @@ export default function PenaltyImpactAnalysis({
             <div className="stat-card">
               <div className="stat-value">{powerPlay.shotsPerPowerPlay.toFixed(1)}</div>
               <div className="stat-label">Shots per PP</div>
-              <div className="stat-comparison">
-                League Avg: {leaguePPShotsPerOpp.toFixed(1)}
-                <span className={powerPlay.shotsPerPowerPlay > leaguePPShotsPerOpp ? 'positive' : 'negative'}>
-                  {' '}({powerPlay.shotsPerPowerPlay > leaguePPShotsPerOpp ? '+' : ''}
-                  {(powerPlay.shotsPerPowerPlay - leaguePPShotsPerOpp).toFixed(1)})
-                </span>
-              </div>
             </div>
 
             <div className="stat-card">
@@ -210,13 +204,15 @@ export default function PenaltyImpactAnalysis({
             <div className="stat-card primary">
               <div className="stat-value">{penaltyKill.penaltyKillSuccessRate.toFixed(1)}%</div>
               <div className="stat-label">Success Rate</div>
-              <div className="stat-comparison">
-                League Avg: {leaguePKRate.toFixed(1)}%
-                <span className={penaltyKill.penaltyKillSuccessRate > leaguePKRate ? 'positive' : 'negative'}>
-                  {' '}({penaltyKill.penaltyKillSuccessRate > leaguePKRate ? '+' : ''}
-                  {(penaltyKill.penaltyKillSuccessRate - leaguePKRate).toFixed(1)}%)
-                </span>
-              </div>
+              {leaguePKRate !== null && (
+                <div className="stat-comparison">
+                  League Avg: {leaguePKRate.toFixed(1)}%
+                  <span className={penaltyKill.penaltyKillSuccessRate > leaguePKRate ? 'positive' : 'negative'}>
+                    {' '}({penaltyKill.penaltyKillSuccessRate > leaguePKRate ? '+' : ''}
+                    {(penaltyKill.penaltyKillSuccessRate - leaguePKRate).toFixed(1)}%)
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="stat-card">
@@ -232,23 +228,6 @@ export default function PenaltyImpactAnalysis({
                   : '0.0'}
               </div>
               <div className="stat-label">Shots Allowed per PK</div>
-              <div className="stat-comparison">
-                League Avg: {leaguePKShotsAllowedPerOpp.toFixed(1)}
-                <span
-                  className={
-                    penaltyKill.totalPenaltyKills > 0 &&
-                    penaltyKill.shotsAllowed / penaltyKill.totalPenaltyKills < leaguePKShotsAllowedPerOpp
-                      ? 'positive'
-                      : 'negative'
-                  }
-                >
-                  {' '}(
-                  {penaltyKill.totalPenaltyKills > 0
-                    ? (penaltyKill.shotsAllowed / penaltyKill.totalPenaltyKills - leaguePKShotsAllowedPerOpp).toFixed(1)
-                    : '0.0'}
-                  )
-                </span>
-              </div>
             </div>
 
             <div className="stat-card">
@@ -343,15 +322,20 @@ export default function PenaltyImpactAnalysis({
         <ul>
           <li>
             <strong>Power Play Efficiency:</strong> The team is converting at{' '}
-            {powerPlay.powerPlayConversionRate.toFixed(1)}%, which is{' '}
-            {powerPlay.powerPlayConversionRate > leaguePPRate ? 'above' : 'below'} the league average of{' '}
-            {leaguePPRate}%. They are generating {powerPlay.shotsPerPowerPlay.toFixed(1)} shots per power play
+            {powerPlay.powerPlayConversionRate.toFixed(1)}%
+            {leaguePPRate !== null
+              ? `, which is ${powerPlay.powerPlayConversionRate > leaguePPRate ? 'above' : 'below'} the league average of ${leaguePPRate.toFixed(1)}%`
+              : ''
+            }. They are generating {powerPlay.shotsPerPowerPlay.toFixed(1)} shots per power play
             opportunity.
           </li>
           <li>
             <strong>Penalty Kill Performance:</strong> The penalty kill is operating at{' '}
-            {penaltyKill.penaltyKillSuccessRate.toFixed(1)}% success rate, which ranks as{' '}
-            {leagueComparison.pkRank.toLowerCase()}. They are allowing{' '}
+            {penaltyKill.penaltyKillSuccessRate.toFixed(1)}% success rate
+            {leaguePKRate !== null
+              ? `, which ranks as ${leagueComparison.pkRank.toLowerCase()}`
+              : ''
+            }. They are allowing{' '}
             {penaltyKill.totalPenaltyKills > 0
               ? (penaltyKill.shotsAllowed / penaltyKill.totalPenaltyKills).toFixed(1)
               : '0.0'}{' '}

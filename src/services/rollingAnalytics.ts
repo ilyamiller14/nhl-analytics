@@ -52,6 +52,9 @@ export interface RollingMetrics {
   gamePDO: number;
   gameCorsiPct: number;
   gameFenwickPct: number;
+  // Per-game raw values for cumulative charts
+  gameXGFor: number;
+  gameGoalsFor: number;
 }
 
 /**
@@ -197,6 +200,8 @@ export function calculateRollingMetrics(
       gamePDO: Math.round(gamePDO * 10) / 10,
       gameCorsiPct: Math.round(gameCorsiPct * 10) / 10,
       gameFenwickPct: Math.round(gameFenwickPct * 10) / 10,
+      gameXGFor: Math.round(game.xGFor * 100) / 100,
+      gameGoalsFor: game.goalsFor,
     });
   }
 
@@ -255,42 +260,3 @@ export function aggregateShotsToGameMetrics(
   };
 }
 
-/**
- * Generate sample game metrics for demonstration
- * In production, this would come from actual game data
- */
-export function generateSampleRollingData(gamesCount: number = 20): RollingMetrics[] {
-  const games: GameMetrics[] = [];
-
-  for (let i = 0; i < gamesCount; i++) {
-    const date = new Date();
-    date.setDate(date.getDate() - (gamesCount - i) * 3);
-
-    // Generate realistic random stats
-    const goals = Math.random() < 0.4 ? Math.floor(Math.random() * 3) : 0;
-    const assists = Math.random() < 0.5 ? Math.floor(Math.random() * 2) : 0;
-    const shotsFor = 25 + Math.floor(Math.random() * 15);
-    const shotsAgainst = 25 + Math.floor(Math.random() * 15);
-
-    games.push({
-      gameId: 2024020000 + i,
-      date: date.toISOString().split('T')[0],
-      goals,
-      assists,
-      points: goals + assists,
-      shotsFor,
-      shotsAgainst,
-      shotAttemptsFor: shotsFor + Math.floor(Math.random() * 20),
-      shotAttemptsAgainst: shotsAgainst + Math.floor(Math.random() * 20),
-      unblockedFor: shotsFor + Math.floor(Math.random() * 10),
-      unblockedAgainst: shotsAgainst + Math.floor(Math.random() * 10),
-      xGFor: 2 + Math.random() * 2,
-      xGAgainst: 2 + Math.random() * 2,
-      goalsFor: Math.floor(Math.random() * 5),
-      goalsAgainst: Math.floor(Math.random() * 5),
-      toi: 1000 + Math.floor(Math.random() * 200),
-    });
-  }
-
-  return calculateRollingMetrics(games, 5);
-}

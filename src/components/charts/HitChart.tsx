@@ -105,8 +105,11 @@ export default function HitChart({
           height={height}
           viewBox="0 0 200 85"
           className="hit-chart-svg"
+          style={{ maxWidth: '100%', height: 'auto' }}
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setHoveredHit(null)}
+          role="img"
+          aria-label="Hit location chart on ice rink"
         >
           {/* Rink background */}
           <NHLRink showZones={true} showDangerZones={false} asGroup={true} />

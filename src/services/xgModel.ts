@@ -13,6 +13,7 @@ import type {
   XGPrediction,
   XGModelCoefficients,
 } from '../types/xgModel';
+import type { ShotEvent } from './playByPlayService';
 
 /**
  * Pre-trained model coefficients
@@ -178,4 +179,44 @@ export function calculateGoalsAboveExpected(
 ): number {
   const expectedGoals = calculateTotalXG(shots);
   return parseFloat((actualGoals - expectedGoals).toFixed(2));
+}
+
+/**
+ * Map NHL API shot type string to model shot type
+ */
+function mapShotType(
+  shotType: string
+): 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap' {
+  const lowerType = shotType?.toLowerCase() || '';
+  if (lowerType.includes('slap')) return 'slap';
+  if (lowerType.includes('snap')) return 'snap';
+  if (lowerType.includes('backhand')) return 'backhand';
+  if (lowerType.includes('tip') || lowerType.includes('deflect')) return 'tip';
+  if (lowerType.includes('wrap')) return 'wrap';
+  return 'wrist';
+}
+
+/**
+ * Calculate xG for a ShotEvent directly
+ * Convenience wrapper that extracts distance/angle from coordinates
+ * and uses the canonical xG model
+ */
+export function calculateShotEventXG(shot: ShotEvent): number {
+  const netX = shot.xCoord >= 0 ? 89 : -89;
+  const distance = Math.sqrt(
+    Math.pow(shot.xCoord - netX, 2) + Math.pow(shot.yCoord, 2)
+  );
+  const distanceFromGoalLine = Math.abs(netX - shot.xCoord);
+  const lateralDistance = Math.abs(shot.yCoord);
+  const angle = distanceFromGoalLine > 0
+    ? Math.atan(lateralDistance / distanceFromGoalLine) * (180 / Math.PI)
+    : 90;
+
+  const result = calculateXG({
+    distance,
+    angle,
+    shotType: mapShotType(shot.shotType),
+    strength: '5v5',
+  });
+  return result.xGoal;
 }

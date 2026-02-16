@@ -37,9 +37,12 @@ export default function PreloadIndicator() {
   const isComplete = !status.isLoading && status.teamsLoaded === status.totalTeams;
 
   return (
-    <div
+    <button
+      type="button"
       className={`preload-indicator ${isExpanded ? 'expanded' : ''} ${isComplete ? 'complete' : ''}`}
       onClick={() => setIsExpanded(!isExpanded)}
+      aria-expanded={isExpanded}
+      aria-label={status.isLoading ? `Preloading data: ${progressPercent}% complete` : 'Data preload complete'}
     >
       <div className="preload-icon">
         {status.isLoading ? (
@@ -95,6 +98,6 @@ export default function PreloadIndicator() {
           {status.isLoading ? `${progressPercent}%` : ''}
         </div>
       )}
-    </div>
+    </button>
   );
 }

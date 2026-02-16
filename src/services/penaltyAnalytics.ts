@@ -9,6 +9,7 @@
  */
 
 import type { ShotEvent } from './playByPlayService';
+import { calculateShotEventXG } from './xgModel';
 
 export type GameSituation = '5v5' | '5v4' | '4v5' | '5v3' | '3v5' | '4v4' | '4v3' | '3v4' | '3v3';
 
@@ -75,6 +76,9 @@ export interface SpecialTeamsAnalytics {
     goals: number;
     xG: number;
   }>;
+  // Real computed league averages (from leagueAveragesService)
+  leaguePPPct?: number;
+  leaguePKPct?: number;
 }
 
 /**
@@ -160,7 +164,7 @@ export function analyzeSpecialTeams(
       situationBreakdown[situation] = { shots: 0, goals: 0, xG: 0 };
     }
 
-    const shotXG = calculateShotXG(shot);
+    const shotXG = calculateShotEventXG(shot);
 
     if (shot.teamId === teamId) {
       // Team's own shots
@@ -186,8 +190,8 @@ export function analyzeSpecialTeams(
   // Calculate PP analytics
   const ppGoals = ppShots.filter((s) => s.result === 'goal').length;
   const ppShotsOnGoal = ppShots.filter((s) => s.result === 'shot-on-goal' || s.result === 'goal').length;
-  const ppXG = ppShots.reduce((sum, s) => sum + calculateShotXG(s), 0);
-  const highDangerPP = ppShots.filter((s) => calculateShotXG(s) >= 0.15).length;
+  const ppXG = ppShots.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
+  const highDangerPP = ppShots.filter((s) => calculateShotEventXG(s) >= 0.15).length;
 
   // Estimate PP opportunities (rough approximation: cluster of PP shots = 1 PP)
   const totalPowerPlays = Math.max(1, Math.ceil(ppShots.length / 3));
@@ -195,13 +199,13 @@ export function analyzeSpecialTeams(
   // Calculate PK analytics
   const pkGoalsAllowed = pkShotsAgainst.filter((s) => s.result === 'goal').length;
   const pkShotsOnGoalAllowed = pkShotsAgainst.filter((s) => s.result === 'shot-on-goal' || s.result === 'goal').length;
-  const pkXGAllowed = pkShotsAgainst.reduce((sum, s) => sum + calculateShotXG(s), 0);
+  const pkXGAllowed = pkShotsAgainst.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
   const pkShotsBlocked = pkShotsAgainst.filter((s) => s.result === 'blocked-shot').length;
   const totalPenaltyKills = Math.max(1, Math.ceil(pkShotsAgainst.length / 3));
 
   // ES analytics
   const esGoals = evenStrengthShots.filter((s) => s.result === 'goal').length;
-  const esXG = evenStrengthShots.reduce((sum, s) => sum + calculateShotXG(s), 0);
+  const esXG = evenStrengthShots.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
 
   return {
     powerPlay: {
@@ -239,27 +243,6 @@ export function analyzeSpecialTeams(
 }
 
 /**
- * Calculate xG for a shot using corrected angle formula
- */
-function calculateShotXG(shot: ShotEvent): number {
-  const netX = shot.xCoord >= 0 ? 89 : -89;
-  const distance = Math.sqrt(
-    Math.pow(shot.xCoord - netX, 2) + Math.pow(shot.yCoord, 2)
-  );
-
-  // Correct angle: 0 = center, higher = more to the side
-  const distanceFromGoalLine = Math.abs(netX - shot.xCoord);
-  const lateralDistance = Math.abs(shot.yCoord);
-  const angle = distanceFromGoalLine > 0
-    ? Math.atan(lateralDistance / distanceFromGoalLine) * (180 / Math.PI)
-    : 90;
-
-  const logit = -0.5 - 0.045 * distance - 0.025 * angle;
-  const xg = 1 / (1 + Math.exp(-logit));
-  return Math.max(0.005, Math.min(0.60, xg));
-}
-
-/**
  * Compare PP/PK performance to league averages
  */
 export function compareToLeagueAverage(
@@ -270,9 +253,9 @@ export function compareToLeagueAverage(
   ppVsAverage: number;
   pkVsAverage: number;
 } {
-  // NHL league averages (approximate)
-  const leaguePPRate = 20.0; // 20% PP conversion
-  const leaguePKRate = 80.0; // 80% PK success
+  // Use real league averages if available, fall back to 0 diff (no ranking) if not
+  const leaguePPRate = analytics.leaguePPPct ?? analytics.powerPlay.powerPlayConversionRate;
+  const leaguePKRate = analytics.leaguePKPct ?? analytics.penaltyKill.penaltyKillSuccessRate;
 
   const ppDiff = analytics.powerPlay.powerPlayConversionRate - leaguePPRate;
   const pkDiff = analytics.penaltyKill.penaltyKillSuccessRate - leaguePKRate;

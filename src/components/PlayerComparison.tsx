@@ -1,33 +1,51 @@
 import type { PlayerLandingResponse } from '../types/api';
+import type { SeasonStats } from '../types/stats';
 import StatChart from './StatChart';
 import { formatNumber, formatPlusMinus, formatShootingPct } from '../utils/formatters';
 import './PlayerComparison.css';
 
+interface ComparisonEntryData {
+  player: PlayerLandingResponse;
+  season: number;
+  stats: SeasonStats | undefined;
+}
+
 interface PlayerComparisonProps {
-  players: PlayerLandingResponse[];
+  entries: ComparisonEntryData[];
   selectedMetrics: string[];
 }
 
-function PlayerComparison({ players, selectedMetrics }: PlayerComparisonProps) {
-  if (players.length === 0) {
+function formatSeasonShort(season: number): string {
+  const startYear = Math.floor(season / 10000);
+  const endYear = season % 10000;
+  return `${startYear}-${String(endYear).slice(2)}`;
+}
+
+function PlayerComparison({ entries, selectedMetrics }: PlayerComparisonProps) {
+  if (entries.length === 0) {
     return null;
   }
 
-  // Extract current season stats for each player
-  const playersStats = players.map((player) => ({
-    player,
-    stats: player.featuredStats?.regularSeason?.subSeason,
-  }));
+  // Build display labels (include season when same player appears multiple times)
+  const playerIds = entries.map((e) => e.player.playerId);
+  const hasDuplicates = playerIds.some((id, i) => playerIds.indexOf(id) !== i);
+
+  const getLabel = (entry: ComparisonEntryData) => {
+    const name = `${entry.player.firstName.default} ${entry.player.lastName.default}`;
+    if (hasDuplicates) {
+      return `${name} (${formatSeasonShort(entry.season)})`;
+    }
+    return name;
+  };
 
   // Prepare radar chart data
   const radarData = selectedMetrics.map((metric) => {
     const dataPoint: any = { metric };
 
-    playersStats.forEach(({ player, stats }) => {
-      if (stats) {
-        const value = (stats as any)[metric];
-        dataPoint[`${player.firstName.default} ${player.lastName.default}`] =
-          typeof value === 'number' ? value : 0;
+    entries.forEach((entry) => {
+      if (entry.stats) {
+        const value = (entry.stats as any)[metric];
+        dataPoint[getLabel(entry)] = typeof value === 'number' ? value : 0;
       }
     });
 
@@ -35,14 +53,12 @@ function PlayerComparison({ players, selectedMetrics }: PlayerComparisonProps) {
   });
 
   // Prepare bar chart data
-  const barChartData = playersStats.map(({ player, stats }) => {
-    const data: any = {
-      name: `${player.firstName.default} ${player.lastName.default}`,
-    };
+  const barChartData = entries.map((entry) => {
+    const data: any = { name: getLabel(entry) };
 
     selectedMetrics.forEach((metric) => {
-      if (stats) {
-        const value = (stats as any)[metric];
+      if (entry.stats) {
+        const value = (entry.stats as any)[metric];
         data[metric] = typeof value === 'number' ? value : 0;
       }
     });
@@ -77,9 +93,9 @@ function PlayerComparison({ players, selectedMetrics }: PlayerComparisonProps) {
           <StatChart
             data={radarData}
             type="radar"
-            dataKeys={playersStats.map(({ player }, index) => ({
-              key: `${player.firstName.default} ${player.lastName.default}`,
-              name: `${player.firstName.default} ${player.lastName.default}`,
+            dataKeys={entries.map((entry, index) => ({
+              key: getLabel(entry),
+              name: getLabel(entry),
               color: colors[index % colors.length],
             }))}
             xAxisKey="metric"
@@ -111,21 +127,24 @@ function PlayerComparison({ players, selectedMetrics }: PlayerComparisonProps) {
             <thead>
               <tr>
                 <th>Stat</th>
-                {playersStats.map(({ player }) => (
-                  <th key={player.playerId}>
+                {entries.map((entry) => (
+                  <th key={`${entry.player.playerId}-${entry.season}`}>
                     <div className="player-header">
-                      {player.headshot && (
+                      {entry.player.headshot && (
                         <img
-                          src={player.headshot}
-                          alt={player.firstName.default}
+                          src={entry.player.headshot}
+                          alt={getLabel(entry)}
                           className="table-player-headshot"
                         />
                       )}
                       <div>
                         <div className="player-name-short">
-                          {player.firstName.default} {player.lastName.default}
+                          {entry.player.firstName.default} {entry.player.lastName.default}
                         </div>
-                        <div className="player-team-short">{player.currentTeamAbbrev}</div>
+                        <div className="player-team-short">
+                          {entry.player.currentTeamAbbrev}
+                          {hasDuplicates && ` • ${formatSeasonShort(entry.season)}`}
+                        </div>
                       </div>
                     </div>
                   </th>
@@ -136,9 +155,9 @@ function PlayerComparison({ players, selectedMetrics }: PlayerComparisonProps) {
               {selectedMetrics.map((metric) => (
                 <tr key={metric}>
                   <td className="metric-name">{metric.toUpperCase()}</td>
-                  {playersStats.map(({ player, stats }) => (
-                    <td key={player.playerId} className="stat-value">
-                      {getStatValue(stats, metric)}
+                  {entries.map((entry) => (
+                    <td key={`${entry.player.playerId}-${entry.season}`} className="stat-value">
+                      {getStatValue(entry.stats, metric)}
                     </td>
                   ))}
                 </tr>

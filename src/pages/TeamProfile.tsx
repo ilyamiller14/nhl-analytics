@@ -23,6 +23,7 @@ import {
   getRatingColor,
   type TeamAdvancedAnalytics,
 } from '../services/teamAnalytics';
+import { getLeagueAverages, type LeagueAverages } from '../services/leagueAveragesService';
 import {
   fetchTeamRealAnalytics,
   fetchTeamShotLocations,
@@ -112,11 +113,17 @@ function TeamProfile() {
     loadRealAnalytics();
   }, [teamData?.info?.teamId, teamData?.schedule]);
 
+  // Fetch real league averages for comparison
+  const [leagueAvg, setLeagueAvg] = useState<LeagueAverages | null>(null);
+  useEffect(() => {
+    getLeagueAverages().then(setLeagueAvg);
+  }, []);
+
   // Calculate advanced analytics - must be called before early returns (hooks rule)
   const analytics: TeamAdvancedAnalytics | null = useMemo(() => {
     if (!teamData?.stats) return null;
-    return calculateTeamAnalytics(teamData.stats);
-  }, [teamData?.stats]);
+    return calculateTeamAnalytics(teamData.stats, leagueAvg);
+  }, [teamData?.stats, leagueAvg]);
 
   if (isLoading) {
     return (
@@ -593,7 +600,9 @@ function TeamProfile() {
                     </div>
                     <div className="analytics-stat-card">
                       <span className="analytics-stat-value">
-                        {((stats.goalsFor / (stats.goalsFor + stats.goalsAgainst)) * 100).toFixed(1)}%
+                        {(stats.goalsFor + stats.goalsAgainst) > 0
+                          ? ((stats.goalsFor / (stats.goalsFor + stats.goalsAgainst)) * 100).toFixed(1)
+                          : '0.0'}%
                       </span>
                       <span className="analytics-stat-label">Goals For %</span>
                     </div>

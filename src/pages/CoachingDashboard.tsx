@@ -48,43 +48,14 @@ import {
   type MomentumAnalytics,
 } from '../services/momentumTracking';
 import MomentumTracker from '../components/charts/MomentumTracker';
+import SpecialTeamsMatrix from '../components/charts/SpecialTeamsMatrix';
+import {
+  analyzeSpecialTeamsUnits,
+  type SpecialTeamsUnitAnalysis,
+} from '../services/specialTeamsAnalytics';
 import './CoachingDashboard.css';
 
-// All NHL teams for selector
-const NHL_TEAMS = [
-  { abbrev: 'ANA', name: 'Anaheim Ducks' },
-  { abbrev: 'UTA', name: 'Utah Hockey Club' },
-  { abbrev: 'BOS', name: 'Boston Bruins' },
-  { abbrev: 'BUF', name: 'Buffalo Sabres' },
-  { abbrev: 'CGY', name: 'Calgary Flames' },
-  { abbrev: 'CAR', name: 'Carolina Hurricanes' },
-  { abbrev: 'CHI', name: 'Chicago Blackhawks' },
-  { abbrev: 'COL', name: 'Colorado Avalanche' },
-  { abbrev: 'CBJ', name: 'Columbus Blue Jackets' },
-  { abbrev: 'DAL', name: 'Dallas Stars' },
-  { abbrev: 'DET', name: 'Detroit Red Wings' },
-  { abbrev: 'EDM', name: 'Edmonton Oilers' },
-  { abbrev: 'FLA', name: 'Florida Panthers' },
-  { abbrev: 'LAK', name: 'Los Angeles Kings' },
-  { abbrev: 'MIN', name: 'Minnesota Wild' },
-  { abbrev: 'MTL', name: 'Montreal Canadiens' },
-  { abbrev: 'NSH', name: 'Nashville Predators' },
-  { abbrev: 'NJD', name: 'New Jersey Devils' },
-  { abbrev: 'NYI', name: 'New York Islanders' },
-  { abbrev: 'NYR', name: 'New York Rangers' },
-  { abbrev: 'OTT', name: 'Ottawa Senators' },
-  { abbrev: 'PHI', name: 'Philadelphia Flyers' },
-  { abbrev: 'PIT', name: 'Pittsburgh Penguins' },
-  { abbrev: 'SJS', name: 'San Jose Sharks' },
-  { abbrev: 'SEA', name: 'Seattle Kraken' },
-  { abbrev: 'STL', name: 'St. Louis Blues' },
-  { abbrev: 'TBL', name: 'Tampa Bay Lightning' },
-  { abbrev: 'TOR', name: 'Toronto Maple Leafs' },
-  { abbrev: 'VAN', name: 'Vancouver Canucks' },
-  { abbrev: 'VGK', name: 'Vegas Golden Knights' },
-  { abbrev: 'WSH', name: 'Washington Capitals' },
-  { abbrev: 'WPG', name: 'Winnipeg Jets' },
-];
+import { NHL_TEAMS } from '../constants/teams';
 
 type ViewMode = 'team' | 'players';
 
@@ -128,6 +99,7 @@ export default function CoachingDashboard() {
     awayTeamName: string;
     gameDate: string;
   } | null>(null);
+  const [specialTeamsData, setSpecialTeamsData] = useState<SpecialTeamsUnitAnalysis | null>(null);
 
   // Load team data when team changes
   useEffect(() => {
@@ -268,6 +240,20 @@ export default function CoachingDashboard() {
             });
           }
         }
+
+        // Compute special teams unit analysis
+        setLoadingProgress('Analyzing special teams units...');
+        const allPlayers2 = [
+          ...data.roster.forwards,
+          ...data.roster.defensemen,
+          ...data.roster.goalies,
+        ];
+        const stPlayerNames = new Map<number, string>();
+        allPlayers2.forEach((p) => {
+          stPlayerNames.set(p.playerId, `${p.firstName} ${p.lastName}`);
+        });
+        const stAnalysis = analyzeSpecialTeamsUnits(pbpData, data.info.teamId, stPlayerNames);
+        setSpecialTeamsData(stAnalysis);
 
         setLoadingProgress('');
       } catch (err) {
@@ -637,6 +623,19 @@ export default function CoachingDashboard() {
                     showPeriodBreakdown={true}
                     showSwingMarkers={true}
                   />
+                </div>
+              </section>
+            )}
+
+            {/* Special Teams Unit Effectiveness */}
+            {specialTeamsData && (
+              <section className="dashboard-section">
+                <h2 className="section-title">Special Teams Unit Effectiveness</h2>
+                <p className="section-subtitle">
+                  Power play and penalty kill unit rankings based on on-ice performance metrics
+                </p>
+                <div className="chart-card full-width">
+                  <SpecialTeamsMatrix data={specialTeamsData} />
                 </div>
               </section>
             )}

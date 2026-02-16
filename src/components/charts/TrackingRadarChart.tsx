@@ -61,35 +61,12 @@ interface TrackingRadarChartProps {
   showPercentiles?: boolean;
 }
 
-// Default league averages by position (from NHL EDGE API)
-const DEFAULT_LEAGUE_AVERAGES: Record<string, LeagueAverageData> = {
-  F: {
-    position: 'F',
-    speed: 22.2,           // Top speed (mph) - API: 22.18
-    shotVelocity: 72.5,    // Shot velocity (mph)
-    distance: 9.0,         // Distance per 60 min (mi) - API: ~9
-    zoneControl: 42,       // OZ time % - API: 42.3%
-    burstFrequency: 4,     // Elite bursts (22+) per season - API: 3.69
-    efficiency: 400,       // Fast bursts (18-22 mph) per season - API: ~400
-  },
-  D: {
-    position: 'D',
-    speed: 21.8,
-    shotVelocity: 78.2,
-    distance: 10.0,
-    zoneControl: 40,
-    burstFrequency: 3,
-    efficiency: 350,
-  },
-  G: {
-    position: 'G',
-    speed: 14.0,
-    shotVelocity: 0,
-    distance: 0.5,
-    zoneControl: 50,
-    burstFrequency: 0,
-    efficiency: 0,
-  },
+// No hardcoded league averages - these are passed via leagueAverage prop
+// from actual EDGE API data. If not available, radar shows player values only.
+const EMPTY_LEAGUE_AVERAGES: Record<string, LeagueAverageData> = {
+  F: { position: 'F', speed: 0, shotVelocity: 0, distance: 0, zoneControl: 0, burstFrequency: 0, efficiency: 0 },
+  D: { position: 'D', speed: 0, shotVelocity: 0, distance: 0, zoneControl: 0, burstFrequency: 0, efficiency: 0 },
+  G: { position: 'G', speed: 0, shotVelocity: 0, distance: 0, zoneControl: 0, burstFrequency: 0, efficiency: 0 },
 };
 
 // Metric display configuration
@@ -108,7 +85,7 @@ export default function TrackingRadarChart({
   position,
   showPercentiles = true,
 }: TrackingRadarChartProps) {
-  const avgData = leagueAverage || DEFAULT_LEAGUE_AVERAGES[position];
+  const avgData = leagueAverage || EMPTY_LEAGUE_AVERAGES[position];
 
   // Prepare radar chart data
   const radarData = useMemo(() => {
@@ -357,21 +334,14 @@ export function createPlayerTrackingData(
   },
   leagueAverage?: LeagueAverageData
 ): PlayerTrackingData {
-  const avg = leagueAverage || DEFAULT_LEAGUE_AVERAGES[position];
+  const avg = leagueAverage || EMPTY_LEAGUE_AVERAGES[position];
 
-  // Calculate percentiles based on assumed standard deviations
-  const stdDevs: Record<string, number> = {
-    speed: 1.5,            // Top speed variance
-    shotVelocity: 8.0,     // Shot velocity variance
-    distance: 1.5,         // Distance per 60 variance
-    zoneControl: 8.0,      // OZ% variance
-    burstFrequency: 5.0,   // Elite bursts (22+) variance
-    efficiency: 100.0,     // Fast bursts (18-22) variance
-  };
-
-  const calculatePercentile = (value: number, average: number, stdDev: number): number => {
-    const zScore = (value - average) / stdDev;
-    const percentile = Math.round(50 + 50 * Math.tanh(zScore * 0.7));
+  // Calculate percentiles using ratio to league average (no assumed std devs)
+  // When league average is 0 (unavailable), percentile defaults to 50 (neutral)
+  const calculatePercentile = (value: number, average: number): number => {
+    if (average === 0 || value === 0) return 50;
+    const ratio = value / average;
+    const percentile = Math.round(50 * ratio);
     return Math.max(1, Math.min(99, percentile));
   };
 
@@ -383,7 +353,7 @@ export function createPlayerTrackingData(
       name: 'Speed',
       key: 'speed',
       value: rawValues.speed,
-      percentile: calculatePercentile(rawValues.speed, avg.speed, stdDevs.speed),
+      percentile: calculatePercentile(rawValues.speed, avg.speed),
       unit: 'mph',
       description: 'Average skating speed during play',
     },
@@ -391,7 +361,7 @@ export function createPlayerTrackingData(
       name: 'Shot Velocity',
       key: 'shotVelocity',
       value: rawValues.shotVelocity,
-      percentile: calculatePercentile(rawValues.shotVelocity, avg.shotVelocity, stdDevs.shotVelocity),
+      percentile: calculatePercentile(rawValues.shotVelocity, avg.shotVelocity),
       unit: 'mph',
       description: 'Average shot speed',
     },
@@ -399,7 +369,7 @@ export function createPlayerTrackingData(
       name: 'Distance',
       key: 'distance',
       value: rawValues.distance,
-      percentile: calculatePercentile(rawValues.distance, avg.distance, stdDevs.distance),
+      percentile: calculatePercentile(rawValues.distance, avg.distance),
       unit: 'mi',
       description: 'Average distance skated per game',
     },
@@ -407,7 +377,7 @@ export function createPlayerTrackingData(
       name: 'Zone Control',
       key: 'zoneControl',
       value: rawValues.zoneControl,
-      percentile: calculatePercentile(rawValues.zoneControl, avg.zoneControl, stdDevs.zoneControl),
+      percentile: calculatePercentile(rawValues.zoneControl, avg.zoneControl),
       unit: '%',
       description: 'Offensive zone time percentage when on ice',
     },
@@ -415,7 +385,7 @@ export function createPlayerTrackingData(
       name: 'Elite Bursts',
       key: 'burstFrequency',
       value: rawValues.burstFrequency,
-      percentile: calculatePercentile(rawValues.burstFrequency, avg.burstFrequency, stdDevs.burstFrequency),
+      percentile: calculatePercentile(rawValues.burstFrequency, avg.burstFrequency),
       unit: '/season',
       description: 'Elite speed bursts (22+ mph) per season',
     },
@@ -423,7 +393,7 @@ export function createPlayerTrackingData(
       name: 'Fast Bursts',
       key: 'efficiency',
       value: rawValues.efficiency,
-      percentile: calculatePercentile(rawValues.efficiency, avg.efficiency, stdDevs.efficiency),
+      percentile: calculatePercentile(rawValues.efficiency, avg.efficiency),
       unit: '/season',
       description: 'Fast speed bursts (18-22 mph) per season',
     },

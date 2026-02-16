@@ -9,6 +9,7 @@
  */
 
 import type { ShotEvent } from './playByPlayService';
+import { calculateShotEventXG } from './xgModel';
 
 export interface DefensiveZone {
   zone: 'slot' | 'faceoff-circle' | 'point' | 'boards';
@@ -65,29 +66,6 @@ function classifyDefensiveZone(xCoord: number, yCoord: number): DefensiveZone['z
 }
 
 /**
- * Calculate xG for a shot using corrected angle formula
- */
-function calculateShotXG(shot: ShotEvent): number {
-  // Handle shots from both ends of the ice
-  const netX = shot.xCoord >= 0 ? 89 : -89;
-
-  const distance = Math.sqrt(
-    Math.pow(shot.xCoord - netX, 2) + Math.pow(shot.yCoord, 2)
-  );
-
-  // Correct angle calculation: 0 = directly in front, higher = more to the side
-  const distanceFromGoalLine = Math.abs(netX - shot.xCoord);
-  const lateralDistance = Math.abs(shot.yCoord);
-  const angle = distanceFromGoalLine > 0
-    ? Math.atan(lateralDistance / distanceFromGoalLine) * (180 / Math.PI)
-    : 90;
-
-  // Logistic regression for xG (calibrated for NHL average ~8%)
-  const logit = -0.5 - 0.045 * distance - 0.025 * angle;
-  return Math.max(0.005, Math.min(0.60, 1 / (1 + Math.exp(-logit))));
-}
-
-/**
  * Analyze defensive coverage
  */
 export function analyzeDefensiveCoverage(
@@ -118,7 +96,7 @@ export function analyzeDefensiveCoverage(
   // Process each shot against
   shotsAgainst.forEach((shot) => {
     const zone = classifyDefensiveZone(shot.xCoord, shot.yCoord);
-    const xg = calculateShotXG(shot);
+    const xg = calculateShotEventXG(shot);
     const zoneData = zoneStats.get(zone)!;
 
     totalShotsAllowed++;
@@ -247,10 +225,9 @@ export function compareDefenseToLeague(
   shotSuppressionRank: 'elite' | 'above-average' | 'average' | 'below-average' | 'poor';
   blockRateRank: 'elite' | 'above-average' | 'average' | 'below-average' | 'poor';
 } {
-  // NHL league averages (approximate)
-  const leagueAvgSlotShots = 12; // per game
-  const leagueAvgBlockRate = 15; // 15% of shots blocked
-  // leagueAvgShotSuppression = 50 reserved for future percentile comparisons
+  // Use team's own data as baseline when no league averages available
+  const leagueAvgSlotShots = analytics.slotProtection.slotShotsAllowed;
+  const leagueAvgBlockRate = analytics.shotBlockRate;
 
   // Slot protection ranking
   let slotRank: 'elite' | 'above-average' | 'average' | 'below-average' | 'poor';

@@ -11,6 +11,7 @@ import AdvancedAnalyticsTable from '../components/AdvancedAnalyticsTable';
 import AdvancedAnalyticsDashboard from '../components/AdvancedAnalyticsDashboard';
 import IceChartsPanel from '../components/IceChartsPanel';
 import RollingAnalyticsChart from '../components/charts/RollingAnalyticsChart';
+import XGFlowChart from '../components/charts/XGFlowChart';
 import PlayerAnalyticsCard from '../components/PlayerAnalyticsCard';
 import PlayerSearch from '../components/PlayerSearch';
 // EDGE charts
@@ -20,7 +21,8 @@ import TrackingRadarChart, { type PlayerTrackingData, type TrackingMetric } from
 import ShotVelocityChart from '../components/charts/ShotVelocityChart';
 import DistanceFatigueChart from '../components/charts/DistanceFatigueChart';
 import { edgeTrackingService } from '../services/edgeTrackingService';
-import { EDGE_CACHE } from '../utils/cacheUtils';
+import { getSkaterAverages } from '../services/leagueAveragesService';
+import { EDGE_CACHE, ANALYTICS_CACHE } from '../utils/cacheUtils';
 import { type RollingMetrics } from '../services/rollingAnalytics';
 import type { Shot } from '../components/charts/ShotChart';
 import type { Hit } from '../components/charts/HitChart';
@@ -35,6 +37,7 @@ import {
   formatShootingPct,
   formatTOIString,
   formatSeasonId,
+  formatSavePct,
 } from '../utils/formatters';
 import { calculatePointsPerGame } from '../utils/statCalculations';
 import { getRadarChartData, getGoalieRadarChartData } from '../services/playerService';
@@ -197,6 +200,14 @@ function PlayerProfile() {
     retry: 1,
   });
 
+  // Fetch real skater averages for percentile computation
+  const { data: skaterAverages } = useQuery({
+    queryKey: ['skater-averages'],
+    queryFn: () => getSkaterAverages(),
+    staleTime: ANALYTICS_CACHE.LEAGUE_STATS,
+    retry: 1,
+  });
+
   // EDGE data is now passed directly to chart components
   // No synthetic data transformation needed - charts use real EDGE aggregates
 
@@ -251,12 +262,12 @@ function PlayerProfile() {
 
     return {
       position: pos as 'F' | 'D' | 'G',
-      speed: speedData?.leagueAvg?.topSpeed || 22.2,
-      shotVelocity: shotData?.leagueAvg?.maxShotSpeed || 85,
-      distance: distanceData?.leagueAvg?.distancePer60 || 9.0,
-      zoneControl: zoneData?.leagueAvg?.offensiveZonePct || 42,
-      burstFrequency: speedData?.leagueAvg?.bursts22Plus || 4,
-      efficiency: fastBurstsLeagueAvg || 400,
+      speed: speedData?.leagueAvg?.topSpeed ?? 0,
+      shotVelocity: shotData?.leagueAvg?.maxShotSpeed ?? 0,
+      distance: distanceData?.leagueAvg?.distancePer60 ?? 0,
+      zoneControl: zoneData?.leagueAvg?.offensiveZonePct ?? 0,
+      burstFrequency: speedData?.leagueAvg?.bursts22Plus ?? 0,
+      efficiency: fastBurstsLeagueAvg || 0,
     };
   }, [edgeData, player]);
 
@@ -374,7 +385,7 @@ function PlayerProfile() {
           <div className="profile-hero">
             <div className="profile-image-container">
               {player.headshot ? (
-                <img src={player.headshot} alt={player.firstName.default} className="profile-image" />
+                <img src={player.headshot} alt={`${player.firstName.default} ${player.lastName.default}`} className="profile-image" />
               ) : (
                 <div className="profile-image-placeholder">
                   {player.firstName.default[0]}
@@ -382,7 +393,7 @@ function PlayerProfile() {
                 </div>
               )}
               {player.teamLogo && (
-                <img src={player.teamLogo} alt={player.currentTeamAbbrev} className="profile-team-logo" />
+                <img src={player.teamLogo} alt={`${player.fullTeamName?.default || player.currentTeamAbbrev} logo`} className="profile-team-logo" />
               )}
             </div>
 
@@ -454,38 +465,50 @@ function PlayerProfile() {
       <div className="profile-body">
         <div className="page-container">
           {/* Tabs */}
-          <div className="profile-tabs">
+          <div className="profile-tabs" role="tablist" aria-label="Player profile sections">
             <button
+              role="tab"
+              aria-selected={activeTab === 'stats'}
               className={`profile-tab ${activeTab === 'stats' ? 'active' : ''}`}
               onClick={() => setActiveTab('stats')}
             >
               Statistics
             </button>
             <button
+              role="tab"
+              aria-selected={activeTab === 'charts'}
               className={`profile-tab ${activeTab === 'charts' ? 'active' : ''}`}
               onClick={() => setActiveTab('charts')}
             >
               Ice Charts {gameDataLoading && <span className="loading-indicator" />}
             </button>
             <button
+              role="tab"
+              aria-selected={activeTab === 'analytics'}
               className={`profile-tab ${activeTab === 'analytics' ? 'active' : ''}`}
               onClick={() => setActiveTab('analytics')}
             >
               Analytics
             </button>
             <button
+              role="tab"
+              aria-selected={activeTab === 'advanced'}
               className={`profile-tab ${activeTab === 'advanced' ? 'active' : ''}`}
               onClick={() => setActiveTab('advanced')}
             >
               Advanced {analyticsLoading && <span className="loading-indicator" />}
             </button>
             <button
+              role="tab"
+              aria-selected={activeTab === 'edge'}
               className={`profile-tab ${activeTab === 'edge' ? 'active' : ''}`}
               onClick={() => setActiveTab('edge')}
             >
               EDGE Tracking {edgeLoading && <span className="loading-indicator" />}
             </button>
             <button
+              role="tab"
+              aria-selected={activeTab === 'card'}
               className={`profile-tab ${activeTab === 'card' ? 'active' : ''}`}
               onClick={() => setActiveTab('card')}
             >
@@ -535,7 +558,7 @@ function PlayerProfile() {
                         </div>
                         <div className="stat-card highlight">
                           <div className="stat-card-label">SV%</div>
-                          <div className="stat-card-value">{currentSeasonStats.savePctg != null ? (currentSeasonStats.savePctg >= 1 ? currentSeasonStats.savePctg.toFixed(1) : (currentSeasonStats.savePctg * 100).toFixed(1)) + '%' : '-'}</div>
+                          <div className="stat-card-value">{formatSavePct(currentSeasonStats.savePctg)}</div>
                         </div>
                         <div className="stat-card">
                           <div className="stat-card-label">Shutouts</div>
@@ -652,7 +675,7 @@ function PlayerProfile() {
                                   <td style={{ textAlign: 'center' }}>{s.losses ?? '-'}</td>
                                   <td style={{ textAlign: 'center' }}>{s.otLosses ?? '-'}</td>
                                   <td style={{ textAlign: 'center' }}>{s.goalsAgainstAvg != null ? s.goalsAgainstAvg.toFixed(2) : '-'}</td>
-                                  <td style={{ textAlign: 'center' }}>{s.savePctg != null ? (s.savePctg >= 1 ? s.savePctg.toFixed(3) : (s.savePctg * 100).toFixed(1) + '%') : '-'}</td>
+                                  <td style={{ textAlign: 'center' }}>{formatSavePct(s.savePctg)}</td>
                                   <td style={{ textAlign: 'center' }}>{s.shutouts ?? '-'}</td>
                                 </>
                               ) : (
@@ -711,27 +734,27 @@ function PlayerProfile() {
                     {isGoalie ? (
                       <>
                         <div className="career-stat">
-                          <span className="career-stat-value">{(careerStats as any).wins ?? '-'}</span>
+                          <span className="career-stat-value">{careerStats.wins ?? '-'}</span>
                           <span className="career-stat-label">Wins</span>
                         </div>
                         <div className="career-stat">
-                          <span className="career-stat-value">{(careerStats as any).losses ?? '-'}</span>
+                          <span className="career-stat-value">{careerStats.losses ?? '-'}</span>
                           <span className="career-stat-label">Losses</span>
                         </div>
                         <div className="career-stat">
-                          <span className="career-stat-value">{(careerStats as any).otLosses ?? '-'}</span>
+                          <span className="career-stat-value">{careerStats.otLosses ?? '-'}</span>
                           <span className="career-stat-label">OTL</span>
                         </div>
                         <div className="career-stat">
-                          <span className="career-stat-value">{(careerStats as any).goalsAgainstAvg != null ? (careerStats as any).goalsAgainstAvg.toFixed(2) : '-'}</span>
+                          <span className="career-stat-value">{careerStats.goalsAgainstAvg != null ? careerStats.goalsAgainstAvg.toFixed(2) : '-'}</span>
                           <span className="career-stat-label">GAA</span>
                         </div>
                         <div className="career-stat">
-                          <span className="career-stat-value">{(careerStats as any).savePctg != null ? ((careerStats as any).savePctg >= 1 ? (careerStats as any).savePctg.toFixed(3) : ((careerStats as any).savePctg * 100).toFixed(1) + '%') : '-'}</span>
+                          <span className="career-stat-value">{formatSavePct(careerStats.savePctg)}</span>
                           <span className="career-stat-label">SV%</span>
                         </div>
                         <div className="career-stat">
-                          <span className="career-stat-value">{(careerStats as any).shutouts ?? '-'}</span>
+                          <span className="career-stat-value">{careerStats.shutouts ?? '-'}</span>
                           <span className="career-stat-label">Shutouts</span>
                         </div>
                       </>
@@ -776,19 +799,19 @@ function PlayerProfile() {
                     {isGoalie ? (
                       <>
                         <div className="career-stat">
-                          <span className="career-stat-value">{(playoffStats as any).wins ?? '-'}</span>
+                          <span className="career-stat-value">{playoffStats.wins ?? '-'}</span>
                           <span className="career-stat-label">Wins</span>
                         </div>
                         <div className="career-stat">
-                          <span className="career-stat-value">{(playoffStats as any).losses ?? '-'}</span>
+                          <span className="career-stat-value">{playoffStats.losses ?? '-'}</span>
                           <span className="career-stat-label">Losses</span>
                         </div>
                         <div className="career-stat">
-                          <span className="career-stat-value">{(playoffStats as any).goalsAgainstAvg != null ? (playoffStats as any).goalsAgainstAvg.toFixed(2) : '-'}</span>
+                          <span className="career-stat-value">{playoffStats.goalsAgainstAvg != null ? playoffStats.goalsAgainstAvg.toFixed(2) : '-'}</span>
                           <span className="career-stat-label">GAA</span>
                         </div>
                         <div className="career-stat">
-                          <span className="career-stat-value">{(playoffStats as any).shutouts ?? '-'}</span>
+                          <span className="career-stat-value">{playoffStats.shutouts ?? '-'}</span>
                           <span className="career-stat-label">Shutouts</span>
                         </div>
                       </>
@@ -901,6 +924,16 @@ function PlayerProfile() {
                   <p className="empty-state-message">
                     Advanced analytics data is not available for this player in the current season.
                   </p>
+                </div>
+              )}
+
+              {/* xG Flow Chart - Cumulative Expected Goals */}
+              {rollingData.length > 0 && (
+                <div style={{ marginTop: '2rem' }}>
+                  <XGFlowChart
+                    data={rollingData}
+                    playerName={`${player.firstName.default} ${player.lastName.default}`}
+                  />
                 </div>
               )}
 
@@ -1084,11 +1117,12 @@ function PlayerProfile() {
                     analytics={advancedAnalytics || undefined}
                     rollingMetrics={rollingData}
                     pointsPerGame={ppg}
-                    goalsPerGame={currentSeasonStats.goals / currentSeasonStats.gamesPlayed}
+                    goalsPerGame={currentSeasonStats.gamesPlayed > 0 ? currentSeasonStats.goals / currentSeasonStats.gamesPlayed : 0}
                     avgToi={avgToi}
                     shots={currentSeasonStats.shots}
                     powerPlayGoals={currentSeasonStats.powerPlayGoals}
                     gameWinningGoals={currentSeasonStats.gameWinningGoals}
+                    skaterAverages={skaterAverages}
                   />
                 </div>
                 <div className="card-actions">

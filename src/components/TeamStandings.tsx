@@ -69,7 +69,7 @@ function TeamStandings() {
                     {team.teamLogo && (
                       <img
                         src={team.teamLogo}
-                        alt={team.teamAbbrev}
+                        alt={`${team.teamName} logo`}
                         className="team-logo-small"
                       />
                     )}

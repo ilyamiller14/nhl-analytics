@@ -126,12 +126,10 @@ export async function fetchTeamRosterStats(
  * All 32 NHL team abbreviations (2024-25 season)
  * Note: Arizona Coyotes moved to Utah (UTA) for 2024-25
  */
-export const NHL_TEAMS = [
-  'BOS', 'BUF', 'DET', 'FLA', 'MTL', 'OTT', 'TBL', 'TOR', // Atlantic
-  'CAR', 'CBJ', 'NJD', 'NYI', 'NYR', 'PHI', 'PIT', 'WSH', // Metropolitan
-  'UTA', 'CHI', 'COL', 'DAL', 'MIN', 'NSH', 'STL', 'WPG', // Central (Utah replaced Arizona)
-  'ANA', 'CGY', 'EDM', 'LAK', 'SJS', 'SEA', 'VAN', 'VGK', // Pacific
-];
+import { NHL_TEAM_ABBREVS } from '../constants/teams';
+
+// Re-export for backward compatibility
+export const NHL_TEAMS = NHL_TEAM_ABBREVS;
 
 /**
  * Fetch league-wide stats by aggregating ALL 32 team rosters

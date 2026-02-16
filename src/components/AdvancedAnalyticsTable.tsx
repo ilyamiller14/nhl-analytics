@@ -259,27 +259,27 @@ function AdvancedAnalyticsTable({
           <tbody>
             <tr>
               <td className="metric-name">Goals/Game</td>
-              <td className="metric-value">{(goals / gamesPlayed).toFixed(2)}</td>
+              <td className="metric-value">{gamesPlayed > 0 ? (goals / gamesPlayed).toFixed(2) : '0.00'}</td>
               <td className="metric-desc">Average goals per game</td>
             </tr>
             <tr>
               <td className="metric-name">Assists/Game</td>
-              <td className="metric-value">{(assists / gamesPlayed).toFixed(2)}</td>
+              <td className="metric-value">{gamesPlayed > 0 ? (assists / gamesPlayed).toFixed(2) : '0.00'}</td>
               <td className="metric-desc">Average assists per game</td>
             </tr>
             <tr>
               <td className="metric-name">Points/Game</td>
-              <td className="metric-value">{(points / gamesPlayed).toFixed(2)}</td>
+              <td className="metric-value">{gamesPlayed > 0 ? (points / gamesPlayed).toFixed(2) : '0.00'}</td>
               <td className="metric-desc">Average points per game</td>
             </tr>
             <tr>
               <td className="metric-name">Shots/Game</td>
-              <td className="metric-value">{(shots / gamesPlayed).toFixed(1)}</td>
+              <td className="metric-value">{gamesPlayed > 0 ? (shots / gamesPlayed).toFixed(1) : '0.0'}</td>
               <td className="metric-desc">Average shots on goal per game</td>
             </tr>
             <tr>
               <td className="metric-name">TOI/Game</td>
-              <td className="metric-value">{(toiMinutes / gamesPlayed).toFixed(1)} min</td>
+              <td className="metric-value">{gamesPlayed > 0 ? (toiMinutes / gamesPlayed).toFixed(1) : '0.0'} min</td>
               <td className="metric-desc">Average time on ice per game</td>
             </tr>
           </tbody>

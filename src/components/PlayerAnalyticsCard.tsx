@@ -9,6 +9,8 @@
 import { useMemo } from 'react';
 import type { AdvancedPlayerAnalytics } from '../hooks/useAdvancedPlayerAnalytics';
 import type { RollingMetrics } from '../services/rollingAnalytics';
+import type { SkaterAverages } from '../services/leagueAveragesService';
+import { computePercentile } from '../services/leagueAveragesService';
 import XGTimeSeriesChart from './charts/XGTimeSeriesChart';
 import MiniShotMap from './charts/MiniShotMap';
 import './PlayerAnalyticsCard.css';
@@ -48,6 +50,8 @@ interface PlayerAnalyticsCardProps {
     result: 'goal' | 'shot' | 'miss' | 'block';
     xGoal?: number;
   }>;
+  // Real computed skater distributions for percentile calculation
+  skaterAverages?: SkaterAverages | null;
 }
 
 interface MetricGaugeProps {
@@ -138,6 +142,7 @@ export default function PlayerAnalyticsCard({
   powerPlayGoals,
   gameWinningGoals,
   shotEvents,
+  skaterAverages,
 }: PlayerAnalyticsCardProps) {
   // Get latest rolling metrics
   const latestRolling = rollingMetrics && rollingMetrics.length > 0
@@ -145,23 +150,19 @@ export default function PlayerAnalyticsCard({
     : null;
 
   const percentiles = useMemo(() => {
-    const estimatePercentile = (value: number, average: number, stdDev: number) => {
-      const zScore = (value - average) / stdDev;
-      const percentile = 50 * (1 + Math.tanh(zScore * 0.7));
-      return Math.min(99, Math.max(1, percentile));
-    };
+    if (!skaterAverages) return null; // No percentiles without real data
 
-    const xgPercent = analytics?.xGMetrics?.xGPercent || 50;
+    const xgPercent = analytics?.xGMetrics?.xGPercent || 0;
 
     return {
-      ppg: estimatePercentile(pointsPerGame || 0, 0.5, 0.3),
-      gpg: estimatePercentile(goalsPerGame || 0, 0.2, 0.15),
-      xg: estimatePercentile(xgPercent, 50, 8),
+      ppg: computePercentile(pointsPerGame || 0, skaterAverages.pointsPerGame.mean, skaterAverages.pointsPerGame.stdDev),
+      gpg: computePercentile(goalsPerGame || 0, skaterAverages.goalsPerGame.mean, skaterAverages.goalsPerGame.stdDev),
+      xg: computePercentile(xgPercent, 50, 8), // xG% is naturally centered at 50
     };
-  }, [pointsPerGame, goalsPerGame, analytics]);
+  }, [pointsPerGame, goalsPerGame, analytics, skaterAverages]);
 
-  const ppg = pointsPerGame || points / gamesPlayed;
-  const gpg = goalsPerGame || goals / gamesPlayed;
+  const ppg = pointsPerGame ?? (gamesPlayed > 0 ? points / gamesPlayed : 0);
+  const gpg = goalsPerGame ?? (gamesPlayed > 0 ? goals / gamesPlayed : 0);
   const shPct = shots && shots > 0 ? ((goals / shots) * 100) : null;
 
   return (
@@ -317,20 +318,22 @@ export default function PlayerAnalyticsCard({
             {(analytics.onIceXG || analytics.xGMetrics) && (
               <div className="xg-section on-ice-xg">
                 <div className="xg-section-header">On-Ice xG%</div>
-                <div className="gauges-grid">
-                  <MetricGauge
-                    label="xG%"
-                    value={(analytics.onIceXG || analytics.xGMetrics).xGPercent}
-                    percentile={percentiles.xg}
-                    format="percent"
-                  />
-                  <MetricGauge
-                    label="P/GP"
-                    value={ppg}
-                    percentile={percentiles.ppg}
-                    format="decimal"
-                  />
-                </div>
+                {percentiles && (
+                  <div className="gauges-grid">
+                    <MetricGauge
+                      label="xG%"
+                      value={(analytics.onIceXG || analytics.xGMetrics).xGPercent}
+                      percentile={percentiles.xg}
+                      format="percent"
+                    />
+                    <MetricGauge
+                      label="P/GP"
+                      value={ppg}
+                      percentile={percentiles.ppg}
+                      format="decimal"
+                    />
+                  </div>
+                )}
                 <div className="xg-summary">
                   <div className="xg-item">
                     <span className="xg-value">{(analytics.onIceXG || analytics.xGMetrics).xGF.toFixed(2)}</span>

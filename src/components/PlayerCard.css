@@ -90,6 +90,8 @@
   color: var(--gray-900);
   margin: 0 0 0.75rem 0;
   line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .compact .player-name {
@@ -220,5 +222,11 @@
 
   .stat-value {
     font-size: 1.125rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .player-stats-preview {
+    grid-template-columns: repeat(2, 1fr);
   }
 }

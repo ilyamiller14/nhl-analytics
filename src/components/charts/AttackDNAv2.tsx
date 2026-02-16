@@ -207,7 +207,7 @@ export default function AttackDNAv2({
     ).join(' ') + ' Z';
 
     return (
-      <svg width={svgSize} height={svgSize} className="fingerprint-radar" style={{ maxWidth: '100%', height: 'auto' }}>
+      <svg viewBox={`0 0 ${svgSize} ${svgSize}`} className="fingerprint-radar" style={{ width: '100%', maxWidth: `${svgSize}px`, height: 'auto' }}>
         {/* Background rings */}
         {[0.25, 0.5, 0.75, 1].map((ring) => (
           <circle
@@ -301,7 +301,6 @@ export default function AttackDNAv2({
         {analytics.zoneDistribution.map((zone) => {
           const isHovered = hoveredZone === zone.zone;
           const barWidth = (zone.percentage / Math.max(maxPct, 1)) * 100;
-          const leagueWidth = (zone.leagueAvgPct / Math.max(maxPct, 1)) * 100;
 
           return (
             <div
@@ -312,12 +311,6 @@ export default function AttackDNAv2({
             >
               <div className="zone-label">{ZONE_LABELS[zone.zone]}</div>
               <div className="zone-bar-container">
-                {/* League average marker */}
-                <div
-                  className="league-avg-marker"
-                  style={{ left: `${leagueWidth}%` }}
-                  title={`League avg: ${zone.leagueAvgPct.toFixed(1)}%`}
-                />
                 {/* Actual bar */}
                 <div
                   className="zone-bar"
@@ -330,9 +323,6 @@ export default function AttackDNAv2({
               </div>
               <div className="zone-value">
                 <span className="pct">{zone.percentage.toFixed(1)}%</span>
-                <span className={`deviation ${zone.deviation > 0 ? 'positive' : zone.deviation < 0 ? 'negative' : ''}`}>
-                  {zone.deviation > 0 ? '+' : ''}{zone.deviation.toFixed(1)}
-                </span>
               </div>
             </div>
           );

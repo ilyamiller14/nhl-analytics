@@ -200,21 +200,8 @@ export const COLORS = {
   },
 } as const;
 
-// League Averages (fallback values - should be dynamically fetched)
-export const LEAGUE_AVERAGES = {
-  SHOOTING_PCT: 10.5,
-  SAVE_PCT: 90.5,
-  GOALS_PER_GAME: 3.0,
-  SHOTS_PER_GAME: 31,
-  XG_PER_SHOT: 0.08,
-  CORSI_FOR_PCT: 50,
-  FENWICK_FOR_PCT: 50,
-  PDO: 100,
-  POWER_PLAY_PCT: 20,
-  PENALTY_KILL_PCT: 80,
-  HIGH_DANGER_SHOT_PCT: 18,
-  SHOT_ATTEMPTS_PER_SHOT: 1.8,
-} as const;
+// League averages removed — all comparisons now use computed data from
+// leagueAveragesService.ts which fetches real values from the NHL Stats API.
 
 // Convenience aliases for common imports
 export const RINK_DIMENSIONS = {

@@ -148,8 +148,11 @@ export default function FaceoffChart({
           height={height}
           viewBox="0 0 200 85"
           className="faceoff-chart-svg"
+          style={{ maxWidth: '100%', height: 'auto' }}
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setHoveredDot(null)}
+          role="img"
+          aria-label="Faceoff location chart on ice rink"
         >
           {/* Rink background */}
           <NHLRink showZones={true} showDangerZones={false} asGroup={true} />

@@ -28,6 +28,18 @@ import {
   type ChemistryMatrix,
   type PlayerPairChemistry,
 } from '../services/chemistryAnalytics';
+import LineCombinationChart from '../components/charts/LineCombinationChart';
+import RosterBalanceChart from '../components/charts/RosterBalanceChart';
+import {
+  analyzeLineCombinations,
+  type LineComboAnalysis,
+} from '../services/lineComboAnalytics';
+import {
+  analyzeRosterBalance,
+  type RosterBalanceData,
+} from '../services/rosterBalanceAnalytics';
+import { API_CONFIG } from '../config/api';
+import { getCurrentSeason } from '../utils/seasonUtils';
 import './ManagementDashboard.css';
 
 // Period options for the dropdown
@@ -38,43 +50,9 @@ const PERIOD_OPTIONS = [
   { value: 20, label: 'Last 20 Games' },
 ];
 
-// All NHL teams for selector
-const NHL_TEAMS = [
-  { abbrev: 'ANA', name: 'Anaheim Ducks' },
-  { abbrev: 'UTA', name: 'Utah Hockey Club' },
-  { abbrev: 'BOS', name: 'Boston Bruins' },
-  { abbrev: 'BUF', name: 'Buffalo Sabres' },
-  { abbrev: 'CGY', name: 'Calgary Flames' },
-  { abbrev: 'CAR', name: 'Carolina Hurricanes' },
-  { abbrev: 'CHI', name: 'Chicago Blackhawks' },
-  { abbrev: 'COL', name: 'Colorado Avalanche' },
-  { abbrev: 'CBJ', name: 'Columbus Blue Jackets' },
-  { abbrev: 'DAL', name: 'Dallas Stars' },
-  { abbrev: 'DET', name: 'Detroit Red Wings' },
-  { abbrev: 'EDM', name: 'Edmonton Oilers' },
-  { abbrev: 'FLA', name: 'Florida Panthers' },
-  { abbrev: 'LAK', name: 'Los Angeles Kings' },
-  { abbrev: 'MIN', name: 'Minnesota Wild' },
-  { abbrev: 'MTL', name: 'Montreal Canadiens' },
-  { abbrev: 'NSH', name: 'Nashville Predators' },
-  { abbrev: 'NJD', name: 'New Jersey Devils' },
-  { abbrev: 'NYI', name: 'New York Islanders' },
-  { abbrev: 'NYR', name: 'New York Rangers' },
-  { abbrev: 'OTT', name: 'Ottawa Senators' },
-  { abbrev: 'PHI', name: 'Philadelphia Flyers' },
-  { abbrev: 'PIT', name: 'Pittsburgh Penguins' },
-  { abbrev: 'SJS', name: 'San Jose Sharks' },
-  { abbrev: 'SEA', name: 'Seattle Kraken' },
-  { abbrev: 'STL', name: 'St. Louis Blues' },
-  { abbrev: 'TBL', name: 'Tampa Bay Lightning' },
-  { abbrev: 'TOR', name: 'Toronto Maple Leafs' },
-  { abbrev: 'VAN', name: 'Vancouver Canucks' },
-  { abbrev: 'VGK', name: 'Vegas Golden Knights' },
-  { abbrev: 'WSH', name: 'Washington Capitals' },
-  { abbrev: 'WPG', name: 'Winnipeg Jets' },
-];
+import { NHL_TEAMS } from '../constants/teams';
 
-type ViewMode = 'team' | 'chemistry';
+type ViewMode = 'team' | 'chemistry' | 'lines' | 'roster';
 
 export default function ManagementDashboard() {
   const { teamAbbrev } = useParams<{ teamAbbrev: string }>();
@@ -92,6 +70,8 @@ export default function ManagementDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [loadingProgress, setLoadingProgress] = useState<string>('');
   const [selectedPeriod, setSelectedPeriod] = useState<number>(10); // Default to last 10 games
+  const [lineComboData, setLineComboData] = useState<LineComboAnalysis | null>(null);
+  const [rosterBalanceData, setRosterBalanceData] = useState<RosterBalanceData | null>(null);
 
   // Load team data when team changes (only fetches data, doesn't compute)
   useEffect(() => {
@@ -267,6 +247,70 @@ export default function ManagementDashboard() {
     loadChemistry();
   }, [viewMode, playByPlayData, teamData, playerInfo, shiftsLoaded, chemistryMatrix]);
 
+  // Load line combination data on-demand
+  useEffect(() => {
+    if (viewMode !== 'lines') return;
+    if (!playByPlayData.length || !teamData) return;
+    if (lineComboData) return; // Already computed
+
+    const analysis = analyzeLineCombinations(
+      playByPlayData,
+      teamData.info.teamId,
+      teamData.roster
+    );
+    setLineComboData(analysis);
+  }, [viewMode, playByPlayData, teamData, lineComboData]);
+
+  // Load roster balance data on-demand
+  useEffect(() => {
+    if (viewMode !== 'roster') return;
+    if (!teamData) return;
+    if (rosterBalanceData) return; // Already computed
+
+    async function loadRosterBalance() {
+      setLoadingProgress('Loading player stats for roster analysis...');
+      try {
+        // Fetch player season stats for all skaters
+        const season = getCurrentSeason();
+        const playerStats = new Map<number, { points: number; goals: number; assists: number; gamesPlayed: number }>();
+
+        // Fetch team stats summary which includes individual player stats
+        const url = `${API_CONFIG.NHL_STATS}/skater/summary?cayenneExp=seasonId=${season} and teamId=${teamData!.info.teamId}&limit=100`;
+        try {
+          const resp = await fetch(url);
+          if (resp.ok) {
+            const data = await resp.json();
+            for (const s of (data.data || [])) {
+              playerStats.set(s.playerId, {
+                points: s.points || 0,
+                goals: s.goals || 0,
+                assists: s.assists || 0,
+                gamesPlayed: s.gamesPlayed || 0,
+              });
+            }
+          }
+        } catch {
+          // Fall back: use leaders data if available
+          console.warn('Could not fetch skater stats, roster balance will have limited data');
+        }
+
+        const balance = analyzeRosterBalance(
+          teamData!.roster,
+          playerStats,
+          teamData!.info.teamId,
+          season
+        );
+        setRosterBalanceData(balance);
+        setLoadingProgress('');
+      } catch (err) {
+        console.error('Error loading roster balance:', err);
+        setLoadingProgress('');
+      }
+    }
+
+    loadRosterBalance();
+  }, [viewMode, teamData, rosterBalanceData]);
+
   // Team selector view
   if (!teamAbbrev) {
     return (
@@ -357,6 +401,18 @@ export default function ManagementDashboard() {
               onClick={() => setViewMode('chemistry')}
             >
               Chemistry
+            </button>
+            <button
+              className={`toggle-btn ${viewMode === 'lines' ? 'active' : ''}`}
+              onClick={() => setViewMode('lines')}
+            >
+              Line Combos
+            </button>
+            <button
+              className={`toggle-btn ${viewMode === 'roster' ? 'active' : ''}`}
+              onClick={() => setViewMode('roster')}
+            >
+              Roster Balance
             </button>
           </div>
         </div>
@@ -568,6 +624,47 @@ export default function ManagementDashboard() {
               </div>
             </section>
           </>
+        )}
+
+        {/* Line Combinations Tab */}
+        {viewMode === 'lines' && !lineComboData && (
+          <div className="loading-container">
+            <div className="loading-spinner"></div>
+            <p className="loading-text">Analyzing line combinations...</p>
+          </div>
+        )}
+
+        {viewMode === 'lines' && lineComboData && (
+          <section className="dashboard-section">
+            <h2 className="section-title">Line Combination Performance</h2>
+            <p className="section-subtitle">
+              Forward lines and defense pairs ranked by 5v5 shot differential.
+              Based on on-ice player combinations across {lineComboData.gamesAnalyzed} games.
+            </p>
+            <div className="chart-card full-width">
+              <LineCombinationChart data={lineComboData} />
+            </div>
+          </section>
+        )}
+
+        {/* Roster Balance Tab */}
+        {viewMode === 'roster' && !rosterBalanceData && (
+          <div className="loading-container">
+            <div className="loading-spinner"></div>
+            <p className="loading-text">{loadingProgress || 'Loading roster analysis...'}</p>
+          </div>
+        )}
+
+        {viewMode === 'roster' && rosterBalanceData && (
+          <section className="dashboard-section">
+            <h2 className="section-title">Roster Balance Analysis</h2>
+            <p className="section-subtitle">
+              Age distribution, scoring depth, and roster construction insights
+            </p>
+            <div className="chart-card full-width">
+              <RosterBalanceChart data={rosterBalanceData} />
+            </div>
+          </section>
         )}
       </div>
     </div>

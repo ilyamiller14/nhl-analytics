@@ -39,23 +39,12 @@ interface SpeedProfileChartProps {
   playerName?: string;
 }
 
-// Default league averages by position (real NHL EDGE data)
-const DEFAULT_LEAGUE_AVERAGES: Record<string, PositionalAverage> = {
-  F: {
-    averageSpeed: 14.2,
-    topSpeed: 22.1,
-    burstsPerGame: { tier1: 4.5, tier2: 2.5, tier3: 1.2 },
-  },
-  D: {
-    averageSpeed: 13.5,
-    topSpeed: 21.4,
-    burstsPerGame: { tier1: 3.8, tier2: 2.0, tier3: 0.8 },
-  },
-  G: {
-    averageSpeed: 8.5,
-    topSpeed: 14.2,
-    burstsPerGame: { tier1: 0.5, tier2: 0.1, tier3: 0 },
-  },
+// No hardcoded averages - league avg comes from EDGE API leagueAvg fields
+// Comparison bars only shown when real league data is available
+const EMPTY_LEAGUE_AVERAGES: Record<string, PositionalAverage> = {
+  F: { averageSpeed: 0, topSpeed: 0, burstsPerGame: { tier1: 0, tier2: 0, tier3: 0 } },
+  D: { averageSpeed: 0, topSpeed: 0, burstsPerGame: { tier1: 0, tier2: 0, tier3: 0 } },
+  G: { averageSpeed: 0, topSpeed: 0, burstsPerGame: { tier1: 0, tier2: 0, tier3: 0 } },
 };
 
 // Burst tier colors
@@ -73,7 +62,18 @@ export default function SpeedProfileChart({
   const position = speedData.position === 'D' ? 'D' :
                    speedData.position === 'G' ? 'G' : 'F';
 
-  const avgData = DEFAULT_LEAGUE_AVERAGES[position];
+  // Use league averages from EDGE API data when available, otherwise empty
+  const avgData = (speedData as any).leagueAvg
+    ? {
+        averageSpeed: 0,
+        topSpeed: (speedData as any).leagueAvg.topSpeed || 0,
+        burstsPerGame: {
+          tier1: ((speedData as any).leagueAvg.bursts18To20 || 0) / Math.max(speedData.gamesPlayed || 1, 1),
+          tier2: ((speedData as any).leagueAvg.bursts20To22 || 0) / Math.max(speedData.gamesPlayed || 1, 1),
+          tier3: ((speedData as any).leagueAvg.bursts22Plus || 0) / Math.max(speedData.gamesPlayed || 1, 1),
+        },
+      }
+    : EMPTY_LEAGUE_AVERAGES[position];
 
   // Use REAL EDGE burst data directly
   const burstFrequency = useMemo(() => {
@@ -111,12 +111,12 @@ export default function SpeedProfileChart({
       topSpeed: {
         value: speedData.topSpeed || 0,
         diff: topSpeedDiff,
-        percentile: calculatePercentile(speedData.topSpeed || 0, avgData.topSpeed, 2.0),
+        percentile: calculatePercentile(speedData.topSpeed || 0, avgData.topSpeed),
       },
       avgTopSpeed: {
         value: speedData.avgTopSpeed || 0,
         diff: avgTopSpeedDiff,
-        percentile: calculatePercentile(speedData.avgTopSpeed || 0, avgData.topSpeed, 2.0),
+        percentile: calculatePercentile(speedData.avgTopSpeed || 0, avgData.topSpeed),
       },
     };
   }, [speedData, avgData]);
@@ -277,9 +277,10 @@ export default function SpeedProfileChart({
   );
 }
 
-// Helper function to estimate percentile from value and average
-function calculatePercentile(value: number, average: number, stdDev: number): number {
-  const zScore = (value - average) / stdDev;
-  const percentile = Math.round(50 + 50 * Math.tanh(zScore * 0.7));
+// Calculate percentile using ratio to league average (no assumed std devs)
+function calculatePercentile(value: number, average: number): number {
+  if (average === 0 || value === 0) return 50;
+  const ratio = value / average;
+  const percentile = Math.round(50 * ratio);
   return Math.max(1, Math.min(99, percentile));
 }

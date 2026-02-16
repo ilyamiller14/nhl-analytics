@@ -1,7 +1,7 @@
 // NHL API response type definitions
 
 import type { Player, PlayerSearchResult } from './player';
-import type { SeasonStats } from './stats';
+import type { SeasonStats, CareerRegularSeasonStats } from './stats';
 
 export interface SearchResponse {
   data: PlayerSearchResult[];
@@ -84,8 +84,8 @@ export interface PlayerLandingResponse {
     };
   };
   careerTotals?: {
-    regularSeason: SeasonStats;
-    playoffs?: SeasonStats;
+    regularSeason: CareerRegularSeasonStats;
+    playoffs?: CareerRegularSeasonStats;
   };
   shopLink?: string;
   twitterLink?: string;
@@ -101,8 +101,8 @@ export interface PlayerStatsResponse {
   playerId: number;
   seasonId: number;
   careerTotals?: {
-    regularSeason: SeasonStats;
-    playoffs?: SeasonStats;
+    regularSeason: CareerRegularSeasonStats;
+    playoffs?: CareerRegularSeasonStats;
   };
   featuredStats?: {
     season: number;

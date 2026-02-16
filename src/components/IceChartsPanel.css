@@ -27,6 +27,8 @@
   margin-bottom: 24px;
   border-bottom: 2px solid #dee2e6;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 
 .chart-tab {
@@ -158,9 +160,19 @@
   border: 2px dashed #dee2e6;
 }
 
-.empty-state-icon {
+.ice-charts-empty .empty-state-icon {
   font-size: 4rem;
   margin-bottom: 16px;
+}
+
+@media (max-width: 480px) {
+  .ice-charts-empty {
+    padding: 2rem 1rem;
+  }
+
+  .ice-charts-empty .empty-state-icon {
+    font-size: 3rem;
+  }
 }
 
 .empty-state-title {

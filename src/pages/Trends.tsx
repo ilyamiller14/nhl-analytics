@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import LeagueLeaders from '../components/LeagueLeaders';
 import TeamStandings from '../components/TeamStandings';
 import LeagueAdvancedAnalytics from '../components/LeagueAdvancedAnalytics';
-import { fetchTrendingPlayers, fetchCategoryLeaders, fetchGoalieLeaders, type LeagueLeader } from '../services/statsService';
+import { fetchCategoryLeaders, fetchGoalieLeaders, type LeagueLeader } from '../services/statsService';
 import { Link } from 'react-router-dom';
 import './Trends.css';
 
@@ -20,8 +20,7 @@ function Trends() {
     async function loadData() {
       setIsLoading(true);
       try {
-        const [, categories, goalieLeaders] = await Promise.all([
-          fetchTrendingPlayers(),
+        const [categories, goalieLeaders] = await Promise.all([
           fetchCategoryLeaders(),
           fetchGoalieLeaders('wins', 10),
         ]);
@@ -103,26 +102,38 @@ function Trends() {
         </div>
 
         {/* Tabs */}
-        <div className="trends-tabs">
+        <div className="trends-tabs" role="tablist" aria-label="Trends navigation">
           <button
+            role="tab"
+            aria-selected={activeTab === 'leaders'}
+            aria-controls="panel-leaders"
             className={`tab-button ${activeTab === 'leaders' ? 'active' : ''}`}
             onClick={() => setActiveTab('leaders')}
           >
             League Leaders
           </button>
           <button
+            role="tab"
+            aria-selected={activeTab === 'standings'}
+            aria-controls="panel-standings"
             className={`tab-button ${activeTab === 'standings' ? 'active' : ''}`}
             onClick={() => setActiveTab('standings')}
           >
             Team Standings
           </button>
           <button
+            role="tab"
+            aria-selected={activeTab === 'analytics'}
+            aria-controls="panel-analytics"
             className={`tab-button ${activeTab === 'analytics' ? 'active' : ''}`}
             onClick={() => setActiveTab('analytics')}
           >
             Advanced Analytics
           </button>
           <button
+            role="tab"
+            aria-selected={activeTab === 'trends'}
+            aria-controls="panel-trends"
             className={`tab-button ${activeTab === 'trends' ? 'active' : ''}`}
             onClick={() => setActiveTab('trends')}
           >
@@ -131,7 +142,7 @@ function Trends() {
         </div>
 
         {/* Tab Content */}
-        <div className="trends-content">
+        <div className="trends-content" role="tabpanel" id={`panel-${activeTab}`}>
           {activeTab === 'leaders' && <LeagueLeaders />}
 
           {activeTab === 'standings' && <TeamStandings />}

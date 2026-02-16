@@ -168,16 +168,22 @@ export function useAdvancedPlayerAnalytics(
             );
             const gamePlayerGoals = gamePlayerShots.filter((s) => s.result === 'goal').length;
 
-            // Get date from game ID (format: YYYYMMDD in first 8 digits conceptually)
-            // NHL game IDs are like 2024020123, extract season year
-            const gameDate = new Date().toISOString().split('T')[0]; // Placeholder
+            // Use actual game date from play-by-play data
+            const gameDate = playByPlay.gameDate || new Date().toISOString().split('T')[0];
+
+            // Count assists from goal events where this player is listed as an assister
+            const gamePlayerAssists = playByPlay.allEvents.filter(
+              (play: any) =>
+                play.typeDescKey === 'goal' &&
+                play.details?.assists?.some((a: any) => a.playerId === playerId)
+            ).length;
 
             perGameMetrics.push({
               gameId,
               date: gameDate,
               goals: gamePlayerGoals,
-              assists: 0, // Would need event parsing to get assists
-              points: gamePlayerGoals, // Simplified - just goals
+              assists: gamePlayerAssists,
+              points: gamePlayerGoals + gamePlayerAssists,
               shotsFor: shotsFor.filter((s) => s.result === 'goal' || s.result === 'shot-on-goal').length,
               shotsAgainst: shotsAgainst.filter((s) => s.result === 'goal' || s.result === 'shot-on-goal').length,
               shotAttemptsFor: shotsFor.length,
@@ -255,30 +261,23 @@ export function useAdvancedPlayerAnalytics(
           (shot) => shot.shootingPlayerId === playerId
         );
 
-        // Calculate Individual xG (ixG) - sum of xG from player's OWN shots
-        const calculateSingleShotXG = (xCoord: number, yCoord: number, shotType: string) => {
-          const distance = calculateDistance(xCoord, yCoord);
-          const angle = calculateShotAngle(xCoord, yCoord);
-          const typeMultiplier = {
-            'wrist': 1.0, 'slap': 0.85, 'snap': 1.05,
-            'backhand': 0.80, 'tip': 1.35, 'wrap': 0.70
-          }[mapShotType(shotType)] || 1.0;
-
-          const logit = -0.5 + distance * -0.045 + angle * -0.025 + Math.log(typeMultiplier);
-          const xg = 1 / (1 + Math.exp(-logit));
-          return Math.max(0.005, Math.min(0.60, xg));
-        };
-
-        // Calculate ixG for each of player's personal shots
+        // Calculate Individual xG (ixG) using canonical xG model for consistency
         const playerShotsWithXG = playerPersonalShots.map((shot) => {
-          const xg = calculateSingleShotXG(shot.xCoord, shot.yCoord, shot.shotType);
+          const distance = calculateDistance(shot.xCoord, shot.yCoord);
+          const angle = calculateShotAngle(shot.xCoord, shot.yCoord);
+          const prediction = calculateXG({
+            distance,
+            angle,
+            shotType: mapShotType(shot.shotType),
+            strength: '5v5', // TODO: parse actual strength from situationCode
+          });
           return {
             x: shot.xCoord,
             y: shot.yCoord,
             result: shot.result === 'goal' ? 'goal' as const :
                     shot.result === 'shot-on-goal' ? 'shot' as const :
                     shot.result === 'missed-shot' ? 'miss' as const : 'block' as const,
-            xGoal: xg,
+            xGoal: prediction.xGoal,
           };
         });
 

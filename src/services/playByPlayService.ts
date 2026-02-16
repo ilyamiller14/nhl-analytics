@@ -580,8 +580,17 @@ export function convertToShotAttempt(shotEvent: ShotEvent): ShotAttempt {
 
   const shotType = shotTypeMap[shotEvent.shotType?.toLowerCase()] || 'wrist';
 
-  // Parse strength from situation code
-  const strength: '5v5' | 'PP' | 'SH' | '4v4' | '3v3' = '5v5'; // Default to even strength
+  // Parse strength from situation code (e.g., "1551" = home skaters, home goalie, away skaters, away goalie)
+  let strength: '5v5' | 'PP' | 'SH' | '4v4' | '3v3' = '5v5';
+  const sitCode = shotEvent.situation?.strength || '';
+  if (sitCode.length === 4) {
+    const homeSkaters = parseInt(sitCode[0], 10);
+    const awaySkaters = parseInt(sitCode[2], 10);
+    if (homeSkaters > awaySkaters) strength = 'PP';
+    else if (homeSkaters < awaySkaters) strength = 'SH';
+    else if (homeSkaters === 4) strength = '4v4';
+    else if (homeSkaters === 3) strength = '3v3';
+  }
 
   // Calculate expected goals (xG)
   const xgPrediction = calculateXG({

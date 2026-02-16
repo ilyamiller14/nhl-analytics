@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchLeagueLeaders, type LeagueLeader } from '../services/statsService';
+import { fetchLeagueLeaders, fetchGoalieLeaders, type LeagueLeader } from '../services/statsService';
 import './LeagueLeaders.css';
 
 const STAT_OPTIONS = [
@@ -21,7 +21,9 @@ function LeagueLeaders() {
     async function loadLeaders() {
       setIsLoading(true);
       try {
-        const data = await fetchLeagueLeaders(selectedStat, 50);
+        const data = selectedStat === 'wins'
+          ? await fetchGoalieLeaders('wins', 50)
+          : await fetchLeagueLeaders(selectedStat, 50);
         setLeaders(data);
       } catch (error) {
         console.error('Failed to load leaders:', error);
@@ -41,7 +43,7 @@ function LeagueLeaders() {
         <div className="league-leaders-header">
           <h2>League Leaders</h2>
         </div>
-        <div className="loading-message">
+        <div className="loading-message" role="status" aria-live="polite">
           <p>Loading real-time NHL leaders...</p>
         </div>
       </div>
@@ -57,6 +59,7 @@ function LeagueLeaders() {
             value={selectedStat}
             onChange={(e) => setSelectedStat(e.target.value)}
             className="stat-select"
+            aria-label="Select statistic category"
           >
             {STAT_OPTIONS.map((option) => (
               <option key={option.key} value={option.key}>
@@ -69,6 +72,7 @@ function LeagueLeaders() {
             value={displayCount}
             onChange={(e) => setDisplayCount(parseInt(e.target.value))}
             className="count-select"
+            aria-label="Number of leaders to display"
           >
             <option value={10}>Top 10</option>
             <option value={20}>Top 20</option>

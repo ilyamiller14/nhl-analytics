@@ -12,6 +12,7 @@
  */
 
 import type { LeaguePlayerStats } from './leagueStatsService';
+import { calculatePercentile } from '../utils/statCalculations';
 
 /**
  * Extended player stats with all computed advanced metrics
@@ -238,22 +239,8 @@ export function computeAdvancedMetricsForPlayers(
   return players.map(computeAdvancedMetrics);
 }
 
-/**
- * Get league-wide percentiles for a specific metric
- * Useful for comparing a player's performance relative to the league
- */
-export function calculatePercentile(
-  value: number,
-  allValues: number[]
-): number {
-  const sorted = [...allValues].sort((a, b) => a - b);
-  const index = sorted.findIndex(v => v >= value);
-
-  if (index === -1) return 100;
-  if (index === 0) return 0;
-
-  return (index / sorted.length) * 100;
-}
+// Re-export calculatePercentile from statCalculations for backward compatibility
+export { calculatePercentile };
 
 /**
  * Filter players by position for position-specific analysis

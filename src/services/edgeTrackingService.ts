@@ -18,9 +18,7 @@ import { API_CONFIG } from '../config/api';
 // Use proxy in development, Cloudflare Worker in production
 const NHL_API_BASE_URL = API_CONFIG.NHL_WEB;
 
-// Current season constant (2025-26 season)
 import { getCurrentSeason } from '../utils/seasonUtils';
-const CURRENT_SEASON = getCurrentSeason();
 
 // Default game type (regular season)
 const DEFAULT_GAME_TYPE: EdgeGameType = 2;
@@ -148,19 +146,19 @@ function transformSpeedResponse(raw: RawSpeedResponse): SpeedDataWithLeagueAvg {
     burstsPerGame18To20: bursts18To20,
     burstsPerGame20To22: bursts20To22,
     burstsPerGame22Plus: bursts22Plus,
-    // League averages from API
+    // League averages from API (0 when API doesn't provide them)
     leagueAvg: {
-      topSpeed: details.maxSkatingSpeed?.leagueAvg?.imperial || 22.2,
-      bursts22Plus: details.burstsOver22?.leagueAvg || 4,
-      bursts20To22: details.bursts20To22?.leagueAvg || 73,
-      bursts18To20: details.bursts18To20?.leagueAvg || 326,
+      topSpeed: details.maxSkatingSpeed?.leagueAvg?.imperial || 0,
+      bursts22Plus: details.burstsOver22?.leagueAvg || 0,
+      bursts20To22: details.bursts20To22?.leagueAvg || 0,
+      bursts18To20: details.bursts18To20?.leagueAvg || 0,
     },
-    // Percentiles from API
+    // Percentiles from API (0 when API doesn't provide them)
     percentiles: {
-      topSpeed: (details.maxSkatingSpeed?.percentile || 0.5) * 100,
-      bursts22Plus: (details.burstsOver22?.percentile || 0.5) * 100,
-      bursts20To22: (details.bursts20To22?.percentile || 0.5) * 100,
-      bursts18To20: (details.bursts18To20?.percentile || 0.5) * 100,
+      topSpeed: (details.maxSkatingSpeed?.percentile || 0) * 100,
+      bursts22Plus: (details.burstsOver22?.percentile || 0) * 100,
+      bursts20To22: (details.bursts20To22?.percentile || 0) * 100,
+      bursts18To20: (details.bursts18To20?.percentile || 0) * 100,
     },
   } as SpeedDataWithLeagueAvg;
 }
@@ -190,8 +188,8 @@ function transformZoneTimeResponse(raw: RawZoneTimeResponse): ZoneTimeWithLeague
       offensiveZonePct: 0,
       defensiveZonePct: 0,
       neutralZonePct: 0,
-      leagueAvg: { offensiveZonePct: 42.3, neutralZonePct: 17.8, defensiveZonePct: 39.8 },
-      percentiles: { offensiveZonePct: 50, neutralZonePct: 50, defensiveZonePct: 50 },
+      leagueAvg: { offensiveZonePct: 0, neutralZonePct: 0, defensiveZonePct: 0 },
+      percentiles: { offensiveZonePct: 0, neutralZonePct: 0, defensiveZonePct: 0 },
     } as ZoneTimeWithLeagueAvg;
   }
   return {
@@ -203,14 +201,14 @@ function transformZoneTimeResponse(raw: RawZoneTimeResponse): ZoneTimeWithLeague
     defensiveZonePct: (allStrength.defensiveZonePctg || 0) * 100,
     neutralZonePct: (allStrength.neutralZonePctg || 0) * 100,
     leagueAvg: {
-      offensiveZonePct: (allStrength.offensiveZoneLeagueAvg || 0.423) * 100,
-      neutralZonePct: (allStrength.neutralZoneLeagueAvg || 0.178) * 100,
-      defensiveZonePct: (allStrength.defensiveZoneLeagueAvg || 0.398) * 100,
+      offensiveZonePct: (allStrength.offensiveZoneLeagueAvg || 0) * 100,
+      neutralZonePct: (allStrength.neutralZoneLeagueAvg || 0) * 100,
+      defensiveZonePct: (allStrength.defensiveZoneLeagueAvg || 0) * 100,
     },
     percentiles: {
-      offensiveZonePct: (allStrength.offensiveZonePercentile || 0.5) * 100,
-      neutralZonePct: (allStrength.neutralZonePercentile || 0.5) * 100,
-      defensiveZonePct: (allStrength.defensiveZonePercentile || 0.5) * 100,
+      offensiveZonePct: (allStrength.offensiveZonePercentile || 0) * 100,
+      neutralZonePct: (allStrength.neutralZonePercentile || 0) * 100,
+      defensiveZonePct: (allStrength.defensiveZonePercentile || 0) * 100,
     },
   } as ZoneTimeWithLeagueAvg;
 }
@@ -242,8 +240,8 @@ function transformDistanceResponse(raw: RawDistanceResponse): DistanceWithLeague
       evenStrengthDistance: 0,
       powerPlayDistance: 0,
       penaltyKillDistance: 0,
-      leagueAvg: { distancePer60: 9.0 },
-      percentiles: { distancePer60: 50 },
+      leagueAvg: { distancePer60: 0 },
+      percentiles: { distancePer60: 0 },
     } as DistanceWithLeagueAvg;
   }
   return {
@@ -257,10 +255,10 @@ function transformDistanceResponse(raw: RawDistanceResponse): DistanceWithLeague
     powerPlayDistance: ppStrength?.distanceTotal?.imperial || 0,
     penaltyKillDistance: pkStrength?.distanceTotal?.imperial || 0,
     leagueAvg: {
-      distancePer60: allStrength.distancePer60?.leagueAvg?.imperial || 9.0,
+      distancePer60: allStrength.distancePer60?.leagueAvg?.imperial || 0,
     },
     percentiles: {
-      distancePer60: (allStrength.distancePer60?.percentile || 0.5) * 100,
+      distancePer60: (allStrength.distancePer60?.percentile || 0) * 100,
     },
   } as DistanceWithLeagueAvg;
 }
@@ -299,12 +297,12 @@ function transformShotSpeedResponse(raw: RawShotSpeedResponse): ShotSpeedWithLea
     shots80To90: s80to90,
     shots90Plus: s90to100 + over100,
     leagueAvg: {
-      avgShotSpeed: details?.avgShotSpeed?.leagueAvg?.imperial || 65,
-      maxShotSpeed: details?.topShotSpeed?.leagueAvg?.imperial || 85,
+      avgShotSpeed: details?.avgShotSpeed?.leagueAvg?.imperial || 0,
+      maxShotSpeed: details?.topShotSpeed?.leagueAvg?.imperial || 0,
     },
     percentiles: {
-      avgShotSpeed: (details?.avgShotSpeed?.percentile || 0.5) * 100,
-      maxShotSpeed: (details?.topShotSpeed?.percentile || 0.5) * 100,
+      avgShotSpeed: (details?.avgShotSpeed?.percentile || 0) * 100,
+      maxShotSpeed: (details?.topShotSpeed?.percentile || 0) * 100,
     },
   } as unknown as ShotSpeedWithLeagueAvg;
 }
@@ -320,7 +318,7 @@ function transformComparisonResponse(raw: RawComparisonResponse): SkaterComparis
   // Set percentile to 0 here — consuming code should use detailed endpoint data
   // from SpeedDataWithLeagueAvg.percentiles, ZoneTimeWithLeagueAvg.percentiles, etc.
   const ozPct = (zoneDetails?.offensiveZonePctg || 0) * 100;
-  const ozLeagueAvg = (zoneDetails?.offensiveZoneLeagueAvg || 0.42) * 100;
+  const ozLeagueAvg = (zoneDetails?.offensiveZoneLeagueAvg || 0) * 100;
 
   const createRanking = (value: number, leagueAvg: number) => ({
     value,
@@ -341,19 +339,19 @@ function transformComparisonResponse(raw: RawComparisonResponse): SkaterComparis
     percentiles: {
       topSpeed: createRanking(
         speedDetails?.maxSkatingSpeed?.imperial || 0,
-        22.5 // League avg top speed ~22.5 mph
+        0 // No hardcoded league avg — use real data from leagueAveragesService
       ),
       avgSpeed: createRanking(
         speedDetails?.maxSkatingSpeed?.imperial || 0,
-        22.5
+        0
       ),
       bursts22Plus: createRanking(
         speedDetails?.burstsOver22 || 0,
-        15 // League avg bursts ~15
+        0
       ),
       distancePerGame: createRanking(
         distanceDetails?.distancePer60?.imperial || 0,
-        9.0 // League avg ~9 mi per 60
+        0
       ),
       offensiveZonePct: createRanking(ozPct, ozLeagueAvg),
       avgShiftLength: createRanking(0, 45),
@@ -430,7 +428,7 @@ class EdgeTrackingService {
   private buildEndpoint(
     metric: string,
     entityId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): string {
     return `/edge/${metric}/${entityId}/${season}/${gameType}`;
@@ -451,7 +449,7 @@ class EdgeTrackingService {
    */
   async getSkaterDetail(
     playerId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<SkaterDetail> {
     const endpoint = this.buildEndpoint('skater-detail', playerId, season, gameType);
@@ -469,7 +467,7 @@ class EdgeTrackingService {
    */
   async getSkaterSpeedDetail(
     playerId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<SkaterSpeedDetail> {
     const endpoint = this.buildEndpoint('skater-skating-speed-detail', playerId, season, gameType);
@@ -488,7 +486,7 @@ class EdgeTrackingService {
    */
   async getSkaterDistanceDetail(
     playerId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<SkaterDistanceDetail> {
     const endpoint = this.buildEndpoint('skater-skating-distance-detail', playerId, season, gameType);
@@ -507,7 +505,7 @@ class EdgeTrackingService {
    */
   async getSkaterZoneTime(
     playerId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<SkaterZoneTime> {
     const endpoint = this.buildEndpoint('skater-zone-time', playerId, season, gameType);
@@ -526,7 +524,7 @@ class EdgeTrackingService {
    */
   async getSkaterComparison(
     playerId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<SkaterComparison> {
     const endpoint = this.buildEndpoint('skater-comparison', playerId, season, gameType);
@@ -549,7 +547,7 @@ class EdgeTrackingService {
    */
   async getShotSpeedDetail(
     playerId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<ShotSpeedDetail> {
     const endpoint = this.buildEndpoint('skater-shot-speed-detail', playerId, season, gameType);
@@ -571,7 +569,7 @@ class EdgeTrackingService {
    */
   async getTeamDetail(
     teamId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<TeamEdgeDetail> {
     const endpoint = this.buildEndpoint('team-detail', teamId, season, gameType);
@@ -589,7 +587,7 @@ class EdgeTrackingService {
    */
   async getTeamSpeedDetail(
     teamId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<TeamSpeedDetail> {
     const endpoint = this.buildEndpoint('team-skating-speed-detail', teamId, season, gameType);
@@ -611,7 +609,7 @@ class EdgeTrackingService {
    */
   async getGoalieDetail(
     playerId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<GoalieEdgeDetail> {
     const endpoint = this.buildEndpoint('goalie-detail', playerId, season, gameType);
@@ -627,7 +625,7 @@ class EdgeTrackingService {
    * @returns Current season in YYYYYYYY format
    */
   getCurrentSeasonId(): string {
-    return CURRENT_SEASON;
+    return getCurrentSeason();
   }
 
   /**
@@ -650,7 +648,7 @@ class EdgeTrackingService {
    */
   async getAllSkaterData(
     playerId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<{
     detail: SkaterDetail;
@@ -698,7 +696,7 @@ class EdgeTrackingService {
    */
   async getAllTeamData(
     teamId: number,
-    season: string = CURRENT_SEASON,
+    season: string = getCurrentSeason(),
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<{
     detail: TeamEdgeDetail;
@@ -723,4 +721,4 @@ export const edgeTrackingService = new EdgeTrackingService();
 export default EdgeTrackingService;
 
 // Export current season constant for external use
-export { CURRENT_SEASON, DEFAULT_GAME_TYPE };
+export { DEFAULT_GAME_TYPE };

@@ -67,14 +67,15 @@ const REBOUND_WINDOW = 3;
 const FLOW_GRID_WIDTH = 10;
 const FLOW_GRID_HEIGHT = 8;
 
-/** League average fingerprint values (for comparison) */
+/** League average fingerprint values — zeroed out (no hardcoded assumptions).
+ * Deviation from average will be 0 unless real league data is provided. */
 const LEAGUE_AVERAGES = {
-  rushTendency: 25,
-  cycleTendency: 30,
-  pointShotFocus: 20,
-  netFrontPresence: 15,
-  transitionSpeed: 50,
-  entryAggression: 55,
+  rushTendency: 0,
+  cycleTendency: 0,
+  pointShotFocus: 0,
+  netFrontPresence: 0,
+  transitionSpeed: 0,
+  entryAggression: 0,
 };
 
 // ============================================================================
@@ -982,7 +983,7 @@ import type {
   AttackDNAv2,
 } from '../types/playStyle';
 
-import { LEAGUE_AVERAGES_V2 } from '../types/playStyle';
+// No league averages import needed - all comparisons use computed data
 
 /** High-danger zone threshold (feet from goal) */
 const HIGH_DANGER_DISTANCE = 25;
@@ -1182,15 +1183,14 @@ export function computeZoneDistribution(shots: ShotLocation[]): ShotZoneDistribu
   return zones.map((zone) => {
     const { shots: shotCount, goals: goalCount } = zoneCounts[zone];
     const percentage = (shotCount / totalShots) * 100;
-    const leagueAvgPct = LEAGUE_AVERAGES_V2.zoneDistribution[zone];
 
     return {
       zone,
       shotCount,
       goalCount,
       percentage,
-      leagueAvgPct,
-      deviation: percentage - leagueAvgPct,
+      leagueAvgPct: 0,
+      deviation: 0,
     };
   });
 }
@@ -1386,10 +1386,10 @@ export function calculateRollingAverages(
       avgTimeToShot,
       avgShotDistance,
       shootingPct: avgShootingPct,
-      // Zone distribution would need per-game zone data
-      slotPct: avgHighDangerPct, // Approximate
-      pointPct: 100 - avgHighDangerPct - 30, // Rough estimate
-      boardsPct: 30,
+      // Zone distribution derived from high-danger percentage
+      slotPct: avgHighDangerPct,
+      pointPct: Math.max(0, 100 - avgHighDangerPct) * 0.55, // Approximate split of remaining
+      boardsPct: Math.max(0, 100 - avgHighDangerPct) * 0.45,
     });
   }
 

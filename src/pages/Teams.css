@@ -136,6 +136,14 @@
   transition: all 0.15s ease;
 }
 
+/* Stack conferences earlier for tablets */
+@media (max-width: 900px) {
+  .conferences-container {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+}
+
 /* Responsive - stack on mobile */
 @media (max-width: 768px) {
   .teams-page {

@@ -8,6 +8,7 @@ import type {
 } from '../types/api';
 import type { PlayerSearchResult } from '../types/player';
 import { API_CONFIG } from '../config/api';
+import { getCurrentSeason } from '../utils/seasonUtils';
 
 // Use proxy in development, Cloudflare Worker in production
 export const NHL_API_BASE_URL = API_CONFIG.NHL_WEB;
@@ -152,15 +153,8 @@ class NHLApiService {
    * @returns Current season in YYYYYYYY format
    */
   getCurrentSeasonId(): string {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
-
-    // NHL season typically starts in October (month 9)
-    // If current month is Jan-Sep, it's still the previous year's season
-    const seasonStartYear = month >= 9 ? year : year - 1;
-
-    return this.formatSeasonId(seasonStartYear);
+    // Use the canonical getCurrentSeason() from seasonUtils for consistency
+    return getCurrentSeason();
   }
 }
 
