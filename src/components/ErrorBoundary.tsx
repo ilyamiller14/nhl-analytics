@@ -24,13 +24,24 @@ export default class ErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  componentDidCatch(_error: Error, _info: ErrorInfo) {
-    // Intentionally left empty — avoid console in production
+  componentDidCatch(error: Error, _info: ErrorInfo) {
+    // Auto-reload on chunk load failure (stale deployment)
+    const isChunkError =
+      error.message?.includes('Failed to fetch dynamically imported module') ||
+      error.message?.includes('Importing a module script failed') ||
+      error.name === 'ChunkLoadError';
+
+    if (isChunkError) {
+      const lastReload = sessionStorage.getItem('chunk-error-reload');
+      if (!lastReload || Date.now() - parseInt(lastReload) > 10000) {
+        sessionStorage.setItem('chunk-error-reload', Date.now().toString());
+        window.location.reload();
+      }
+    }
   }
 
   handleReload = () => {
-    this.setState({ hasError: false, error: null });
+    window.location.reload();
   };
 
   render() {

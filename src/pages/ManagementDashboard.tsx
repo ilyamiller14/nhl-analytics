@@ -122,9 +122,12 @@ export default function ManagementDashboard() {
           // Fall back to individual fetches (slower)
           setLoadingProgress(`Loading ${completedGames.length} games individually...`);
           const gameIds = completedGames.map((g) => g.gameId);
-          pbpData = await Promise.all(
-            gameIds.map((id) => fetchGamePlayByPlay(id))
+          const results = await Promise.all(
+            gameIds.map((id) =>
+              fetchGamePlayByPlay(id).catch(() => null)
+            )
           );
+          pbpData = results.filter((g): g is GamePlayByPlay => g !== null);
         }
         setPlayByPlayData(pbpData);
 
@@ -142,6 +145,8 @@ export default function ManagementDashboard() {
         setPlayerInfo({ ids: playerIds, names: playerNames });
         setShiftsLoaded(false); // Reset - shifts need to be fetched for chemistry
         setChemistryMatrix(null);
+        setLineComboData(null);
+        setRosterBalanceData(null);
         setLoadingProgress('');
       } catch (err) {
         console.error('Error loading management data:', err);
