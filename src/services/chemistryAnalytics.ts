@@ -10,7 +10,6 @@
  */
 
 import type { GamePlayByPlay, ShotEvent, PlayerShift } from './playByPlayService';
-import { fetchGameShifts } from './playByPlayService';
 import { parseTimeToSeconds } from '../utils/timeUtils';
 
 // ============================================================================
@@ -190,12 +189,12 @@ function getPlayersOnIceForShot(
  * Calculate pair chemistry from a set of games
  * Fetches real shift data on demand when not already present.
  */
-export async function calculatePairChemistry(
+export function calculatePairChemistry(
   gamesPlayByPlay: GamePlayByPlay[],
   player1Id: number,
   player2Id: number,
   teamId: number
-): Promise<PlayerPairChemistry> {
+): PlayerPairChemistry {
   const pairKey = getPairKey(player1Id, player2Id);
   const [sortedP1, sortedP2] = pairKey.split('-').map(Number);
 
@@ -207,20 +206,12 @@ export async function calculatePairChemistry(
   const player2Only = { shots: 0, goals: 0 };
 
   for (const game of gamesPlayByPlay) {
-    let { shifts } = game;
-    const { shots, homeTeamId } = game;
+    const { shifts, shots, homeTeamId } = game;
     const opponentTeamId = homeTeamId === teamId ? game.awayTeamId : homeTeamId;
 
-    // Fetch real shift data on demand if not present
-    if (!shifts || shifts.length === 0) {
-      try {
-        shifts = await fetchGameShifts(game.gameId);
-      } catch {
-        shifts = [];
-      }
-    }
-
+    // Skip games without shift data — caller should pre-load shifts
     const hasShifts = shifts && shifts.length > 0;
+    if (!hasShifts) continue;
 
     // Calculate overlapping time precisely from real shifts
     if (hasShifts) {
@@ -321,12 +312,12 @@ export async function calculatePairChemistry(
 /**
  * Build a full chemistry matrix for a roster
  */
-export async function buildChemistryMatrix(
+export function buildChemistryMatrix(
   gamesPlayByPlay: GamePlayByPlay[],
   teamId: number,
   playerIds: number[],
   playerNames: Map<number, string>
-): Promise<ChemistryMatrix> {
+): ChemistryMatrix {
   const matrix = new Map<string, PlayerPairChemistry>();
 
   // Calculate chemistry for each pair
@@ -334,7 +325,7 @@ export async function buildChemistryMatrix(
     for (let j = i + 1; j < playerIds.length; j++) {
       const p1 = playerIds[i];
       const p2 = playerIds[j];
-      const chemistry = await calculatePairChemistry(gamesPlayByPlay, p1, p2, teamId);
+      const chemistry = calculatePairChemistry(gamesPlayByPlay, p1, p2, teamId);
 
       // Add player names
       chemistry.player1Name = playerNames.get(chemistry.player1Id);
