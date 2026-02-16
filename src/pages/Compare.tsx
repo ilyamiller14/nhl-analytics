@@ -38,12 +38,41 @@ function Compare() {
   // Fetch player data when selected from search
   const { data: searchedPlayer } = usePlayerStats(searchPlayerId, searchPlayerId !== null);
 
+  const [duplicateMessage, setDuplicateMessage] = useState('');
+
   useEffect(() => {
     if (searchedPlayer) {
-      addPlayer(searchedPlayer);
+      // If player already exists with current season, try adding with previous season
+      const currentSeason = searchedPlayer.featuredStats?.season;
+      const alreadyHasCurrent = entries.some(
+        (e) => e.player.playerId === searchedPlayer.playerId && e.season === currentSeason
+      );
+
+      if (alreadyHasCurrent) {
+        // Find the most recent season not already in the list
+        const usedSeasons = new Set(
+          entries.filter((e) => e.player.playerId === searchedPlayer.playerId).map((e) => e.season)
+        );
+        const availableSeasons = (searchedPlayer.seasonTotals || [])
+          .filter((s) => s.leagueAbbrev === 'NHL' && s.gameTypeId === 2)
+          .map((s) => s.season)
+          .filter((s) => !usedSeasons.has(s))
+          .sort((a, b) => b - a);
+
+        if (availableSeasons.length > 0) {
+          addPlayer(searchedPlayer, availableSeasons[0]);
+          setDuplicateMessage(`Added ${searchedPlayer.firstName.default} ${searchedPlayer.lastName.default} with ${formatSeasonDisplay(availableSeasons[0])} season. Use the dropdown to change.`);
+          setTimeout(() => setDuplicateMessage(''), 4000);
+        } else {
+          setDuplicateMessage('This player is already added for all available seasons.');
+          setTimeout(() => setDuplicateMessage(''), 3000);
+        }
+      } else {
+        addPlayer(searchedPlayer);
+      }
       setSearchPlayerId(null);
     }
-  }, [searchedPlayer, addPlayer]);
+  }, [searchedPlayer, addPlayer, entries]);
 
   const handlePlayerSelect = (player: PlayerSearchResult) => {
     // Check max entries
@@ -65,6 +94,15 @@ function Compare() {
     }));
   }, [entries, getEntryStats]);
 
+  // Build metric key -> label mapping for display
+  const metricLabels = useMemo(() => {
+    const labels: Record<string, string> = {};
+    DEFAULT_METRICS.forEach((m) => {
+      labels[m.key] = m.label;
+    });
+    return labels;
+  }, []);
+
   return (
     <div className="compare-page">
       <div className="page-container">
@@ -85,6 +123,11 @@ function Compare() {
             {maxPlayersMessage && (
               <div role="status" aria-live="polite" style={{ color: '#b45309', marginTop: '0.5rem', fontSize: '0.875rem' }}>
                 Maximum 4 players can be compared at once. Remove a player to add another.
+              </div>
+            )}
+            {duplicateMessage && (
+              <div role="status" aria-live="polite" style={{ color: '#2563eb', marginTop: '0.5rem', fontSize: '0.875rem' }}>
+                {duplicateMessage}
               </div>
             )}
           </div>
@@ -202,6 +245,7 @@ function Compare() {
                 <PlayerComparison
                   entries={comparisonEntries}
                   selectedMetrics={selectedMetrics}
+                  metricLabels={metricLabels}
                 />
               </div>
             )}

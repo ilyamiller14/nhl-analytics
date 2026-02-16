@@ -83,10 +83,10 @@ export default function XGFlowChart({ data, playerName }: XGFlowChartProps) {
       {/* Header */}
       <div style={{ marginBottom: '1rem' }}>
         <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-          xG Flow Chart {playerName && `— ${playerName}`}
+          On-Ice xG Flow {playerName && `— ${playerName}`}
         </h3>
         <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-          Cumulative expected goals vs actual goals over the season. Shows finishing efficiency and variance from expected production.
+          Cumulative on-ice expected goals vs on-ice actual goals over the season. Shows team finishing efficiency while this player is on the ice.
         </p>
       </div>
 
@@ -103,7 +103,7 @@ export default function XGFlowChart({ data, playerName }: XGFlowChartProps) {
       >
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>
-            Cumulative xG
+            On-Ice xG
           </div>
           <div style={{ fontSize: '1.5rem', fontWeight: 600, color: '#f59e0b' }}>
             {latestData.cumulativeXG.toFixed(1)}
@@ -111,7 +111,7 @@ export default function XGFlowChart({ data, playerName }: XGFlowChartProps) {
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>
-            Actual Goals
+            On-Ice Goals
           </div>
           <div style={{ fontSize: '1.5rem', fontWeight: 600, color: '#3b82f6' }}>
             {latestData.cumulativeGoals}
@@ -190,11 +190,11 @@ export default function XGFlowChart({ data, playerName }: XGFlowChartProps) {
                     {new Date(data.date).toLocaleDateString()}
                   </div>
                   <div style={{ fontSize: '0.875rem', marginBottom: '0.25rem' }}>
-                    <span style={{ color: '#3b82f6' }}>Cumulative Goals: </span>
+                    <span style={{ color: '#3b82f6' }}>On-Ice Goals: </span>
                     <strong>{data.cumulativeGoals}</strong>
                   </div>
                   <div style={{ fontSize: '0.875rem', marginBottom: '0.25rem' }}>
-                    <span style={{ color: '#f59e0b' }}>Cumulative xG: </span>
+                    <span style={{ color: '#f59e0b' }}>On-Ice xG: </span>
                     <strong>{data.cumulativeXG.toFixed(1)}</strong>
                   </div>
                   <div style={{ fontSize: '0.875rem', marginBottom: '0.25rem' }}>
@@ -224,8 +224,8 @@ export default function XGFlowChart({ data, playerName }: XGFlowChartProps) {
             wrapperStyle={{ paddingTop: '1rem' }}
             iconType="line"
             formatter={(value) => {
-              if (value === 'cumulativeGoals') return 'Actual Goals';
-              if (value === 'cumulativeXG') return 'Expected Goals (xG)';
+              if (value === 'cumulativeGoals') return 'On-Ice Goals';
+              if (value === 'cumulativeXG') return 'On-Ice xG';
               return value;
             }}
           />

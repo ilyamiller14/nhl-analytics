@@ -83,27 +83,33 @@ export interface SpecialTeamsAnalytics {
 
 /**
  * Parse game situation from NHL API situation code
- * Format examples: "1521" where:
- * - 1st digit: home team defending side
- * - 2nd-3rd digits: home skaters
- * - 4th-5th digits: away skaters
+ * Format: "1551" where digits are: homeSkaters, homeGoalie, awaySkaters, awayGoalie
+ * Returns HomeVsAway format: '5v5' means home has 5, away has 5
  */
 export function parseSituation(situationCode: string): GameSituation {
   if (!situationCode || situationCode.length < 4) return '5v5';
 
-  // Extract skater counts (simplified parsing)
-  const code = situationCode.slice(1); // Remove defending side digit
+  const homeSkaters = parseInt(situationCode[0], 10);
+  const awaySkaters = parseInt(situationCode[2], 10);
 
-  // Common patterns
-  if (code.includes('55')) return '5v5';
-  if (code.includes('54') || code.includes('45')) return '5v4';
-  if (code.includes('53') || code.includes('35')) return '5v3';
-  if (code.includes('44')) return '4v4';
-  if (code.includes('43') || code.includes('34')) return '4v3';
-  if (code.includes('33')) return '3v3';
+  if (isNaN(homeSkaters) || isNaN(awaySkaters)) return '5v5';
 
-  // Default to even strength
-  return '5v5';
+  const key = `${homeSkaters}v${awaySkaters}`;
+
+  // Map to known GameSituation values
+  const validSituations: Record<string, GameSituation> = {
+    '5v5': '5v5',
+    '5v4': '5v4',
+    '4v5': '4v5',
+    '5v3': '5v3',
+    '3v5': '3v5',
+    '4v4': '4v4',
+    '4v3': '4v3',
+    '3v4': '3v4',
+    '3v3': '3v3',
+  };
+
+  return validSituations[key] || '5v5';
 }
 
 /**

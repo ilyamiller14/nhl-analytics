@@ -49,8 +49,9 @@ function UnitTable({ units, type }: { units: SpecialTeamsUnit[]; type: 'pp' | 'p
     );
   }
 
-  // Compute ranges for heat coloring
-  const sfRange = { min: Math.min(...units.map(u => u.shotsForPer60)), max: Math.max(...units.map(u => u.shotsForPer60)) };
+  // Compute ranges for heat coloring — use correct metric per unit type
+  const shotValues = units.map(u => isPP ? u.shotsForPer60 : u.shotsAgainstPer60);
+  const sfRange = { min: Math.min(...shotValues), max: Math.max(...shotValues) };
   const hdRange = { min: Math.min(...units.map(u => u.highDangerShotsPer60)), max: Math.max(...units.map(u => u.highDangerShotsPer60)) };
   const xgRange = { min: Math.min(...units.map(u => u.xGForPer60)), max: Math.max(...units.map(u => u.xGForPer60)) };
 

@@ -13,6 +13,7 @@ interface ComparisonEntryData {
 interface PlayerComparisonProps {
   entries: ComparisonEntryData[];
   selectedMetrics: string[];
+  metricLabels?: Record<string, string>;
 }
 
 function formatSeasonShort(season: number): string {
@@ -21,10 +22,14 @@ function formatSeasonShort(season: number): string {
   return `${startYear}-${String(endYear).slice(2)}`;
 }
 
-function PlayerComparison({ entries, selectedMetrics }: PlayerComparisonProps) {
+function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: PlayerComparisonProps) {
   if (entries.length === 0) {
     return null;
   }
+
+  const getMetricLabel = (metric: string): string => {
+    return metricLabels[metric] || metric;
+  };
 
   // Build display labels (include season when same player appears multiple times)
   const playerIds = entries.map((e) => e.player.playerId);
@@ -38,9 +43,9 @@ function PlayerComparison({ entries, selectedMetrics }: PlayerComparisonProps) {
     return name;
   };
 
-  // Prepare radar chart data
+  // Prepare radar chart data — use labels for display
   const radarData = selectedMetrics.map((metric) => {
-    const dataPoint: any = { metric };
+    const dataPoint: any = { metric: getMetricLabel(metric) };
 
     entries.forEach((entry) => {
       if (entry.stats) {
@@ -82,46 +87,23 @@ function PlayerComparison({ entries, selectedMetrics }: PlayerComparisonProps) {
     return String(value);
   };
 
+  // Highlight best value per metric
+  const getBestValue = (metric: string): number | null => {
+    const values = entries
+      .map((e) => (e.stats as any)?.[metric])
+      .filter((v): v is number => typeof v === 'number');
+    if (values.length === 0) return null;
+    // For +/-, higher is better. For all other metrics, higher is better too.
+    return Math.max(...values);
+  };
+
   const colors = ['#003087', '#C8102E', '#0055A4', '#10b981'];
 
   return (
     <div className="player-comparison">
-      {/* Radar Chart */}
-      {selectedMetrics.length >= 3 && (
-        <div className="comparison-section">
-          <h3 className="comparison-title">Performance Comparison (Radar)</h3>
-          <StatChart
-            data={radarData}
-            type="radar"
-            dataKeys={entries.map((entry, index) => ({
-              key: getLabel(entry),
-              name: getLabel(entry),
-              color: colors[index % colors.length],
-            }))}
-            xAxisKey="metric"
-            height={450}
-          />
-        </div>
-      )}
-
-      {/* Bar Chart */}
+      {/* Comparison Table — show first as it's most useful */}
       <div className="comparison-section">
-        <h3 className="comparison-title">Side-by-Side Comparison (Bar Chart)</h3>
-        <StatChart
-          data={barChartData}
-          type="bar"
-          dataKeys={selectedMetrics.map((metric) => ({
-            key: metric,
-            name: metric.toUpperCase(),
-          }))}
-          xAxisKey="name"
-          height={400}
-        />
-      </div>
-
-      {/* Comparison Table */}
-      <div className="comparison-section">
-        <h3 className="comparison-title">Detailed Stats Table</h3>
+        <h3 className="comparison-title">Detailed Stats Comparison</h3>
         <div className="comparison-table-container">
           <table className="comparison-table">
             <thead>
@@ -143,7 +125,7 @@ function PlayerComparison({ entries, selectedMetrics }: PlayerComparisonProps) {
                         </div>
                         <div className="player-team-short">
                           {entry.player.currentTeamAbbrev}
-                          {hasDuplicates && ` • ${formatSeasonShort(entry.season)}`}
+                          {` • ${formatSeasonShort(entry.season)}`}
                         </div>
                       </div>
                     </div>
@@ -152,19 +134,63 @@ function PlayerComparison({ entries, selectedMetrics }: PlayerComparisonProps) {
               </tr>
             </thead>
             <tbody>
-              {selectedMetrics.map((metric) => (
-                <tr key={metric}>
-                  <td className="metric-name">{metric.toUpperCase()}</td>
-                  {entries.map((entry) => (
-                    <td key={`${entry.player.playerId}-${entry.season}`} className="stat-value">
-                      {getStatValue(entry.stats, metric)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
+              {selectedMetrics.map((metric) => {
+                const best = getBestValue(metric);
+                return (
+                  <tr key={metric}>
+                    <td className="metric-name">{getMetricLabel(metric)}</td>
+                    {entries.map((entry) => {
+                      const raw = (entry.stats as any)?.[metric];
+                      const isBest = typeof raw === 'number' && raw === best && entries.length > 1;
+                      return (
+                        <td
+                          key={`${entry.player.playerId}-${entry.season}`}
+                          className="stat-value"
+                          style={isBest ? { fontWeight: 700, color: '#059669' } : undefined}
+                        >
+                          {getStatValue(entry.stats, metric)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Radar Chart */}
+      {selectedMetrics.length >= 3 && (
+        <div className="comparison-section">
+          <h3 className="comparison-title">Performance Radar</h3>
+          <StatChart
+            data={radarData}
+            type="radar"
+            dataKeys={entries.map((entry, index) => ({
+              key: getLabel(entry),
+              name: getLabel(entry),
+              color: colors[index % colors.length],
+            }))}
+            xAxisKey="metric"
+            height={450}
+          />
+        </div>
+      )}
+
+      {/* Bar Chart */}
+      <div className="comparison-section">
+        <h3 className="comparison-title">Side-by-Side (Bar Chart)</h3>
+        <StatChart
+          data={barChartData}
+          type="bar"
+          dataKeys={selectedMetrics.map((metric) => ({
+            key: metric,
+            name: getMetricLabel(metric),
+          }))}
+          xAxisKey="name"
+          height={400}
+        />
       </div>
     </div>
   );

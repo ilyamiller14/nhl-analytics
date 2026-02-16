@@ -47,20 +47,9 @@ export default function IceChartsPanel({
 }: IceChartsPanelProps) {
   const [activeView, setActiveView] = useState<'shots' | 'heatmap' | 'hits' | 'faceoffs' | 'passes' | 'attack-dna' | 'turnovers' | 'zone-heat' | 'conversion'>('shots');
 
-  // Generate turnovers from hits if not provided (giveaways near hits, takeaways elsewhere)
-  const turnovers: Turnover[] = propTurnovers || hits.map((hit, i) => ({
-    x: hit.x + (Math.random() - 0.5) * 20,
-    y: hit.y + (Math.random() - 0.5) * 10,
-    type: i % 3 === 0 ? 'giveaway' : 'takeaway',
-    zoneCode: hit.x > 25 ? 'O' : hit.x < -25 ? 'D' : 'N',
-  }));
-
-  // Generate ice time events from shots/hits if not provided
-  const iceTimeEvents: IceTimeEvent[] = propIceTimeEvents || [
-    ...shots.map(s => ({ x: s.x, y: s.y, duration: 2, eventType: 'shot' })),
-    ...hits.map(h => ({ x: h.x, y: h.y, duration: 1, eventType: 'hit' })),
-    ...faceoffs.map(f => ({ x: f.x, y: f.y, duration: 3, eventType: 'faceoff' })),
-  ];
+  // Use real turnover and ice time event data only — no fabricated data
+  const turnovers: Turnover[] = propTurnovers || [];
+  const iceTimeEvents: IceTimeEvent[] = propIceTimeEvents || [];
 
   if (isLoading) {
     return (
