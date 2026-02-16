@@ -307,32 +307,204 @@ export function calculatePairChemistry(
 }
 
 /**
- * Build a full chemistry matrix for a roster
+ * Build a full chemistry matrix for a roster.
+ *
+ * Optimized: iterates over games/shots/shifts ONCE and aggregates per-pair,
+ * instead of iterating all data per-pair (which was O(pairs × games × shifts)).
+ * Yields to the event loop between games to keep the UI responsive.
  */
-export function buildChemistryMatrix(
+export async function buildChemistryMatrix(
   gamesPlayByPlay: GamePlayByPlay[],
   teamId: number,
   playerIds: number[],
   playerNames: Map<number, string>
-): ChemistryMatrix {
-  const matrix = new Map<string, PlayerPairChemistry>();
+): Promise<ChemistryMatrix> {
+  const playerIdSet = new Set(playerIds);
 
-  // Calculate chemistry for each pair
-  for (let i = 0; i < playerIds.length; i++) {
-    for (let j = i + 1; j < playerIds.length; j++) {
-      const p1 = playerIds[i];
-      const p2 = playerIds[j];
-      const chemistry = calculatePairChemistry(gamesPlayByPlay, p1, p2, teamId);
+  // Accumulators per pair
+  interface PairAccumulator {
+    toiTogether: number;
+    shiftsOverlapping: number;
+    together: { shots: number; goals: number; highDangerShots: number; shotsAgainst: number; goalsAgainst: number };
+    player1Only: { shots: number; goals: number };
+    player2Only: { shots: number; goals: number };
+  }
+  const pairData = new Map<string, PairAccumulator>();
 
-      // Add player names
-      chemistry.player1Name = playerNames.get(chemistry.player1Id);
-      chemistry.player2Name = playerNames.get(chemistry.player2Id);
+  const getOrCreatePair = (key: string): PairAccumulator => {
+    let pair = pairData.get(key);
+    if (!pair) {
+      pair = {
+        toiTogether: 0,
+        shiftsOverlapping: 0,
+        together: { shots: 0, goals: 0, highDangerShots: 0, shotsAgainst: 0, goalsAgainst: 0 },
+        player1Only: { shots: 0, goals: 0 },
+        player2Only: { shots: 0, goals: 0 },
+      };
+      pairData.set(key, pair);
+    }
+    return pair;
+  };
 
-      // Only include pairs with meaningful data
-      if (chemistry.shiftsOverlapping > 5) {
-        matrix.set(getPairKey(p1, p2), chemistry);
+  // Process each game once
+  for (let gameIdx = 0; gameIdx < gamesPlayByPlay.length; gameIdx++) {
+    const game = gamesPlayByPlay[gameIdx];
+    const { shifts, shots, homeTeamId } = game;
+    if (!shifts || shifts.length === 0) continue;
+
+    // Yield to event loop every 5 games to keep UI responsive
+    if (gameIdx > 0 && gameIdx % 5 === 0) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    // Index shifts by player for this game (only our team's players)
+    const playerShifts = new Map<number, PlayerShift[]>();
+    for (const shift of shifts) {
+      if (shift.teamId !== teamId || !playerIdSet.has(shift.playerId)) continue;
+      let arr = playerShifts.get(shift.playerId);
+      if (!arr) { arr = []; playerShifts.set(shift.playerId, arr); }
+      arr.push(shift);
+    }
+
+    // Compute pairwise shift overlaps for players who appear in this game
+    const activePlayers = Array.from(playerShifts.keys()).sort((a, b) => a - b);
+    for (let i = 0; i < activePlayers.length; i++) {
+      const p1Shifts = playerShifts.get(activePlayers[i])!;
+      for (let j = i + 1; j < activePlayers.length; j++) {
+        const p2Shifts = playerShifts.get(activePlayers[j])!;
+        const key = getPairKey(activePlayers[i], activePlayers[j]);
+        const pair = getOrCreatePair(key);
+
+        for (const s1 of p1Shifts) {
+          for (const s2 of p2Shifts) {
+            const overlap = getShiftOverlap(s1, s2);
+            if (overlap >= SHIFT_OVERLAP_THRESHOLD) {
+              pair.toiTogether += overlap;
+              pair.shiftsOverlapping++;
+            }
+          }
+        }
       }
     }
+
+    // Process shots: determine on-ice players from enriched shot data or shifts
+    for (const shot of shots) {
+      // Get our team's players on ice for this shot
+      let ourOnIce: number[];
+      const isHome = teamId === homeTeamId;
+      const onIceArr = isHome ? shot.homePlayersOnIce : shot.awayPlayersOnIce;
+
+      if (onIceArr && onIceArr.length > 0) {
+        ourOnIce = onIceArr.filter(id => playerIdSet.has(id));
+      } else {
+        // Fallback: check shifts
+        const shotTimeSec = parseTimeToSeconds(shot.timeInPeriod);
+        ourOnIce = [];
+        for (const [pid, pShifts] of playerShifts) {
+          for (const s of pShifts) {
+            if (s.period === shot.period) {
+              const start = parseTimeToSeconds(s.startTime);
+              const end = parseTimeToSeconds(s.endTime);
+              if (shotTimeSec >= start && shotTimeSec <= end) {
+                ourOnIce.push(pid);
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if (ourOnIce.length < 2) continue;
+      ourOnIce.sort((a, b) => a - b);
+
+      const isOurShot = shot.teamId === teamId;
+      const isOpponentShot = shot.teamId !== teamId && shot.teamId !== 0;
+      const isGoal = shot.result === 'goal';
+      const isHD = isHighDangerShot(shot.xCoord, shot.yCoord);
+
+      // For each pair of on-ice players, update their "together" stats
+      for (let i = 0; i < ourOnIce.length; i++) {
+        for (let j = i + 1; j < ourOnIce.length; j++) {
+          const key = getPairKey(ourOnIce[i], ourOnIce[j]);
+          const pair = getOrCreatePair(key);
+
+          if (isOurShot) {
+            pair.together.shots++;
+            if (isGoal) pair.together.goals++;
+            if (isHD) pair.together.highDangerShots++;
+          } else if (isOpponentShot) {
+            pair.together.shotsAgainst++;
+            if (isGoal) pair.together.goalsAgainst++;
+          }
+        }
+      }
+
+      // Track "apart" stats: players on our team NOT on ice for this shot
+      if (isOurShot) {
+        const onIceSet = new Set(ourOnIce);
+        for (const pid of activePlayers) {
+          if (onIceSet.has(pid)) continue;
+          // This player was NOT on ice but the shot happened
+          for (const onIcePid of ourOnIce) {
+            const key = getPairKey(pid, onIcePid);
+            const pair = getOrCreatePair(key);
+            // The on-ice player had a shot without the off-ice player
+            const [sortedP1] = key.split('-').map(Number);
+            if (onIcePid === sortedP1) {
+              pair.player1Only.shots++;
+              if (isGoal) pair.player1Only.goals++;
+            } else {
+              pair.player2Only.shots++;
+              if (isGoal) pair.player2Only.goals++;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Build final matrix from accumulated data
+  const matrix = new Map<string, PlayerPairChemistry>();
+
+  for (const [key, data] of pairData) {
+    if (data.shiftsOverlapping <= 5) continue;
+
+    const [p1, p2] = key.split('-').map(Number);
+
+    const totalShotsTogether = data.together.shots;
+    const totalShotsApart = data.player1Only.shots + data.player2Only.shots;
+    const totalShots = totalShotsTogether + totalShotsApart;
+
+    const shotSupportRate = totalShots > 0
+      ? (totalShotsTogether / totalShots) * 100
+      : 50;
+
+    const shotsPerMinuteTogether = data.toiTogether > 0 ? (data.together.shots / (data.toiTogether / 60)) : 0;
+    const offensiveScore = Math.min(100, shotsPerMinuteTogether * 10);
+
+    const shotsAgainstPerMinute = data.toiTogether > 0 ? (data.together.shotsAgainst / (data.toiTogether / 60)) : 0;
+    const defensiveScore = Math.max(0, 100 - shotsAgainstPerMinute * 15);
+
+    const chemistryIndex = Math.round(
+      offensiveScore * CHEMISTRY_WEIGHTS.offensiveProduction +
+      Math.min(100, shotSupportRate) * CHEMISTRY_WEIGHTS.shotSupport +
+      defensiveScore * CHEMISTRY_WEIGHTS.defensiveImpact
+    );
+
+    matrix.set(key, {
+      player1Id: p1,
+      player2Id: p2,
+      player1Name: playerNames.get(p1),
+      player2Name: playerNames.get(p2),
+      gamesAnalyzed: gamesPlayByPlay.length,
+      estimatedToiTogether: data.toiTogether,
+      shiftsOverlapping: data.shiftsOverlapping,
+      together: data.together,
+      apart: { player1Only: data.player1Only, player2Only: data.player2Only },
+      chemistryIndex: Math.min(100, Math.max(0, chemistryIndex)),
+      shotSupportRate: Math.round(shotSupportRate),
+      defensiveChemistry: Math.round(defensiveScore),
+    });
   }
 
   return {
