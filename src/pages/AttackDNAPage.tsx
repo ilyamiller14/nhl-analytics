@@ -21,7 +21,8 @@ import {
   calculateGameMetrics,
   buildSeasonTrend,
 } from '../services/playStyleAnalytics';
-import { fetchGamePlayByPlay, fetchPlayerSeasonGames } from '../services/playByPlayService';
+import { fetchGamePlayByPlay, fetchPlayerSeasonGames, type GamePlayByPlay } from '../services/playByPlayService';
+import { fetchCachedTeamPBP, convertCachedToGamePBP } from '../services/cachedDataService';
 import { API_CONFIG } from '../config/api';
 import { getCurrentSeason, formatSeasonString } from '../utils/seasonUtils';
 import type { AttackDNAv2 as AttackDNAv2Type, SeasonTrend, GameMetrics } from '../types/playStyle';
@@ -44,6 +45,7 @@ interface CachedData {
   teamId: number;
   allGameIds: number[];
   gameOpponents: Map<number, { opponent: string; isHome: boolean; date: string }>;
+  cachedGames?: GamePlayByPlay[]; // Pre-loaded games from edge cache
 }
 
 export default function AttackDNAPage() {
@@ -198,13 +200,58 @@ export default function AttackDNAPage() {
     const gameIds = completedGames.reverse().map((g: any) => g.id);
     setTotalGamesAvailable(gameIds.length);
 
+    // Try to load pre-cached play-by-play data from edge (instant)
+    let preloadedGames: GamePlayByPlay[] | undefined;
+    try {
+      const edgeCached = await fetchCachedTeamPBP(abbrev);
+      if (edgeCached && edgeCached.length > 0) {
+        preloadedGames = edgeCached.map(convertCachedToGamePBP);
+        console.log(`Attack DNA: loaded ${preloadedGames.length} games from edge cache`);
+      }
+    } catch (err) {
+      console.warn('Edge cache not available for Attack DNA:', err);
+    }
+
     // Cache data
     setCachedData({
       entityInfo: info,
       teamId,
       allGameIds: gameIds,
       gameOpponents,
+      cachedGames: preloadedGames,
     });
+  };
+
+  // Helper: get game PBP data, preferring pre-loaded cache
+  const getGameData = async (data: CachedData, gameIds: number[]): Promise<GamePlayByPlay[]> => {
+    if (data.cachedGames && data.cachedGames.length > 0) {
+      // Use pre-loaded edge cache data, indexed by gameId
+      const cacheMap = new Map(data.cachedGames.map(g => [g.gameId, g]));
+      const results: GamePlayByPlay[] = [];
+      const missing: number[] = [];
+
+      for (const id of gameIds) {
+        const cached = cacheMap.get(id);
+        if (cached) {
+          results.push(cached);
+        } else {
+          missing.push(id);
+        }
+      }
+
+      // Fetch any games not in edge cache individually
+      if (missing.length > 0) {
+        const fetched = await Promise.all(
+          missing.map(id => fetchGamePlayByPlay(id).catch(() => null))
+        );
+        results.push(...fetched.filter((g): g is GamePlayByPlay => g !== null));
+      }
+
+      return results;
+    }
+
+    // No edge cache — fetch individually
+    return Promise.all(gameIds.map(id => fetchGamePlayByPlay(id)));
   };
 
   // Compute analytics for a specific game range
@@ -213,10 +260,8 @@ export default function AttackDNAPage() {
       ? data.allGameIds
       : data.allGameIds.slice(0, range);
 
-    // Fetch play-by-play for selected games
-    const playByPlayData = await Promise.all(
-      gamesToUse.map((gameId) => fetchGamePlayByPlay(gameId))
-    );
+    // Fetch play-by-play for selected games (uses edge cache if available)
+    const playByPlayData = await getGameData(data, gamesToUse);
 
     // Compute v2 Attack DNA
     const dna = computeAttackDNAv2(
@@ -230,10 +275,8 @@ export default function AttackDNAPage() {
     // Build season trend (for all games in cache)
     if (data.allGameIds.length >= 5) {
       try {
-        // Fetch all games for trend analysis
-        const allPlayByPlay = await Promise.all(
-          data.allGameIds.map((gameId) => fetchGamePlayByPlay(gameId))
-        );
+        // Use all games for trend analysis (edge cache makes this fast)
+        const allPlayByPlay = await getGameData(data, data.allGameIds);
 
         // Calculate per-game metrics
         const gameMetricsList: GameMetrics[] = allPlayByPlay.map((pbp) => {

@@ -83,14 +83,15 @@ export interface SpecialTeamsAnalytics {
 
 /**
  * Parse game situation from NHL API situation code
- * Format: "1551" where digits are: homeSkaters, homeGoalie, awaySkaters, awayGoalie
- * Returns HomeVsAway format: '5v5' means home has 5, away has 5
+ * Format: "1551" where digits are: [awayGoalies][awaySkaters][homeSkaters][homeGoalies]
+ * Verified: HOME penalty → "1541" (home=4 at index 2), AWAY penalty → "1451" (home=5 at index 2)
+ * Returns HomeVsAway format: '5v4' means home has 5, away has 4 (home PP)
  */
 export function parseSituation(situationCode: string): GameSituation {
   if (!situationCode || situationCode.length < 4) return '5v5';
 
-  const homeSkaters = parseInt(situationCode[0], 10);
-  const awaySkaters = parseInt(situationCode[2], 10);
+  const homeSkaters = parseInt(situationCode[2], 10); // Index 2 = home skaters
+  const awaySkaters = parseInt(situationCode[1], 10); // Index 1 = away skaters
 
   if (isNaN(homeSkaters) || isNaN(awaySkaters)) return '5v5';
 

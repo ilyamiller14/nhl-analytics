@@ -33,7 +33,7 @@ import {
   Cell,
 } from 'recharts';
 import { fetchTeamData, type TeamData } from '../services/teamStatsService';
-import { fetchGamePlayByPlay, type GamePlayByPlay } from '../services/playByPlayService';
+import { fetchGamePlayByPlay, fetchGameShifts, enrichShotsWithOnIcePlayers, type GamePlayByPlay } from '../services/playByPlayService';
 import { fetchCachedTeamPBP, convertCachedToGamePBP } from '../services/cachedDataService';
 import {
   computeDecisionQualityMetrics,
@@ -241,8 +241,8 @@ export default function CoachingDashboard() {
           }
         }
 
-        // Compute special teams unit analysis
-        setLoadingProgress('Analyzing special teams units...');
+        // Compute special teams unit analysis (requires shift data for on-ice player detection)
+        setLoadingProgress('Loading shift data for special teams analysis...');
         const allPlayers2 = [
           ...data.roster.forwards,
           ...data.roster.defensemen,
@@ -252,7 +252,42 @@ export default function CoachingDashboard() {
         allPlayers2.forEach((p) => {
           stPlayerNames.set(p.playerId, `${p.firstName} ${p.lastName}`);
         });
-        const stAnalysis = analyzeSpecialTeamsUnits(pbpData, data.info.teamId, stPlayerNames);
+
+        // Fetch shifts if not already included (edge cache doesn't include shifts)
+        const needsShifts = pbpData.some(g => !g.shifts || g.shifts.length === 0);
+        let stGames = pbpData;
+        if (needsShifts) {
+          const batchSize = 10;
+          const updatedGames: GamePlayByPlay[] = [];
+          const shiftTimeout = 30000;
+          const shiftStart = Date.now();
+
+          for (let i = 0; i < pbpData.length; i += batchSize) {
+            if (Date.now() - shiftStart > shiftTimeout) {
+              updatedGames.push(...pbpData.slice(i).map(g => ({ ...g, shifts: g.shifts || [] })));
+              break;
+            }
+            const batch = pbpData.slice(i, i + batchSize);
+            setLoadingProgress(`Loading shifts for special teams... ${Math.min(i + batchSize, pbpData.length)}/${pbpData.length} games`);
+            const batchResults = await Promise.all(
+              batch.map(async (game) => {
+                if (game.shifts && game.shifts.length > 0) return game;
+                try {
+                  const shifts = await fetchGameShifts(game.gameId);
+                  return { ...game, shifts };
+                } catch {
+                  return { ...game, shifts: [] };
+                }
+              })
+            );
+            updatedGames.push(...batchResults);
+          }
+          stGames = updatedGames;
+        }
+
+        setLoadingProgress('Analyzing special teams units...');
+        const enrichedGames = stGames.map(enrichShotsWithOnIcePlayers);
+        const stAnalysis = analyzeSpecialTeamsUnits(enrichedGames, data.info.teamId, stPlayerNames);
         setSpecialTeamsData(stAnalysis);
 
         setLoadingProgress('');

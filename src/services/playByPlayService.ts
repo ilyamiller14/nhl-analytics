@@ -580,12 +580,12 @@ export function convertToShotAttempt(shotEvent: ShotEvent): ShotAttempt {
 
   const shotType = shotTypeMap[shotEvent.shotType?.toLowerCase()] || 'wrist';
 
-  // Parse strength from situation code (e.g., "1551" = home skaters, home goalie, away skaters, away goalie)
+  // Parse strength from situation code: [awayGoalies][awaySkaters][homeSkaters][homeGoalies]
   let strength: '5v5' | 'PP' | 'SH' | '4v4' | '3v3' = '5v5';
   const sitCode = shotEvent.situation?.strength || '';
   if (sitCode.length === 4) {
-    const homeSkaters = parseInt(sitCode[0], 10);
-    const awaySkaters = parseInt(sitCode[2], 10);
+    const homeSkaters = parseInt(sitCode[2], 10); // Index 2 = home skaters
+    const awaySkaters = parseInt(sitCode[1], 10); // Index 1 = away skaters
     if (homeSkaters > awaySkaters) strength = 'PP';
     else if (homeSkaters < awaySkaters) strength = 'SH';
     else if (homeSkaters === 4) strength = '4v4';
@@ -614,4 +614,65 @@ export function convertToShotAttempt(shotEvent: ShotEvent): ShotAttempt {
     rushShot: false,
     xGoal: xgPrediction.xGoal,
   };
+}
+
+/**
+ * Enrich shots in a game with on-ice player data derived from shift data.
+ *
+ * The NHL API does NOT include homePlayersOnIce/awayPlayersOnIce in play-by-play events.
+ * This function uses shift data to determine which players were on ice for each shot.
+ *
+ * Requires game.shifts to be populated (via fetchGameShifts).
+ * If shifts are empty, shots are returned unchanged.
+ */
+export function enrichShotsWithOnIcePlayers(game: GamePlayByPlay): GamePlayByPlay {
+  if (!game.shifts || game.shifts.length === 0) return game;
+
+  // Pre-index shifts by period and team for O(1) lookups
+  const shiftIndex = new Map<string, PlayerShift[]>();
+  for (const shift of game.shifts) {
+    const key = `${shift.period}-${shift.teamId}`;
+    if (!shiftIndex.has(key)) {
+      shiftIndex.set(key, []);
+    }
+    shiftIndex.get(key)!.push(shift);
+  }
+
+  const enrichedShots = game.shots.map((shot) => {
+    // Skip if already has on-ice data
+    if (shot.homePlayersOnIce.length > 0 && shot.awayPlayersOnIce.length > 0) {
+      return shot;
+    }
+
+    const shotTimeSec = parseTimeToSeconds(shot.timeInPeriod);
+
+    // Find home players on ice
+    const homeShifts = shiftIndex.get(`${shot.period}-${game.homeTeamId}`) || [];
+    const homeOnIce = homeShifts
+      .filter((s) => {
+        const start = parseTimeToSeconds(s.startTime);
+        const end = parseTimeToSeconds(s.endTime);
+        return shotTimeSec >= start && shotTimeSec <= end;
+      })
+      .map((s) => s.playerId);
+
+    // Find away players on ice
+    const awayShifts = shiftIndex.get(`${shot.period}-${game.awayTeamId}`) || [];
+    const awayOnIce = awayShifts
+      .filter((s) => {
+        const start = parseTimeToSeconds(s.startTime);
+        const end = parseTimeToSeconds(s.endTime);
+        return shotTimeSec >= start && shotTimeSec <= end;
+      })
+      .map((s) => s.playerId);
+
+    // Deduplicate (shouldn't happen but be safe)
+    return {
+      ...shot,
+      homePlayersOnIce: [...new Set(homeOnIce)],
+      awayPlayersOnIce: [...new Set(awayOnIce)],
+    };
+  });
+
+  return { ...game, shots: enrichedShots };
 }

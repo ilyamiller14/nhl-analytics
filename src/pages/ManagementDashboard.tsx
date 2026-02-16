@@ -11,10 +11,10 @@
  * - /management/:teamAbbrev (team view)
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { fetchTeamData, type TeamData } from '../services/teamStatsService';
-import { fetchGamePlayByPlay, fetchGameShifts, type GamePlayByPlay } from '../services/playByPlayService';
+import { fetchGamePlayByPlay, fetchGameShifts, enrichShotsWithOnIcePlayers, type GamePlayByPlay } from '../services/playByPlayService';
 import { fetchCachedTeamPBP, convertCachedToGamePBP } from '../services/cachedDataService';
 import {
   computeTeamEvolutionWithCustomWindows,
@@ -72,6 +72,7 @@ export default function ManagementDashboard() {
   const [selectedPeriod, setSelectedPeriod] = useState<number>(10); // Default to last 10 games
   const [lineComboData, setLineComboData] = useState<LineComboAnalysis | null>(null);
   const [rosterBalanceData, setRosterBalanceData] = useState<RosterBalanceData | null>(null);
+  const chemistryLoadingRef = useRef(false);
 
   // Load team data when team changes (only fetches data, doesn't compute)
   useEffect(() => {
@@ -147,6 +148,7 @@ export default function ManagementDashboard() {
         setChemistryMatrix(null);
         setLineComboData(null);
         setRosterBalanceData(null);
+        chemistryLoadingRef.current = false;
         setLoadingProgress('');
       } catch (err) {
         console.error('Error loading management data:', err);
@@ -182,16 +184,19 @@ export default function ManagementDashboard() {
     if (viewMode !== 'chemistry') return;
     if (!playByPlayData.length || !teamData || !playerInfo) return;
     if (shiftsLoaded && chemistryMatrix) return; // Already computed
+    if (chemistryLoadingRef.current) return; // Prevent re-entry
 
     async function loadChemistry() {
+      chemistryLoadingRef.current = true;
       setIsLoadingChemistry(true);
       setLoadingProgress('Loading shift data for chemistry analysis...');
 
       try {
         // Check if we need to fetch shifts (cached data has empty shifts)
-        const needsShifts = playByPlayData.some(g => !g.shifts || g.shifts.length === 0);
+        const currentPBP = playByPlayData;
+        const needsShifts = currentPBP.some(g => !g.shifts || g.shifts.length === 0);
 
-        let pbpWithShifts = playByPlayData;
+        let pbpWithShifts = currentPBP;
         if (needsShifts) {
           // Fetch shifts for all games in parallel batches with overall timeout
           const batchSize = 10;
@@ -199,16 +204,16 @@ export default function ManagementDashboard() {
           const overallTimeout = 30000; // 30s max for all shifts
           const startTime = Date.now();
 
-          for (let i = 0; i < playByPlayData.length; i += batchSize) {
+          for (let i = 0; i < currentPBP.length; i += batchSize) {
             // Check overall timeout
             if (Date.now() - startTime > overallTimeout) {
               // Add remaining games with empty shifts
-              updatedGames.push(...playByPlayData.slice(i).map(g => ({ ...g, shifts: g.shifts || [] })));
+              updatedGames.push(...currentPBP.slice(i).map(g => ({ ...g, shifts: g.shifts || [] })));
               break;
             }
 
-            const batch = playByPlayData.slice(i, i + batchSize);
-            setLoadingProgress(`Loading shifts... ${Math.min(i + batchSize, playByPlayData.length)}/${playByPlayData.length} games`);
+            const batch = currentPBP.slice(i, i + batchSize);
+            setLoadingProgress(`Loading shifts... ${Math.min(i + batchSize, currentPBP.length)}/${currentPBP.length} games`);
 
             const batchResults = await Promise.all(
               batch.map(async (game) => {
@@ -245,26 +250,87 @@ export default function ManagementDashboard() {
         console.error('Error loading chemistry data:', err);
         setError('Failed to load chemistry analytics');
       } finally {
+        chemistryLoadingRef.current = false;
         setIsLoadingChemistry(false);
       }
     }
 
     loadChemistry();
-  }, [viewMode, playByPlayData, teamData, playerInfo, shiftsLoaded, chemistryMatrix]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, teamData, playerInfo, shiftsLoaded]);
 
-  // Load line combination data on-demand
+  // Load line combination data on-demand (requires shift data for on-ice player detection)
+  const lineComboLoadingRef = useRef(false);
   useEffect(() => {
     if (viewMode !== 'lines') return;
     if (!playByPlayData.length || !teamData) return;
     if (lineComboData) return; // Already computed
+    if (lineComboLoadingRef.current) return;
 
-    const analysis = analyzeLineCombinations(
-      playByPlayData,
-      teamData.info.teamId,
-      teamData.roster
-    );
-    setLineComboData(analysis);
-  }, [viewMode, playByPlayData, teamData, lineComboData]);
+    async function loadLineCombos() {
+      lineComboLoadingRef.current = true;
+      setIsLoadingChemistry(true); // Reuse chemistry loading state
+      setLoadingProgress('Loading shift data for line analysis...');
+
+      try {
+        // Ensure shifts are loaded (may already be from Chemistry tab)
+        const needsShifts = playByPlayData.some(g => !g.shifts || g.shifts.length === 0);
+        let gamesWithShifts = playByPlayData;
+
+        if (needsShifts) {
+          const batchSize = 10;
+          const updatedGames: GamePlayByPlay[] = [];
+          const overallTimeout = 30000;
+          const startTime = Date.now();
+
+          for (let i = 0; i < playByPlayData.length; i += batchSize) {
+            if (Date.now() - startTime > overallTimeout) {
+              updatedGames.push(...playByPlayData.slice(i).map(g => ({ ...g, shifts: g.shifts || [] })));
+              break;
+            }
+            const batch = playByPlayData.slice(i, i + batchSize);
+            setLoadingProgress(`Loading shifts... ${Math.min(i + batchSize, playByPlayData.length)}/${playByPlayData.length} games`);
+            const batchResults = await Promise.all(
+              batch.map(async (game) => {
+                if (game.shifts && game.shifts.length > 0) return game;
+                try {
+                  const shifts = await fetchGameShifts(game.gameId);
+                  return { ...game, shifts };
+                } catch {
+                  return { ...game, shifts: [] };
+                }
+              })
+            );
+            updatedGames.push(...batchResults);
+          }
+          gamesWithShifts = updatedGames;
+          setPlayByPlayData(gamesWithShifts);
+          setShiftsLoaded(true);
+        }
+
+        setLoadingProgress('Enriching shot data with on-ice players...');
+        // Enrich shots with on-ice player data from shifts
+        const enrichedGames = gamesWithShifts.map(enrichShotsWithOnIcePlayers);
+
+        setLoadingProgress('Analyzing line combinations...');
+        const analysis = analyzeLineCombinations(
+          enrichedGames,
+          teamData!.info.teamId,
+          teamData!.roster
+        );
+        setLineComboData(analysis);
+        setLoadingProgress('');
+      } catch (err) {
+        console.error('Error loading line combo data:', err);
+      } finally {
+        lineComboLoadingRef.current = false;
+        setIsLoadingChemistry(false);
+      }
+    }
+
+    loadLineCombos();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, teamData, shiftsLoaded]);
 
   // Load roster balance data on-demand
   useEffect(() => {
