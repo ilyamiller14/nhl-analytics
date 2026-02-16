@@ -266,15 +266,12 @@ export function calculatePairChemistry(
   const totalShotsApart = player1Only.shots + player2Only.shots;
   const totalShotsTogether = together.shots;
 
-  // Shot support rate: shots together / expected based on time
-  // Expected = (total shots) * (time together / total time)
-  const estimatedTotalTime = toiTogether * 3; // Rough estimate: together time is ~1/3 of total
-  const expectedShotsTogether = estimatedTotalTime > 0
-    ? ((totalShotsTogether + totalShotsApart) * (toiTogether / estimatedTotalTime))
-    : 0;
-
-  const shotSupportRate = expectedShotsTogether > 0
-    ? (totalShotsTogether / expectedShotsTogether) * 100
+  // Shot support rate: what % of the pair's total shots happen when they're together
+  // High % = they generate most of their offense as a unit (good chemistry)
+  // Low % = they produce more when apart (poor fit)
+  const totalShots = totalShotsTogether + totalShotsApart;
+  const shotSupportRate = totalShots > 0
+    ? (totalShotsTogether / totalShots) * 100
     : 50;
 
   // Offensive component (shots/60 together vs apart normalized)
