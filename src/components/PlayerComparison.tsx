@@ -1,13 +1,17 @@
 import type { PlayerLandingResponse } from '../types/api';
 import type { SeasonStats } from '../types/stats';
+import type { AdvancedPlayerAnalytics } from '../hooks/useAdvancedPlayerAnalytics';
 import StatChart from './StatChart';
 import { formatNumber, formatPlusMinus, formatShootingPct } from '../utils/formatters';
+import { computeDerivedStat } from '../hooks/useComparison';
 import './PlayerComparison.css';
 
 interface ComparisonEntryData {
   player: PlayerLandingResponse;
   season: number;
   stats: SeasonStats | undefined;
+  analytics?: Partial<AdvancedPlayerAnalytics>;
+  analyticsLoading?: boolean;
 }
 
 interface PlayerComparisonProps {
@@ -43,15 +47,33 @@ function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: Playe
     return name;
   };
 
+  // Resolve a stat value: raw field, computed derived stat, or analytics
+  const resolveValue = (stats: any, key: string, analytics?: Partial<AdvancedPlayerAnalytics>): number | string | undefined => {
+    // Analytics keys (xG etc.)
+    if (key.startsWith('@') && analytics) {
+      switch (key) {
+        case '@ixG': return analytics.individualXG?.ixG;
+        case '@gax': return analytics.individualXG?.goalsAboveExpected;
+        case '@ixGPerGame': return analytics.individualXG?.ixGPerGame;
+        case '@xGPct': return analytics.onIceXG?.xGPercent;
+        case '@xGDiff': return analytics.onIceXG?.xGDiff;
+        default: return undefined;
+      }
+    }
+    if (key.startsWith('@')) return undefined; // analytics not loaded yet
+
+    if (!stats) return undefined;
+    if (key.startsWith('_')) return computeDerivedStat(stats, key);
+    return stats[key];
+  };
+
   // Prepare radar chart data — use labels for display
   const radarData = selectedMetrics.map((metric) => {
     const dataPoint: any = { metric: getMetricLabel(metric) };
 
     entries.forEach((entry) => {
-      if (entry.stats) {
-        const value = (entry.stats as any)[metric];
-        dataPoint[getLabel(entry)] = typeof value === 'number' ? value : 0;
-      }
+      const value = resolveValue(entry.stats, metric, entry.analytics);
+      dataPoint[getLabel(entry)] = typeof value === 'number' ? value : 0;
     });
 
     return dataPoint;
@@ -62,27 +84,32 @@ function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: Playe
     const data: any = { name: getLabel(entry) };
 
     selectedMetrics.forEach((metric) => {
-      if (entry.stats) {
-        const value = (entry.stats as any)[metric];
-        data[metric] = typeof value === 'number' ? value : 0;
-      }
+      const value = resolveValue(entry.stats, metric, entry.analytics);
+      data[metric] = typeof value === 'number' ? value : 0;
     });
 
     return data;
   });
 
-  // Prepare comparison table data
-  const getStatValue = (stats: any | undefined, key: string) => {
-    if (!stats) return '-';
-
-    const value = stats[key];
-
+  // Format a stat value for display
+  const getStatValue = (stats: any | undefined, key: string, analytics?: Partial<AdvancedPlayerAnalytics>, loading?: boolean) => {
+    if (key.startsWith('@') && loading) return '...';
+    const value = resolveValue(stats, key, analytics);
     if (value === undefined || value === null) return '-';
 
-    // Format based on metric type
     if (key === 'plusMinus') return formatPlusMinus(value as number);
-    if (key === 'shootingPctg') return formatShootingPct(value as number);
-    if (typeof value === 'number') return formatNumber(value, key.includes('Pctg') ? 1 : 0);
+    if (key === 'avgToi' && typeof value === 'string') return value;
+    if (key === 'shootingPctg' || key === 'faceoffWinningPctg') return formatShootingPct(value as number);
+    if (key.includes('Pctg') || key === '_goalsPctTeam' || key === '_ptsPctTeam') {
+      return `${(value as number).toFixed(1)}%`;
+    }
+    if ((key.startsWith('_') || key.startsWith('@')) && typeof value === 'number') {
+      if (key === '@xGPct') return `${value.toFixed(1)}%`;
+      if (key === '@gax') return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
+      if (key === '@xGDiff') return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
+      return value.toFixed(2);
+    }
+    if (typeof value === 'number') return formatNumber(value, 0);
 
     return String(value);
   };
@@ -90,10 +117,10 @@ function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: Playe
   // Highlight best value per metric
   const getBestValue = (metric: string): number | null => {
     const values = entries
-      .map((e) => (e.stats as any)?.[metric])
+      .map((e) => resolveValue(e.stats, metric, e.analytics))
       .filter((v): v is number => typeof v === 'number');
     if (values.length === 0) return null;
-    // For +/-, higher is better. For all other metrics, higher is better too.
+    if (metric === 'pim') return Math.min(...values); // lower PIM is better
     return Math.max(...values);
   };
 
@@ -140,7 +167,7 @@ function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: Playe
                   <tr key={metric}>
                     <td className="metric-name">{getMetricLabel(metric)}</td>
                     {entries.map((entry) => {
-                      const raw = (entry.stats as any)?.[metric];
+                      const raw = resolveValue(entry.stats, metric);
                       const isBest = typeof raw === 'number' && raw === best && entries.length > 1;
                       return (
                         <td
@@ -148,7 +175,7 @@ function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: Playe
                           className="stat-value"
                           style={isBest ? { fontWeight: 700, color: '#059669' } : undefined}
                         >
-                          {getStatValue(entry.stats, metric)}
+                          {getStatValue(entry.stats, metric, entry.analytics, entry.analyticsLoading)}
                         </td>
                       );
                     })}

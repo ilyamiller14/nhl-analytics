@@ -1,18 +1,18 @@
-import type { StatCategory } from '../types/stats';
+import type { MetricGroup } from '../hooks/useComparison';
 import './MetricSelector.css';
 
 interface MetricSelectorProps {
-  availableMetrics: StatCategory[];
+  metricGroups: MetricGroup[];
   selectedMetrics: string[];
   onMetricToggle: (metricKey: string) => void;
   maxSelection?: number;
 }
 
 function MetricSelector({
-  availableMetrics,
+  metricGroups,
   selectedMetrics,
   onMetricToggle,
-  maxSelection = 6,
+  maxSelection = 10,
 }: MetricSelectorProps) {
   const isMaxSelected = selectedMetrics.length >= maxSelection;
 
@@ -25,24 +25,30 @@ function MetricSelector({
         </span>
       </div>
 
-      <div className="metrics-grid">
-        {availableMetrics.map((metric) => {
-          const isSelected = selectedMetrics.includes(metric.key);
-          const isDisabled = !isSelected && isMaxSelected;
+      <div className="metric-groups">
+        {metricGroups.map((group) => (
+          <div key={group.label} className="metric-group">
+            <span className="group-label">{group.label}</span>
+            <div className="group-chips">
+              {group.metrics.map((metric) => {
+                const isSelected = selectedMetrics.includes(metric.key);
+                const isDisabled = !isSelected && isMaxSelected;
 
-          return (
-            <button
-              key={metric.key}
-              onClick={() => !isDisabled && onMetricToggle(metric.key)}
-              className={`metric-chip ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}`}
-              disabled={isDisabled}
-              title={metric.description}
-            >
-              <span className="metric-label">{metric.label}</span>
-              {isSelected && <span className="check-icon">✓</span>}
-            </button>
-          );
-        })}
+                return (
+                  <button
+                    key={metric.key}
+                    onClick={() => !isDisabled && onMetricToggle(metric.key)}
+                    className={`metric-chip ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}`}
+                    disabled={isDisabled}
+                    title={metric.description}
+                  >
+                    {metric.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
