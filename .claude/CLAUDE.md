@@ -1,27 +1,23 @@
 # NHL Analytics - Project Instructions
 
-## Critical Rule: NO MOCK DATA
+## Critical Rules
 
-**ALL DATA MUST BE REAL.** No mock data generators, no synthetic events, no Math.random() to create fake data.
-
-- EDGE charts use real EDGE API aggregates directly
-- Play-by-play charts use real play-by-play events
-- If data isn't available, show an empty state - never generate fake data
+1. **NO MOCK DATA.** All data must be real. No synthetic events, no Math.random(). Show empty states when data unavailable.
+2. **NO HARDCODED LEAGUE AVERAGES.** All benchmarks computed from NHL Stats API via `leagueAveragesService.ts`.
+3. **NO ASSUMED PERCENTILES.** Use real distributions from `getSkaterAverages()`.
 
 ## Data Sources
 
-| Data Type | Source | Notes |
-|-----------|--------|-------|
-| EDGE Speed | `/web/edge/skater-skating-speed-detail/{id}/{season}/2` | Real burst counts, top speed |
-| EDGE Distance | `/web/edge/skater-skating-distance-detail/{id}/{season}/2` | Real zone/situation breakdown |
-| EDGE Zone Time | `/web/edge/skater-zone-time/{id}/{season}/2` | Real time percentages |
-| EDGE Shot Speed | `/web/edge/skater-shot-speed-detail/{id}/{season}/2` | Real shot velocities |
-| Zone Entries | Play-by-play events | Real controlled vs dump entries |
-| Rush Attacks | Play-by-play events | Real breakaways, odd-man rushes |
+| Data Type | Source |
+|-----------|--------|
+| EDGE Speed/Distance/Zone/Shots | `/web/edge/skater-*-detail/{id}/{season}/2` |
+| Play-by-play | `/gamecenter/{gameId}/play-by-play` |
+| League averages | `/stats/rest/en/team/summary` + `/skater/summary` |
+| Player info | `/player/{id}/landing` |
 
 ## Deployment
 
-Uses Cloudflare Pages (NOT Netlify). Production branch = `production`.
+Cloudflare Pages (NOT Netlify). **MUST use `--branch=production`**.
 
 ```bash
 npm run build && npx wrangler pages deploy dist --project-name=nhl-analytics --branch=production
@@ -29,7 +25,7 @@ npm run build && npx wrangler pages deploy dist --project-name=nhl-analytics --b
 
 ## Key Constraints
 
-1. **Season format**: Always use 8-digit format: `20252026` (not `2025-26`)
+1. **Season format**: Always 8-digit: `20252026` (not `2025-26`)
 2. **EDGE availability**: 2023-24 season onwards only
 3. **Goalie exclusion**: EDGE charts disabled for goalies
-4. **No synthetic generation**: Charts display empty states when data unavailable
+4. **Direct physical scaling**: Attack DNA radar uses physical limits (not league-avg normalization)

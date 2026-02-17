@@ -81,14 +81,38 @@ describe('calculateAdvancedMetrics', () => {
 });
 
 describe('calculateWAR', () => {
-  it('returns non-negative value', () => {
-    expect(calculateWAR(30, 40, 10, 1500, 'C')).toBeGreaterThanOrEqual(0);
+  it('returns positive for good players (box-score fallback)', () => {
+    expect(calculateWAR(30, 40, 10, 1500, 'C')).toBeGreaterThan(0);
   });
 
-  it('defensemen have lower replacement level', () => {
+  it('returns negative for below-replacement players', () => {
+    expect(calculateWAR(2, 5, -20, 900, 'D')).toBeLessThan(0);
+  });
+
+  it('defensemen get more credit for same stats (lower replacement level)', () => {
     const fwd = calculateWAR(20, 30, 5, 1500, 'C');
     const def = calculateWAR(20, 30, 5, 1500, 'D');
-    expect(def).toBeGreaterThan(fwd); // Lower replacement = more WAR
+    expect(def).toBeGreaterThan(fwd);
+  });
+
+  it('uses on-ice xG data when provided', () => {
+    const withXG = calculateWAR(30, 40, 10, 1500, 'C', {
+      xGFor: 40, xGAgainst: 30, goalsAboveExpected: 5,
+      shotsFor: 800, shotsAgainst: 600,
+    });
+    expect(withXG).toBeGreaterThan(0);
+  });
+
+  it('bad on-ice xG produces lower WAR', () => {
+    const good = calculateWAR(15, 20, -5, 1000, 'D', {
+      xGFor: 25, xGAgainst: 15, goalsAboveExpected: 2,
+      shotsFor: 500, shotsAgainst: 400,
+    });
+    const bad = calculateWAR(15, 20, -5, 1000, 'D', {
+      xGFor: 10, xGAgainst: 30, goalsAboveExpected: -3,
+      shotsFor: 300, shotsAgainst: 600,
+    });
+    expect(good).toBeGreaterThan(bad);
   });
 });
 

@@ -16,13 +16,14 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import type { SkaterZoneTime } from '../../types/edge';
+import type { SkaterZoneTime, ZoneStartData } from '../../types/edge';
 import './ZoneTimeChart.css';
 
 interface ZoneTimeChartProps {
   zoneData: SkaterZoneTime;
   playerName?: string;
   isTeam?: boolean;
+  zoneStarts?: ZoneStartData | null;
 }
 
 // Zone colors
@@ -49,6 +50,7 @@ export default function ZoneTimeChart({
   zoneData,
   playerName,
   isTeam = false,
+  zoneStarts,
 }: ZoneTimeChartProps) {
   // Check if we have valid percentage data (API may return percentages but no raw time)
   const hasPctData = (zoneData.offensiveZonePct || 0) > 0 ||
@@ -263,6 +265,27 @@ export default function ZoneTimeChart({
           </div>
         )}
       </div>
+
+      {/* Zone Starts */}
+      {zoneStarts && (
+        <div className="entry-exit-section">
+          <h4 className="section-title">Zone Starts</h4>
+          <div className="entry-stats">
+            <div className="entry-stat" style={{ borderLeftColor: ZONE_COLORS.OZ }}>
+              <span className="entry-label">OZ Starts</span>
+              <span className="entry-value">{(zoneStarts.offensiveZoneStartsPctg * 100).toFixed(1)}%</span>
+            </div>
+            <div className="entry-stat">
+              <span className="entry-label">NZ Starts</span>
+              <span className="entry-value">{(zoneStarts.neutralZoneStartsPctg * 100).toFixed(1)}%</span>
+            </div>
+            <div className="entry-stat" style={{ borderLeftColor: ZONE_COLORS.DZ }}>
+              <span className="entry-label">DZ Starts</span>
+              <span className="entry-value">{(zoneStarts.defensiveZoneStartsPctg * 100).toFixed(1)}%</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Zone Legend */}
       <div className="zone-legend">

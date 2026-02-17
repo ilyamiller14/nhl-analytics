@@ -141,9 +141,12 @@ export default function CoachingDashboard() {
         const cachedData = await fetchCachedTeamPBP(teamAbbrev!);
 
         let pbpData: GamePlayByPlay[];
+        // Preserve rosterSpots from cached data for player name resolution
+        let cachedRosterSpots: any[][] = [];
         if (cachedData && cachedData.length > 0) {
           // Use pre-cached data (instant load)
           setLoadingProgress('Using pre-cached data...');
+          cachedRosterSpots = cachedData.map(g => g.rosterSpots || []);
           pbpData = cachedData.map(convertCachedToGamePBP);
           console.log(`Loaded ${pbpData.length} games from edge cache`);
         } else {
@@ -241,54 +244,108 @@ export default function CoachingDashboard() {
           }
         }
 
-        // Compute special teams unit analysis (requires shift data for on-ice player detection)
-        setLoadingProgress('Loading shift data for special teams analysis...');
-        const allPlayers2 = [
-          ...data.roster.forwards,
-          ...data.roster.defensemen,
-          ...data.roster.goalies,
-        ];
-        const stPlayerNames = new Map<number, string>();
-        allPlayers2.forEach((p) => {
-          stPlayerNames.set(p.playerId, `${p.firstName} ${p.lastName}`);
-        });
+        // Compute special teams unit analysis
+        {
+          setLoadingProgress('Loading shift data for special teams analysis...');
+          const allPlayers2 = [
+            ...data.roster.forwards,
+            ...data.roster.defensemen,
+            ...data.roster.goalies,
+          ];
+          const stPlayerNames = new Map<number, string>();
+          allPlayers2.forEach((p) => {
+            stPlayerNames.set(p.playerId, `${p.firstName} ${p.lastName}`);
+          });
 
-        // Fetch shifts if not already included (edge cache doesn't include shifts)
-        const needsShifts = pbpData.some(g => !g.shifts || g.shifts.length === 0);
-        let stGames = pbpData;
-        if (needsShifts) {
-          const batchSize = 10;
-          const updatedGames: GamePlayByPlay[] = [];
-          const shiftTimeout = 30000;
-          const shiftStart = Date.now();
-
-          for (let i = 0; i < pbpData.length; i += batchSize) {
-            if (Date.now() - shiftStart > shiftTimeout) {
-              updatedGames.push(...pbpData.slice(i).map(g => ({ ...g, shifts: g.shifts || [] })));
-              break;
+          // Augment with player names from cached rosterSpots (per-game full rosters)
+          // This is the most comprehensive source — captures all players who appeared in any game
+          for (const roster of cachedRosterSpots) {
+            for (const player of roster) {
+              if (player?.playerId && !stPlayerNames.has(player.playerId)) {
+                const fn = typeof player.firstName === 'object' ? player.firstName?.default : player.firstName;
+                const ln = typeof player.lastName === 'object' ? player.lastName?.default : player.lastName;
+                if (fn && ln) stPlayerNames.set(player.playerId, `${fn} ${ln}`);
+              }
             }
-            const batch = pbpData.slice(i, i + batchSize);
-            setLoadingProgress(`Loading shifts for special teams... ${Math.min(i + batchSize, pbpData.length)}/${pbpData.length} games`);
-            const batchResults = await Promise.all(
-              batch.map(async (game) => {
-                if (game.shifts && game.shifts.length > 0) return game;
-                try {
-                  const shifts = await fetchGameShifts(game.gameId);
-                  return { ...game, shifts };
-                } catch {
-                  return { ...game, shifts: [] };
-                }
-              })
-            );
-            updatedGames.push(...batchResults);
           }
-          stGames = updatedGames;
-        }
 
-        setLoadingProgress('Analyzing special teams units...');
-        const enrichedGames = stGames.map(enrichShotsWithOnIcePlayers);
-        const stAnalysis = analyzeSpecialTeamsUnits(enrichedGames, data.info.teamId, stPlayerNames);
-        setSpecialTeamsData(stAnalysis);
+          // Also extract from PBP event details (goals, shots have shooter/scorer names)
+          for (const game of pbpData) {
+            for (const event of (game.allEvents || [])) {
+              // Extract from rosterSpots (comprehensive per-game roster, available in cached data)
+              if (event.rosterSpots) {
+                // This field exists on the top-level game data, not events - handled below
+              }
+              // Extract names from event details (goals, shots have shooter/scorer info)
+              const details = event.details;
+              if (details) {
+                const pairs: [number | undefined, any, any][] = [
+                  [details.shootingPlayerId, details.firstName, details.lastName],
+                  [details.scoringPlayerId, details.firstName, details.lastName],
+                ];
+                // Also extract from assists array
+                if (Array.isArray(details.assists)) {
+                  for (const a of details.assists) {
+                    pairs.push([a.playerId, a.firstName, a.lastName]);
+                  }
+                }
+                for (const [pid, fnRaw, lnRaw] of pairs) {
+                  if (!pid || stPlayerNames.has(pid)) continue;
+                  const fn = typeof fnRaw === 'object' ? fnRaw?.default : fnRaw;
+                  const ln = typeof lnRaw === 'object' ? lnRaw?.default : lnRaw;
+                  if (fn && ln) stPlayerNames.set(pid, `${fn} ${ln}`);
+                }
+              }
+              // Extract from on-ice player arrays (NHL API includes objects with names on shot events)
+              for (const list of [event.homePlayersOnIce, event.awayPlayersOnIce]) {
+                if (!Array.isArray(list)) continue;
+                for (const p of list) {
+                  if (typeof p === 'object' && p?.playerId && !stPlayerNames.has(p.playerId)) {
+                    const fn = typeof p.firstName === 'object' ? p.firstName?.default : p.firstName;
+                    const ln = typeof p.lastName === 'object' ? p.lastName?.default : p.lastName;
+                    if (fn && ln) stPlayerNames.set(p.playerId, `${fn} ${ln}`);
+                  }
+                }
+              }
+            }
+          }
+
+          const needsShifts = pbpData.some(g => !g.shifts || g.shifts.length === 0);
+          let stGames = pbpData;
+          if (needsShifts) {
+            const batchSize = 10;
+            const updatedGames: GamePlayByPlay[] = [];
+            const shiftTimeout = 30000;
+            const shiftStart = Date.now();
+
+            for (let i = 0; i < pbpData.length; i += batchSize) {
+              if (Date.now() - shiftStart > shiftTimeout) {
+                updatedGames.push(...pbpData.slice(i).map(g => ({ ...g, shifts: g.shifts || [] })));
+                break;
+              }
+              const batch = pbpData.slice(i, i + batchSize);
+              setLoadingProgress(`Loading shifts for special teams... ${Math.min(i + batchSize, pbpData.length)}/${pbpData.length} games`);
+              const batchResults = await Promise.all(
+                batch.map(async (game) => {
+                  if (game.shifts && game.shifts.length > 0) return game;
+                  try {
+                    const shifts = await fetchGameShifts(game.gameId);
+                    return { ...game, shifts };
+                  } catch {
+                    return { ...game, shifts: [] };
+                  }
+                })
+              );
+              updatedGames.push(...batchResults);
+            }
+            stGames = updatedGames;
+          }
+
+          setLoadingProgress('Analyzing special teams units...');
+          const enrichedGames = stGames.map(enrichShotsWithOnIcePlayers);
+          const stAnalysis = analyzeSpecialTeamsUnits(enrichedGames, data.info.teamId, stPlayerNames);
+          setSpecialTeamsData(stAnalysis);
+        }
 
         setLoadingProgress('');
       } catch (err) {

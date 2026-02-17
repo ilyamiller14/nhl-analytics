@@ -3,15 +3,18 @@
  *
  * Analyzes power play and penalty kill unit effectiveness by:
  * - Identifying PP/PK unit combinations from on-ice player data
- * - Calculating per-unit metrics: shots/60, high-danger shots/60, goals/60
+ * - Fuzzy-merging units that share n-1 of n players (handles lineup rotation)
+ * - Calculating per-unit metrics: raw shots, goals, xG, efficiency
  * - Ranking units by effectiveness
  *
- * Data sources: Play-by-play shots with homePlayersOnIce/awayPlayersOnIce
+ * All metrics are real observed data — no TOI estimation.
+ * Goalies are filtered from unit identification using goalieInNetId.
  */
 
 import type { ShotEvent, GamePlayByPlay } from './playByPlayService';
 import { parseSituation, isPowerPlay, isPenaltyKill } from './penaltyAnalytics';
 import { calculateShotEventXG } from './xgModel';
+import { parseTimeToSeconds } from '../utils/timeUtils';
 
 // ============================================================================
 // INTERFACES
@@ -23,13 +26,10 @@ export interface UnitPlayer {
 }
 
 export interface SpecialTeamsUnit {
-  unitId: string; // Sorted player IDs joined with '-'
+  unitId: string;
   unitType: 'pp' | 'pk';
   players: UnitPlayer[];
   gamesAppeared: number;
-
-  // Time on ice (estimated from shift overlap of shot events)
-  estimatedToi: number; // seconds
 
   // Raw counts
   shotsFor: number;
@@ -39,16 +39,9 @@ export interface SpecialTeamsUnit {
   shotsAgainst: number;
   goalsAgainst: number;
 
-  // Rate stats (per 60 minutes)
-  shotsForPer60: number;
-  goalsForPer60: number;
-  highDangerShotsPer60: number;
-  xGForPer60: number;
-  shotsAgainstPer60: number;
-
   // Efficiency
   shootingPct: number;
-  successRate: number; // PP: goals scored / opportunities; PK: kills / opportunities
+  savePct: number;
 }
 
 export interface SpecialTeamsUnitAnalysis {
@@ -57,21 +50,19 @@ export interface SpecialTeamsUnitAnalysis {
   ppUnits: SpecialTeamsUnit[];
   pkUnits: SpecialTeamsUnit[];
   ppSummary: {
-    totalOpportunities: number;
     totalGoals: number;
     totalShots: number;
-    overallPct: number;
+    shootingPct: number;
   };
   pkSummary: {
-    totalOpportunities: number;
     goalsAllowed: number;
     shotsAgainst: number;
-    overallPct: number;
+    savePct: number;
   };
 }
 
 // ============================================================================
-// HIGH-DANGER SHOT DETECTION (reusing the same logic as chemistryAnalytics)
+// HELPERS
 // ============================================================================
 
 const HIGH_DANGER_DISTANCE = 25;
@@ -83,27 +74,16 @@ function isHighDangerShot(x: number, y: number): boolean {
   return distance <= HIGH_DANGER_DISTANCE && Math.abs(y) <= HIGH_DANGER_Y_THRESHOLD;
 }
 
-// ============================================================================
-// UNIT IDENTIFICATION
-// ============================================================================
-
-/**
- * Get the skaters (non-goalie) on ice for a shot from the appropriate team
- * Returns sorted player IDs for consistent unit identification
- */
 function getSkatersOnIce(
   shot: ShotEvent,
   teamId: number,
-  homeTeamId: number
+  homeTeamId: number,
+  goalieIds: Set<number>
 ): number[] {
   const isHome = teamId === homeTeamId;
   const playersOnIce = isHome ? shot.homePlayersOnIce : shot.awayPlayersOnIce;
-
   if (!playersOnIce || playersOnIce.length === 0) return [];
-
-  // Return all players on ice (the goalie is often included but we keep them
-  // for more accurate unit matching—units are identified by the full set)
-  return [...playersOnIce].sort((a, b) => a - b);
+  return playersOnIce.filter(id => !goalieIds.has(id)).sort((a, b) => a - b);
 }
 
 function getUnitKey(playerIds: number[]): string {
@@ -111,52 +91,96 @@ function getUnitKey(playerIds: number[]): string {
 }
 
 // ============================================================================
-// MAIN ANALYSIS FUNCTION
+// FUZZY UNIT MERGING
 // ============================================================================
 
+interface RawUnitData {
+  playerIds: number[];
+  shots: ShotEvent[];
+  shotsAgainst: ShotEvent[];
+  gameIds: Set<number>;
+}
+
 /**
- * Analyze special teams unit effectiveness across multiple games.
+ * Merge units that share n-1 of n players into the largest matching unit.
+ * This handles normal lineup rotation (e.g., PP1 with different 5th man).
  *
- * Approach:
- * 1. For each shot, determine if the game situation is PP or PK for our team
- * 2. Identify which players were on ice (the "unit")
- * 3. Group shots by unit and compute aggregate metrics
- * 4. Estimate TOI per unit based on shot frequency and total PP/PK time
- *
- * @param games - Array of GamePlayByPlay data
- * @param teamId - The team to analyze
- * @param playerNames - Map of playerId → display name
- * @param minShots - Minimum shots for a unit to be included (default 3)
+ * Process: sort by total shots desc, then for each unit try to absorb
+ * smaller units that overlap by all-but-one player.
  */
+function mergeOverlappingUnits(
+  unitMap: Map<string, RawUnitData>
+): Map<string, RawUnitData> {
+  // Convert to array sorted by total shots descending (largest first)
+  const units = Array.from(unitMap.entries()).map(([key, data]) => ({
+    key,
+    playerSet: new Set(data.playerIds),
+    data,
+    absorbed: false,
+  }));
+  units.sort((a, b) =>
+    (b.data.shots.length + b.data.shotsAgainst.length) -
+    (a.data.shots.length + a.data.shotsAgainst.length)
+  );
+
+  const merged = new Map<string, RawUnitData>();
+
+  for (const unit of units) {
+    if (unit.absorbed) continue;
+
+    // Try to absorb smaller units that share n-1 players
+    for (const other of units) {
+      if (other.key === unit.key || other.absorbed) continue;
+
+      // Count shared players
+      let shared = 0;
+      for (const id of other.playerSet) {
+        if (unit.playerSet.has(id)) shared++;
+      }
+
+      // Merge if they share all-but-one player from the smaller unit
+      const minSize = Math.min(unit.playerSet.size, other.playerSet.size);
+      if (minSize >= 2 && shared >= minSize - 1) {
+        // Absorb: merge shots, games into the larger unit
+        unit.data.shots.push(...other.data.shots);
+        unit.data.shotsAgainst.push(...other.data.shotsAgainst);
+        for (const gid of other.data.gameIds) unit.data.gameIds.add(gid);
+        other.absorbed = true;
+      }
+    }
+
+    merged.set(unit.key, unit.data);
+  }
+
+  return merged;
+}
+
+// ============================================================================
+// MAIN ANALYSIS
+// ============================================================================
+
 export function analyzeSpecialTeamsUnits(
   games: GamePlayByPlay[],
   teamId: number,
   playerNames: Map<number, string>,
   minShots: number = 3
 ): SpecialTeamsUnitAnalysis {
-  // Track PP and PK shots by unit
-  const ppUnitMap = new Map<string, {
-    playerIds: number[];
-    shots: ShotEvent[];
-    shotsAgainst: ShotEvent[];
-    gameIds: Set<number>;
-  }>();
+  // Build set of known goalie IDs from all shot events
+  const goalieIds = new Set<number>();
+  for (const game of games) {
+    for (const shot of game.shots) {
+      if (shot.goalieInNetId) goalieIds.add(shot.goalieInNetId);
+    }
+  }
 
-  const pkUnitMap = new Map<string, {
-    playerIds: number[];
-    shots: ShotEvent[];
-    shotsAgainst: ShotEvent[];
-    gameIds: Set<number>;
-  }>();
+  // Track PP and PK shots by exact unit
+  const ppUnitMap = new Map<string, RawUnitData>();
+  const pkUnitMap = new Map<string, RawUnitData>();
 
   let totalPPShots = 0;
   let totalPPGoals = 0;
   let totalPKShotsAgainst = 0;
   let totalPKGoalsAgainst = 0;
-
-  // Track unique PP/PK opportunities (approximate by game)
-  const ppGameSet = new Set<number>();
-  const pkGameSet = new Set<number>();
 
   for (const game of games) {
     const isHomeTeam = game.homeTeamId === teamId;
@@ -164,17 +188,12 @@ export function analyzeSpecialTeamsUnits(
     for (const shot of game.shots) {
       const situation = parseSituation(shot.situation?.strength || '');
 
-      // Check if this is a PP situation for our team
       if (isPowerPlay(situation, isHomeTeam)) {
         const isOurShot = shot.teamId === teamId;
-
-        // Get our skaters on ice during this PP
-        const ourSkaters = getSkatersOnIce(shot, teamId, game.homeTeamId);
+        const ourSkaters = getSkatersOnIce(shot, teamId, game.homeTeamId, goalieIds);
         if (ourSkaters.length === 0) continue;
 
         const unitKey = getUnitKey(ourSkaters);
-        ppGameSet.add(game.gameId);
-
         if (!ppUnitMap.has(unitKey)) {
           ppUnitMap.set(unitKey, {
             playerIds: ourSkaters,
@@ -183,7 +202,6 @@ export function analyzeSpecialTeamsUnits(
             gameIds: new Set(),
           });
         }
-
         const unit = ppUnitMap.get(unitKey)!;
         unit.gameIds.add(game.gameId);
 
@@ -196,17 +214,12 @@ export function analyzeSpecialTeamsUnits(
         }
       }
 
-      // Check if this is a PK situation for our team
       if (isPenaltyKill(situation, isHomeTeam)) {
         const isOpponentShot = shot.teamId !== teamId;
-
-        // Get our skaters on ice during this PK
-        const ourSkaters = getSkatersOnIce(shot, teamId, game.homeTeamId);
+        const ourSkaters = getSkatersOnIce(shot, teamId, game.homeTeamId, goalieIds);
         if (ourSkaters.length === 0) continue;
 
         const unitKey = getUnitKey(ourSkaters);
-        pkGameSet.add(game.gameId);
-
         if (!pkUnitMap.has(unitKey)) {
           pkUnitMap.set(unitKey, {
             playerIds: ourSkaters,
@@ -215,7 +228,6 @@ export function analyzeSpecialTeamsUnits(
             gameIds: new Set(),
           });
         }
-
         const unit = pkUnitMap.get(unitKey)!;
         unit.gameIds.add(game.gameId);
 
@@ -230,9 +242,114 @@ export function analyzeSpecialTeamsUnits(
     }
   }
 
-  // Build PP units
+  // Fuzzy-merge units that share n-1 of n players (handles rotation)
+  const mergedPP = mergeOverlappingUnits(ppUnitMap);
+  const mergedPK = mergeOverlappingUnits(pkUnitMap);
+
+  // Enhanced GP: detect PP/PK time windows from situationCode transitions,
+  // then use shift data to find which units were deployed — even if no shots occurred.
+  // A PK that shuts down the PP completely (0 shots) still counts as a deployment.
+  for (const game of games) {
+    const ppNeedsCount = [...mergedPP.values()].some(d => !d.gameIds.has(game.gameId));
+    const pkNeedsCount = [...mergedPK.values()].some(d => !d.gameIds.has(game.gameId));
+    if (!ppNeedsCount && !pkNeedsCount) continue;
+    if (!game.shifts || game.shifts.length === 0) continue;
+
+    const isHomeTeam = game.homeTeamId === teamId;
+    const ourTeamId = teamId;
+
+    // Index shifts by period+team for fast lookup
+    const shiftIndex = new Map<string, { playerId: number; start: number; end: number }[]>();
+    for (const shift of game.shifts) {
+      const key = `${shift.period}-${shift.teamId}`;
+      if (!shiftIndex.has(key)) shiftIndex.set(key, []);
+      shiftIndex.get(key)!.push({
+        playerId: shift.playerId,
+        start: parseTimeToSeconds(shift.startTime),
+        end: parseTimeToSeconds(shift.endTime),
+      });
+    }
+
+    // Build PP/PK time windows from situationCode transitions in allEvents
+    interface STWindow { period: number; start: number; end: number; type: 'pp' | 'pk' }
+    const stWindows: STWindow[] = [];
+    let currentType: 'pp' | 'pk' | null = null;
+    let windowStart: { period: number; time: number } | null = null;
+
+    for (const event of (game.allEvents || [])) {
+      const sitCode = event.situationCode || '';
+      if (sitCode.length !== 4) continue;
+
+      const situation = parseSituation(sitCode);
+      const period = event.periodDescriptor?.number || 0;
+      const time = parseTimeToSeconds(event.timeInPeriod || '');
+
+      let newType: 'pp' | 'pk' | null = null;
+      if (isPowerPlay(situation, isHomeTeam)) newType = 'pp';
+      else if (isPenaltyKill(situation, isHomeTeam)) newType = 'pk';
+
+      if (newType !== currentType) {
+        if (currentType && windowStart) {
+          stWindows.push({
+            period: windowStart.period,
+            start: windowStart.time,
+            end: time || windowStart.time + 120,
+            type: currentType,
+          });
+        }
+        windowStart = newType ? { period, time } : null;
+        currentType = newType;
+      }
+    }
+    // Close final window if game ends during PP/PK
+    if (currentType && windowStart) {
+      stWindows.push({
+        period: windowStart.period,
+        start: windowStart.time,
+        end: windowStart.time + 120,
+        type: currentType,
+      });
+    }
+
+    // For each PP/PK window, sample shifts every 15s to find on-ice units
+    // This catches line changes within a single PP/PK and units with 0 shots
+    for (const window of stWindows) {
+      const relevantPP = window.type === 'pp' && ppNeedsCount;
+      const relevantPK = window.type === 'pk' && pkNeedsCount;
+      if (!relevantPP && !relevantPK) continue;
+
+      const unitsMap = window.type === 'pp' ? mergedPP : mergedPK;
+      const allShifts = shiftIndex.get(`${window.period}-${ourTeamId}`) || [];
+      const overlappingShifts = allShifts.filter(s => s.start < window.end && s.end > window.start);
+
+      for (let t = window.start; t <= window.end; t += 15) {
+        // Check if all units already counted for this game
+        const anyNeedsCount = [...unitsMap.values()].some(d => !d.gameIds.has(game.gameId));
+        if (!anyNeedsCount) break;
+
+        const onIce = overlappingShifts
+          .filter(s => t >= s.start && t <= s.end)
+          .map(s => s.playerId);
+        const ourSkaters = [...new Set(onIce)]
+          .filter(id => !goalieIds.has(id))
+          .sort((a, b) => a - b);
+
+        if (ourSkaters.length < 2) continue;
+
+        for (const [, data] of unitsMap) {
+          if (data.gameIds.has(game.gameId)) continue;
+          const overlap = ourSkaters.filter(id => data.playerIds.includes(id)).length;
+          if (overlap >= data.playerIds.length - 1 && overlap >= 2) {
+            data.gameIds.add(game.gameId);
+          }
+        }
+      }
+    }
+  }
+
+  // Build PP units from merged data
   const ppUnits: SpecialTeamsUnit[] = [];
-  for (const [unitKey, data] of ppUnitMap) {
+  for (const [unitKey, data] of mergedPP) {
     const totalShots = data.shots.length;
     if (totalShots < minShots) continue;
 
@@ -242,14 +359,6 @@ export function analyzeSpecialTeamsUnits(
     const shotsAgainst = data.shotsAgainst.length;
     const goalsAgainst = data.shotsAgainst.filter(s => s.result === 'goal').length;
 
-    // Estimate TOI: ~2 minutes per PP, proportional to shots seen
-    // A typical PP generates ~6-8 shots/60min. Use total PP shots to estimate TOI share.
-    const totalPPShotsAll = Math.max(1, totalPPShots);
-    const estimatedToi = (totalShots / totalPPShotsAll) * ppGameSet.size * 120; // ~2min avg PP per game
-
-    const toiMinutes = estimatedToi / 60;
-    const per60Factor = toiMinutes > 0 ? 60 / toiMinutes : 0;
-
     ppUnits.push({
       unitId: unitKey,
       unitType: 'pp',
@@ -258,41 +367,28 @@ export function analyzeSpecialTeamsUnits(
         name: playerNames.get(id) || `#${id}`,
       })),
       gamesAppeared: data.gameIds.size,
-      estimatedToi,
       shotsFor: totalShots,
       goalsFor: goals,
       highDangerShotsFor: hdShots,
       xGFor: Math.round(xG * 100) / 100,
       shotsAgainst,
       goalsAgainst,
-      shotsForPer60: Math.round(totalShots * per60Factor * 10) / 10,
-      goalsForPer60: Math.round(goals * per60Factor * 100) / 100,
-      highDangerShotsPer60: Math.round(hdShots * per60Factor * 10) / 10,
-      xGForPer60: Math.round(xG * per60Factor * 100) / 100,
-      shotsAgainstPer60: Math.round(shotsAgainst * per60Factor * 10) / 10,
       shootingPct: totalShots > 0 ? Math.round((goals / totalShots) * 1000) / 10 : 0,
-      successRate: data.gameIds.size > 0 ? Math.round((goals / data.gameIds.size) * 100) / 100 : 0,
+      savePct: 0,
     });
   }
 
-  // Build PK units
+  // Build PK units from merged data
   const pkUnits: SpecialTeamsUnit[] = [];
-  for (const [unitKey, data] of pkUnitMap) {
+  for (const [unitKey, data] of mergedPK) {
     const totalShotsAgainst = data.shotsAgainst.length;
     if (totalShotsAgainst < minShots) continue;
 
     const goalsAllowed = data.shotsAgainst.filter(s => s.result === 'goal').length;
-    const hdAgainst = data.shotsAgainst.filter(s => isHighDangerShot(s.xCoord, s.yCoord)).length;
-    const xGAgainst = data.shotsAgainst.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
+    const hdShotsAgainst = data.shotsAgainst.filter(s => isHighDangerShot(s.xCoord, s.yCoord)).length;
+    const xGA = data.shotsAgainst.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
     const ourShots = data.shots.length;
     const ourGoals = data.shots.filter(s => s.result === 'goal').length;
-
-    // Estimate TOI similarly
-    const totalPKAll = Math.max(1, totalPKShotsAgainst);
-    const estimatedToi = (totalShotsAgainst / totalPKAll) * pkGameSet.size * 120;
-
-    const toiMinutes = estimatedToi / 60;
-    const per60Factor = toiMinutes > 0 ? 60 / toiMinutes : 0;
 
     pkUnits.push({
       unitId: unitKey,
@@ -302,45 +398,73 @@ export function analyzeSpecialTeamsUnits(
         name: playerNames.get(id) || `#${id}`,
       })),
       gamesAppeared: data.gameIds.size,
-      estimatedToi,
       shotsFor: ourShots,
       goalsFor: ourGoals,
-      highDangerShotsFor: 0,
-      xGFor: 0,
+      highDangerShotsFor: hdShotsAgainst,
+      xGFor: Math.round(xGA * 100) / 100,
       shotsAgainst: totalShotsAgainst,
       goalsAgainst: goalsAllowed,
-      shotsForPer60: Math.round(ourShots * per60Factor * 10) / 10,
-      goalsForPer60: 0,
-      highDangerShotsPer60: Math.round(hdAgainst * per60Factor * 10) / 10,
-      xGForPer60: Math.round(xGAgainst * per60Factor * 100) / 100,
-      shotsAgainstPer60: Math.round(totalShotsAgainst * per60Factor * 10) / 10,
       shootingPct: 0,
-      successRate: data.gameIds.size > 0
-        ? Math.round(((data.gameIds.size - goalsAllowed) / data.gameIds.size) * 1000) / 10
+      savePct: totalShotsAgainst > 0
+        ? Math.round(((totalShotsAgainst - goalsAllowed) / totalShotsAgainst) * 1000) / 10
         : 0,
     });
   }
 
-  // Sort: PP by goals/xG descending, PK by goals allowed ascending
+  // Redistribute shots/goals from untracked PK units to closest tracked unit.
+  // PK has extreme fragmentation — line changes during PKs create many tiny units
+  // below the minShots threshold that contain goals. Assign them to the best-matching
+  // tracked unit so GA stats are meaningful.
+  const trackedPkKeys = new Set(pkUnits.map(u => u.unitId));
+  for (const [unitKey, data] of mergedPK) {
+    if (trackedPkKeys.has(unitKey)) continue;
+    if (data.shotsAgainst.length === 0 && data.shots.length === 0) continue;
+
+    let bestUnit: SpecialTeamsUnit | null = null;
+    let bestOverlap = 0;
+    for (const unit of pkUnits) {
+      const overlap = data.playerIds.filter(id =>
+        unit.players.some(p => p.playerId === id)
+      ).length;
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestUnit = unit;
+      }
+    }
+
+    if (bestUnit && bestOverlap >= 1) {
+      const extraSA = data.shotsAgainst.length;
+      const extraGA = data.shotsAgainst.filter(s => s.result === 'goal').length;
+      const extraHD = data.shotsAgainst.filter(s => isHighDangerShot(s.xCoord, s.yCoord)).length;
+      const extraXGA = data.shotsAgainst.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
+
+      bestUnit.shotsAgainst += extraSA;
+      bestUnit.goalsAgainst += extraGA;
+      bestUnit.highDangerShotsFor += extraHD;
+      bestUnit.xGFor = Math.round((bestUnit.xGFor + extraXGA) * 100) / 100;
+      bestUnit.savePct = bestUnit.shotsAgainst > 0
+        ? Math.round(((bestUnit.shotsAgainst - bestUnit.goalsAgainst) / bestUnit.shotsAgainst) * 1000) / 10
+        : 0;
+    }
+  }
+
   ppUnits.sort((a, b) => b.xGFor - a.xGFor || b.goalsFor - a.goalsFor);
-  pkUnits.sort((a, b) => a.goalsAgainst - b.goalsAgainst || a.shotsAgainstPer60 - b.shotsAgainstPer60);
+  pkUnits.sort((a, b) => a.goalsAgainst - b.goalsAgainst || b.savePct - a.savePct);
 
   return {
     teamId,
     gamesAnalyzed: games.length,
-    ppUnits: ppUnits.slice(0, 8), // Top 8 units
+    ppUnits: ppUnits.slice(0, 8),
     pkUnits: pkUnits.slice(0, 8),
     ppSummary: {
-      totalOpportunities: ppGameSet.size,
       totalGoals: totalPPGoals,
       totalShots: totalPPShots,
-      overallPct: totalPPShots > 0 ? Math.round((totalPPGoals / totalPPShots) * 1000) / 10 : 0,
+      shootingPct: totalPPShots > 0 ? Math.round((totalPPGoals / totalPPShots) * 1000) / 10 : 0,
     },
     pkSummary: {
-      totalOpportunities: pkGameSet.size,
       goalsAllowed: totalPKGoalsAgainst,
       shotsAgainst: totalPKShotsAgainst,
-      overallPct: totalPKShotsAgainst > 0
+      savePct: totalPKShotsAgainst > 0
         ? Math.round(((totalPKShotsAgainst - totalPKGoalsAgainst) / totalPKShotsAgainst) * 1000) / 10
         : 0,
     },

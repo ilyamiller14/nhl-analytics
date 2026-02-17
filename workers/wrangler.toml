@@ -13,11 +13,10 @@ routes = [
   { pattern = "api.deepdivenhl.com/*", zone_name = "deepdivenhl.com" }
 ]
 
-# Scheduled cache warming - runs hourly
-# Processes 8 teams per run (cycles through all 32 teams every 4 hours)
-# Only fetches NEW games - existing games stay cached
+# Daily cache warming + analytics pre-computation at midnight EST (5:00 UTC)
+# Processes all 32 teams: PBP + shifts + chemistry + line combos + special teams
 [triggers]
-crons = ["0 * * * *"]
+crons = ["0 5 * * *"]
 
 # KV namespace for persistent play-by-play cache
 [[kv_namespaces]]

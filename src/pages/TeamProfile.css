@@ -962,6 +962,38 @@
   }
 }
 
+/* EDGE Mini-Table */
+.edge-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.edge-mini-table th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  border-bottom: 2px solid #e2e8f0;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.edge-mini-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+}
+
+.edge-mini-table tr:last-child td {
+  border-bottom: none;
+}
+
+.edge-mini-table tr:hover td {
+  background: #f8fafc;
+}
+
 /* Attack DNA Link */
 .attack-dna-link {
   display: flex;

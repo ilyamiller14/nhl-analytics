@@ -140,3 +140,4 @@ export async function isTeamCached(teamAbbrev: string): Promise<boolean> {
   if (!status) return false;
   return status.teams[teamAbbrev]?.cached || false;
 }
+

@@ -93,10 +93,18 @@ function AdvancedAnalyticsEnhanced({
     };
   }, [hasRealData, realShotsFor, realShotsAgainst, goals, toiMinutes, gamesPlayed, shots, points]);
 
-  // Calculate WAR from real stats
+  // Calculate WAR — pass on-ice xG data when available
   const war = useMemo(() =>
-    calculateWAR(goals, assists, plusMinus, toiMinutes, position),
-    [goals, assists, plusMinus, toiMinutes, position]
+    calculateWAR(goals, assists, plusMinus, toiMinutes, position,
+      hasRealData ? {
+        xGFor: advancedStats.expectedGoals,
+        xGAgainst: advancedStats.expectedGoalsAgainst,
+        goalsAboveExpected: advancedStats.goalsAboveExpected,
+        shotsFor: advancedStats.corsiFor,
+        shotsAgainst: advancedStats.corsiAgainst,
+      } : undefined
+    ),
+    [goals, assists, plusMinus, toiMinutes, position, hasRealData, advancedStats]
   );
 
   // Calculate assists per 60 (not in AdvancedStats interface)
@@ -191,7 +199,7 @@ function AdvancedAnalyticsEnhanced({
             <div className="metric-label">WAR (Wins Above Replacement)</div>
             <div className="metric-value">{war.toFixed(2)}</div>
             <div className="metric-description">
-              {war > 5 ? 'Elite' : war > 3 ? 'All-Star' : war > 1 ? 'Above Average' : 'Average'}
+              {war > 5 ? 'Elite' : war > 3 ? 'All-Star' : war > 1 ? 'Above Average' : war > 0 ? 'Average' : 'Below Replacement'}
             </div>
           </div>
         </div>

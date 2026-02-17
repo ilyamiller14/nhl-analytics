@@ -12,6 +12,14 @@ import type {
   TeamSpeedDetail,
   GoalieEdgeDetail,
   EdgeGameType,
+  TopSkatingSpeedEntry,
+  HardestShotEntry,
+  DistanceLast10Entry,
+  ZoneStartData,
+  TeamZoneTimeDetail,
+  TeamDistanceDetail,
+  TeamShotSpeedDetail,
+  TeamShotLocationDetail,
 } from '../types/edge';
 import { API_CONFIG } from '../config/api';
 
@@ -39,7 +47,7 @@ interface RawSpeedResponse {
     bursts20To22: { value: number; percentile: number; leagueAvg: number };
     bursts18To20: { value: number; percentile: number; leagueAvg: number };
   };
-  topSkatingSpeeds: unknown[];
+  topSkatingSpeeds: TopSkatingSpeedEntry[];
 }
 
 interface RawZoneTimeResponse {
@@ -55,7 +63,7 @@ interface RawZoneTimeResponse {
     defensiveZonePercentile: number;
     defensiveZoneLeagueAvg: number;
   }>;
-  zoneStarts: unknown[];
+  zoneStarts: ZoneStartData;
 }
 
 interface RawDistanceResponse {
@@ -65,7 +73,7 @@ interface RawDistanceResponse {
     distancePer60: { imperial: number; metric: number; percentile: number; leagueAvg: { imperial: number } };
     distanceMaxGame?: { imperial: number; metric: number };
   }>;
-  skatingDistanceLast10: unknown[];
+  skatingDistanceLast10: DistanceLast10Entry[];
 }
 
 interface RawShotSpeedResponse {
@@ -77,7 +85,7 @@ interface RawShotSpeedResponse {
     shotAttempts80To90?: { value: number; percentile: number; leagueAvg: number };
     shotAttempts70To80?: { value: number; percentile: number; leagueAvg: number };
   };
-  hardestShots: unknown[];
+  hardestShots: HardestShotEntry[];
 }
 
 interface RawComparisonResponse {
@@ -126,6 +134,7 @@ export interface SpeedDataWithLeagueAvg extends SkaterSpeedDetail {
     bursts20To22: number;
     bursts18To20: number;
   };
+  topSkatingSpeeds: TopSkatingSpeedEntry[];
 }
 
 function transformSpeedResponse(raw: RawSpeedResponse): SpeedDataWithLeagueAvg {
@@ -160,6 +169,8 @@ function transformSpeedResponse(raw: RawSpeedResponse): SpeedDataWithLeagueAvg {
       bursts20To22: (details.bursts20To22?.percentile || 0) * 100,
       bursts18To20: (details.bursts18To20?.percentile || 0) * 100,
     },
+    // Harvested: individual top speed moments
+    topSkatingSpeeds: raw.topSkatingSpeeds || [],
   } as SpeedDataWithLeagueAvg;
 }
 
@@ -174,6 +185,7 @@ export interface ZoneTimeWithLeagueAvg extends SkaterZoneTime {
     neutralZonePct: number;
     defensiveZonePct: number;
   };
+  zoneStarts: ZoneStartData | null;
 }
 
 function transformZoneTimeResponse(raw: RawZoneTimeResponse): ZoneTimeWithLeagueAvg {
@@ -190,6 +202,7 @@ function transformZoneTimeResponse(raw: RawZoneTimeResponse): ZoneTimeWithLeague
       neutralZonePct: 0,
       leagueAvg: { offensiveZonePct: 0, neutralZonePct: 0, defensiveZonePct: 0 },
       percentiles: { offensiveZonePct: 0, neutralZonePct: 0, defensiveZonePct: 0 },
+      zoneStarts: null,
     } as ZoneTimeWithLeagueAvg;
   }
   return {
@@ -210,6 +223,8 @@ function transformZoneTimeResponse(raw: RawZoneTimeResponse): ZoneTimeWithLeague
       neutralZonePct: (allStrength.neutralZonePercentile || 0) * 100,
       defensiveZonePct: (allStrength.defensiveZonePercentile || 0) * 100,
     },
+    // Harvested: zone start breakdown
+    zoneStarts: raw.zoneStarts || null,
   } as ZoneTimeWithLeagueAvg;
 }
 
@@ -220,6 +235,7 @@ export interface DistanceWithLeagueAvg extends SkaterDistanceDetail {
   percentiles: {
     distancePer60: number;
   };
+  distanceLast10: DistanceLast10Entry[];
 }
 
 function transformDistanceResponse(raw: RawDistanceResponse): DistanceWithLeagueAvg {
@@ -260,6 +276,8 @@ function transformDistanceResponse(raw: RawDistanceResponse): DistanceWithLeague
     percentiles: {
       distancePer60: (allStrength.distancePer60?.percentile || 0) * 100,
     },
+    // Harvested: per-game distance for last 10 games
+    distanceLast10: raw.skatingDistanceLast10 || [],
   } as DistanceWithLeagueAvg;
 }
 
@@ -272,6 +290,7 @@ export interface ShotSpeedWithLeagueAvg extends ShotSpeedDetail {
     avgShotSpeed: number;
     maxShotSpeed: number;
   };
+  hardestShots: HardestShotEntry[];
 }
 
 function transformShotSpeedResponse(raw: RawShotSpeedResponse): ShotSpeedWithLeagueAvg {
@@ -304,6 +323,8 @@ function transformShotSpeedResponse(raw: RawShotSpeedResponse): ShotSpeedWithLea
       avgShotSpeed: (details?.avgShotSpeed?.percentile || 0) * 100,
       maxShotSpeed: (details?.topShotSpeed?.percentile || 0) * 100,
     },
+    // Harvested: individual hardest shot moments
+    hardestShots: raw.hardestShots || [],
   } as unknown as ShotSpeedWithLeagueAvg;
 }
 
@@ -594,6 +615,54 @@ class EdgeTrackingService {
     return this.fetchFromAPI<TeamSpeedDetail>(endpoint);
   }
 
+  /**
+   * Get team distance detail including last 10 games
+   */
+  async getTeamDistanceDetail(
+    teamId: number,
+    season: string = getCurrentSeason(),
+    gameType: EdgeGameType = DEFAULT_GAME_TYPE
+  ): Promise<TeamDistanceDetail> {
+    const endpoint = this.buildEndpoint('team-skating-distance-detail', teamId, season, gameType);
+    return this.fetchFromAPI<TeamDistanceDetail>(endpoint);
+  }
+
+  /**
+   * Get team zone time details with rankings
+   */
+  async getTeamZoneTime(
+    teamId: number,
+    season: string = getCurrentSeason(),
+    gameType: EdgeGameType = DEFAULT_GAME_TYPE
+  ): Promise<TeamZoneTimeDetail> {
+    const endpoint = this.buildEndpoint('team-zone-time-details', teamId, season, gameType);
+    return this.fetchFromAPI<TeamZoneTimeDetail>(endpoint);
+  }
+
+  /**
+   * Get team shot speed detail
+   */
+  async getTeamShotSpeed(
+    teamId: number,
+    season: string = getCurrentSeason(),
+    gameType: EdgeGameType = DEFAULT_GAME_TYPE
+  ): Promise<TeamShotSpeedDetail> {
+    const endpoint = this.buildEndpoint('team-shot-speed-detail', teamId, season, gameType);
+    return this.fetchFromAPI<TeamShotSpeedDetail>(endpoint);
+  }
+
+  /**
+   * Get team shot location detail
+   */
+  async getTeamShotLocation(
+    teamId: number,
+    season: string = getCurrentSeason(),
+    gameType: EdgeGameType = DEFAULT_GAME_TYPE
+  ): Promise<TeamShotLocationDetail> {
+    const endpoint = this.buildEndpoint('team-shot-location-detail', teamId, season, gameType);
+    return this.fetchFromAPI<TeamShotLocationDetail>(endpoint);
+  }
+
   // ============================================================================
   // Goalie Endpoints
   // ============================================================================
@@ -652,11 +721,11 @@ class EdgeTrackingService {
     gameType: EdgeGameType = DEFAULT_GAME_TYPE
   ): Promise<{
     detail: SkaterDetail;
-    speed: SkaterSpeedDetail;
-    distance: SkaterDistanceDetail;
-    zoneTime: SkaterZoneTime;
+    speed: SpeedDataWithLeagueAvg;
+    distance: DistanceWithLeagueAvg;
+    zoneTime: ZoneTimeWithLeagueAvg;
     comparison: SkaterComparison;
-    shotSpeed: ShotSpeedDetail;
+    shotSpeed: ShotSpeedWithLeagueAvg;
   }> {
     const [detail, speed, distance, zoneTime, comparison, shotSpeed] = await Promise.all([
       this.getSkaterDetail(playerId, season, gameType),
@@ -677,11 +746,11 @@ class EdgeTrackingService {
 
     return {
       detail,
-      speed,
-      distance,
-      zoneTime,
+      speed: speed as SpeedDataWithLeagueAvg,
+      distance: distance as DistanceWithLeagueAvg,
+      zoneTime: zoneTime as ZoneTimeWithLeagueAvg,
       comparison,
-      shotSpeed,
+      shotSpeed: shotSpeed as ShotSpeedWithLeagueAvg,
     };
   }
 
@@ -701,15 +770,27 @@ class EdgeTrackingService {
   ): Promise<{
     detail: TeamEdgeDetail;
     speed: TeamSpeedDetail;
+    distance: TeamDistanceDetail;
+    zoneTime: TeamZoneTimeDetail;
+    shotSpeed: TeamShotSpeedDetail;
+    shotLocation: TeamShotLocationDetail;
   }> {
-    const [detail, speed] = await Promise.all([
+    const [detail, speed, distance, zoneTime, shotSpeed, shotLocation] = await Promise.all([
       this.getTeamDetail(teamId, season, gameType),
       this.getTeamSpeedDetail(teamId, season, gameType),
+      this.getTeamDistanceDetail(teamId, season, gameType),
+      this.getTeamZoneTime(teamId, season, gameType),
+      this.getTeamShotSpeed(teamId, season, gameType),
+      this.getTeamShotLocation(teamId, season, gameType),
     ]);
 
     return {
       detail,
       speed,
+      distance,
+      zoneTime,
+      shotSpeed,
+      shotLocation,
     };
   }
 }

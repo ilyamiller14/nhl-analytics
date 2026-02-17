@@ -19,17 +19,19 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
-import type { ShotSpeedDetail } from '../../types/edge';
+import type { ShotSpeedDetail, HardestShotEntry } from '../../types/edge';
 import './ShotVelocityChart.css';
 
 interface ShotVelocityChartProps {
   shotData: ShotSpeedDetail;
   playerName?: string;
+  hardestShots?: HardestShotEntry[];
 }
 
 export default function ShotVelocityChart({
   shotData,
   playerName,
+  hardestShots,
 }: ShotVelocityChartProps) {
   // Speed distribution tiers - REAL EDGE DATA
   // API tracks 70-80, 80-90, 90-100, 100+ mph tiers
@@ -136,6 +138,37 @@ export default function ShotVelocityChart({
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Hardest Shots Mini-Table */}
+      {hardestShots && hardestShots.length > 0 && (
+        <div className="chart-section">
+          <h4 className="section-title">Hardest Shots</h4>
+          <div className="mini-table-container">
+            <table className="mini-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Speed</th>
+                  <th>Period</th>
+                  <th>Time</th>
+                  <th>Game</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hardestShots.slice(0, 5).map((entry, idx) => (
+                  <tr key={idx}>
+                    <td>{new Date(entry.gameDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                    <td className="highlight-value">{entry.shotSpeed.imperial.toFixed(1)} mph</td>
+                    <td>P{entry.periodDescriptor.number}</td>
+                    <td>{entry.timeInPeriod}</td>
+                    <td>{entry.awayTeam.abbrev} @ {entry.homeTeam.abbrev}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

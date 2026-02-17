@@ -3,7 +3,7 @@
  *
  * Proxies requests to NHL Stats API to bypass CORS restrictions.
  * Includes aggressive caching and KV storage for play-by-play data.
- * Scheduled cache warming runs every 6 hours to pre-populate cache.
+ * Daily cron at midnight EST pre-caches PBP for all 32 teams.
  */
 
 interface Env {
@@ -33,6 +33,7 @@ const CACHE_TTLS: Record<string, number> = {
   'shiftcharts': 86400,       // Shift data - 24 hours (historical)
   'play-by-play': 86400,      // Play-by-play - 24 hours (historical)
   'player': 86400,            // Player data - 24 hours
+  'edge': 43200,              // EDGE tracking - 12 hours (updates once/day)
   'roster': 43200,            // Roster - 12 hours
   'club-stats': 43200,        // Team stats - 12 hours
   'club-schedule': 7200,      // Schedule - 2 hours
@@ -193,11 +194,14 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    // Run cache warming in background
-    ctx.waitUntil(cacheTeamPBP(team, env));
+    const startTime = Date.now();
+    const count = await cacheTeamPBP(team, env);
+    const duration = Math.round((Date.now() - startTime) / 1000);
     return new Response(JSON.stringify({
-      message: `Started caching ${team}. Check /cached/status for progress.`,
+      message: `Cached ${team}: ${count} games in ${duration}s`,
       team,
+      games: count,
+      durationSeconds: duration,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -207,7 +211,7 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   if (url.pathname === '/cached/warm-all') {
     ctx.waitUntil(handleScheduled({} as ScheduledEvent, env, ctx));
     return new Response(JSON.stringify({
-      message: 'Started caching all teams. This takes ~30 minutes.',
+      message: 'Started caching all teams. This runs in the background.',
       teams: NHL_TEAMS.length,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -468,33 +472,29 @@ async function cacheTeamPBP(teamAbbrev: string, env: Env): Promise<number> {
 }
 
 /**
- * Scheduled cache warming - runs hourly
- * Processes 4 teams per run to stay within CPU limits
- * Cycles through all 32 teams every 8 hours
+ * Scheduled cache warming - runs daily at midnight EST (5:00 UTC)
+ * Caches PBP data for all 32 teams
  */
 async function handleScheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-  console.log('Starting scheduled cache update...');
+  console.log('Starting daily PBP cache update...');
   const startTime = Date.now();
 
-  // Process 4 teams per run (32 teams / 4 = 8 hours to cycle all)
-  const teamsPerRun = 4;
-  const hour = new Date().getUTCHours();
-  const startIndex = (hour % 8) * teamsPerRun;
-  const teamsToProcess = NHL_TEAMS.slice(startIndex, startIndex + teamsPerRun);
+  let teamsProcessed = 0;
+  let totalGames = 0;
 
-  console.log(`Hour ${hour}: Processing teams ${startIndex}-${startIndex + teamsPerRun}: ${teamsToProcess.join(', ')}`);
-
-  for (const team of teamsToProcess) {
+  for (const team of NHL_TEAMS) {
     try {
       const count = await cacheTeamPBP(team, env);
-      console.log(`${team}: ${count} games cached`);
+      teamsProcessed++;
+      totalGames += count;
+      console.log(`${team}: ${count} games (${teamsProcessed}/${NHL_TEAMS.length} teams done)`);
     } catch (error) {
-      console.error(`Error caching ${team}:`, error);
+      console.error(`Error processing ${team}:`, error);
     }
   }
 
   const duration = Math.round((Date.now() - startTime) / 1000);
-  console.log(`Cache update complete in ${duration}s`);
+  console.log(`Daily update complete: ${teamsProcessed} teams, ${totalGames} total games in ${duration}s`);
 }
 
 export default {

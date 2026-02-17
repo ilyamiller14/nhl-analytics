@@ -539,25 +539,34 @@
 /* Responsive */
 @media (max-width: 600px) {
   .player-analytics-card {
-    width: 100%;
+    width: calc(100vw - 2rem);
     max-width: 560px;
-    padding: 1.25rem;
+    padding: 1rem;
+    border-radius: 12px;
+    font-size: 0.85em;
   }
 
   .card-body-columns {
     grid-template-columns: 1fr;
+    gap: 0.5rem;
   }
 
   .advanced-columns {
     grid-template-columns: 1fr;
+    gap: 0.5rem;
   }
 
   .hero-stat-value {
-    font-size: 1.6rem;
+    font-size: 1.4rem;
   }
 
   .rolling-metrics-grid {
     grid-template-columns: repeat(4, 1fr);
+    gap: 0.25rem;
+  }
+
+  .section-title {
+    font-size: 0.65rem;
   }
 }
 

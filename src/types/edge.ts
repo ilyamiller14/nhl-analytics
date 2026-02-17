@@ -498,6 +498,162 @@ export interface EdgeApiError {
 }
 
 // ============================================================================
+// Harvested Detail Arrays (from existing API responses)
+// ============================================================================
+
+/**
+ * Individual top skating speed entry
+ * From topSkatingSpeeds array in skating-speed-detail response
+ */
+export interface TopSkatingSpeedEntry {
+  gameDate: string;
+  gameCenterLink: string;
+  skatingSpeed: { imperial: number; metric: number };
+  timeInPeriod: string;
+  periodDescriptor: { number: number; periodType: string };
+  homeTeam: { commonName: { default: string }; abbrev: string };
+  awayTeam: { commonName: { default: string }; abbrev: string };
+}
+
+/**
+ * Individual hardest shot entry
+ * From hardestShots array in shot-speed-detail response
+ */
+export interface HardestShotEntry {
+  gameDate: string;
+  gameCenterLink: string;
+  shotSpeed: { imperial: number; metric: number };
+  timeInPeriod: string;
+  periodDescriptor: { number: number; periodType: string };
+  homeTeam: { commonName: { default: string }; abbrev: string };
+  awayTeam: { commonName: { default: string }; abbrev: string };
+  // Team endpoints include player info; skater endpoints don't
+  player?: { id: number; firstName: { default: string }; lastName: { default: string } };
+}
+
+/**
+ * Per-game distance entry from last 10 games
+ * From skatingDistanceLast10 array in skating-distance-detail response
+ */
+export interface DistanceLast10Entry {
+  gameDate: string;
+  gameCenterLink: string;
+  distanceSkatedAll: { imperial: number; metric: number };
+  toiAll: number; // seconds
+  distanceSkatedEven: { imperial: number; metric: number };
+  toiEven: number;
+  distanceSkatedPP?: { imperial: number; metric: number };
+  toiPP?: number;
+  distanceSkatedPK?: { imperial: number; metric: number };
+  toiPK?: number;
+  homeTeam: { commonName: { default: string }; abbrev: string };
+  awayTeam: { commonName: { default: string }; abbrev: string };
+}
+
+/**
+ * Zone start breakdown
+ * From zoneStarts object in skater-zone-time response
+ */
+export interface ZoneStartData {
+  offensiveZoneStartsPctg: number;
+  offensiveZoneStartsPctgPercentile: number;
+  neutralZoneStartsPctg: number;
+  neutralZoneStartsPctgPercentile: number;
+  defensiveZoneStartsPctg: number;
+  defensiveZoneStartsPctgPercentile: number;
+}
+
+// ============================================================================
+// Team EDGE Detail Types (from team-specific endpoints)
+// ============================================================================
+
+/**
+ * Team zone time detail (from team-zone-time-details)
+ * Uses rank instead of percentile (team endpoints rank 1-32)
+ */
+export interface TeamZoneTimeDetail {
+  zoneTimeDetails: Array<{
+    strengthCode: string;
+    offensiveZonePctg: number;
+    offensiveZoneRank: number;
+    offensiveZoneLeagueAvg: number;
+    neutralZonePctg: number;
+    neutralZoneRank: number;
+    neutralZoneLeagueAvg: number;
+    defensiveZonePctg: number;
+    defensiveZoneRank: number;
+    defensiveZoneLeagueAvg: number;
+  }>;
+  shotDifferential?: {
+    shotAttemptDifferential: number;
+    shotAttemptDifferentialRank: number;
+    sogDifferential: number;
+    sogDifferentialRank: number;
+  };
+}
+
+/**
+ * Team distance detail (from team-skating-distance-detail)
+ */
+export interface TeamDistanceDetail {
+  skatingDistanceLast10: DistanceLast10Entry[];
+}
+
+/**
+ * Team shot speed detail (from team-shot-speed-detail)
+ */
+export interface TeamShotSpeedDetail {
+  hardestShots: HardestShotEntry[];
+  shotSpeedDetails: Array<{
+    position: string; // 'all' | 'D' | 'F'
+    topShotSpeed: {
+      imperial: number;
+      metric: number;
+      rank: number;
+      leagueAvg: { imperial: number; metric: number };
+    };
+    avgShotSpeed: {
+      imperial: number;
+      metric: number;
+      rank: number;
+      leagueAvg: { imperial: number; metric: number };
+    };
+    shotAttemptsOver100: { value: number; rank: number; leagueAvg: number };
+    shotAttempts90To100: { value: number; rank: number; leagueAvg: number };
+    shotAttempts80To90: { value: number; leagueAvg: number };
+    shotAttempts70To80: { value: number; leagueAvg: number };
+  }>;
+}
+
+/**
+ * Team shot location detail (from team-shot-location-detail)
+ */
+export interface TeamShotLocationDetail {
+  shotLocationDetails: Array<{
+    area: string;
+    sog: number;
+    sogRank: number;
+    goals: number;
+    goalsRank: number;
+    shootingPctg: number;
+    shootingPctgRank: number;
+  }>;
+  shotLocationTotals: Array<{
+    locationCode: string;
+    position: string;
+    sog: number;
+    sogRank: number;
+    sogLeagueAvg: number;
+    goals: number;
+    goalsRank: number;
+    goalsLeagueAvg: number;
+    shootingPctg: number;
+    shootingPctgRank: number;
+    shootingPctgLeagueAvg: number;
+  }>;
+}
+
+// ============================================================================
 // Helper Types
 // ============================================================================
 

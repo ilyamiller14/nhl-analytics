@@ -6,6 +6,8 @@
  *
  * Uses on-ice player arrays from shots to identify which players are
  * regularly deployed together, then aggregates shot metrics.
+ *
+ * All metrics are real observed data — no TOI estimation.
  */
 
 import type { ShotEvent, GamePlayByPlay } from './playByPlayService';
@@ -22,7 +24,7 @@ export interface LineCombination {
   players: Array<{ playerId: number; name: string; position: string }>;
   gamesAppeared: number;
 
-  // Shot metrics (5v5 only for fair comparison)
+  // Raw shot metrics (5v5 only)
   shotsFor: number;
   goalsFor: number;
   xGFor: number;
@@ -30,20 +32,13 @@ export interface LineCombination {
   goalsAgainst: number;
   xGAgainst: number;
 
-  // Estimated TOI together (seconds, derived from shot frequency)
-  estimatedToi: number;
+  // Share metrics (no TOI needed)
+  cfPct: number;  // Corsi For % = SF / (SF + SA) * 100
+  xGPct: number;  // xG% = xGF / (xGF + xGA) * 100
 
-  // Rate stats per 60 minutes
-  shotsForPer60: number;
-  goalsForPer60: number;
-  xGForPer60: number;
-  shotsAgainstPer60: number;
-  goalsAgainstPer60: number;
-  xGAgainstPer60: number;
-
-  // Net metrics
-  shotDifferentialPer60: number;
-  xGDifferentialPer60: number;
+  // Per-game rates
+  xGForPerGP: number;
+  xGAgainstPerGP: number;
 
   // Quadrant classification
   quadrant: 'elite' | 'offensive' | 'defensive' | 'poor';
@@ -60,11 +55,8 @@ export interface LineComboAnalysis {
 // CONSTANTS
 // ============================================================================
 
-const MIN_SHOTS_THRESHOLD = 5; // Minimum shots to include a combination
-
-// Average NHL shots per 60 at 5v5 is ~25-30 for a team
-// We use this to estimate TOI from shot counts
-const LEAGUE_AVG_SHOTS_PER_60 = 28;
+const MIN_SHOTS_THRESHOLD = 10; // Minimum total shots to include a combination
+const MIN_GAMES_THRESHOLD = 3;  // Minimum games appeared together
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -214,6 +206,7 @@ function buildCombinations(
   for (const [key, data] of comboMap) {
     const totalShots = data.shotsFor.length + data.shotsAgainst.length;
     if (totalShots < MIN_SHOTS_THRESHOLD) continue;
+    if (data.gameIds.size < MIN_GAMES_THRESHOLD) continue;
 
     const shotsFor = data.shotsFor.length;
     const goalsFor = data.shotsFor.filter(s => s.result === 'goal').length;
@@ -222,25 +215,10 @@ function buildCombinations(
     const goalsAgainst = data.shotsAgainst.filter(s => s.result === 'goal').length;
     const xGAgainst = data.shotsAgainst.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
 
-    // Estimate TOI: total shots seen / league avg shots per 60 * 60
-    const estimatedToi = (totalShots / LEAGUE_AVG_SHOTS_PER_60) * 3600;
-    const toiMinutes = estimatedToi / 60;
-    const per60 = toiMinutes > 0 ? 60 / toiMinutes : 0;
-
-    const sfPer60 = Math.round(shotsFor * per60 * 10) / 10;
-    const saPer60 = Math.round(shotsAgainst * per60 * 10) / 10;
-    const xgfPer60 = Math.round(xGFor * per60 * 100) / 100;
-    const xgaPer60 = Math.round(xGAgainst * per60 * 100) / 100;
-
-    // Classify quadrant based on shots for/against rates
-    // Elite: high SF, low SA | Offensive: high SF, high SA
-    // Defensive: low SF, low SA | Poor: low SF, high SA
-    const medianSF = LEAGUE_AVG_SHOTS_PER_60 / 2; // ~14 shots/60 per line
-    let quadrant: 'elite' | 'offensive' | 'defensive' | 'poor';
-    if (sfPer60 >= medianSF && saPer60 <= medianSF) quadrant = 'elite';
-    else if (sfPer60 >= medianSF && saPer60 > medianSF) quadrant = 'offensive';
-    else if (sfPer60 < medianSF && saPer60 <= medianSF) quadrant = 'defensive';
-    else quadrant = 'poor';
+    const gp = data.gameIds.size;
+    const cfPct = totalShots > 0 ? Math.round((shotsFor / totalShots) * 1000) / 10 : 50;
+    const totalXG = xGFor + xGAgainst;
+    const xGPct = totalXG > 0 ? Math.round((xGFor / totalXG) * 1000) / 10 : 50;
 
     combos.push({
       comboId: key,
@@ -250,28 +228,38 @@ function buildCombinations(
         name: playerNames.get(id) || `#${id}`,
         position: playerPositions.get(id) || (lineType === 'forward' ? 'F' : 'D'),
       })),
-      gamesAppeared: data.gameIds.size,
+      gamesAppeared: gp,
       shotsFor,
       goalsFor,
       xGFor: Math.round(xGFor * 100) / 100,
       shotsAgainst,
       goalsAgainst,
       xGAgainst: Math.round(xGAgainst * 100) / 100,
-      estimatedToi,
-      shotsForPer60: sfPer60,
-      goalsForPer60: Math.round(goalsFor * per60 * 100) / 100,
-      xGForPer60: xgfPer60,
-      shotsAgainstPer60: saPer60,
-      goalsAgainstPer60: Math.round(goalsAgainst * per60 * 100) / 100,
-      xGAgainstPer60: xgaPer60,
-      shotDifferentialPer60: Math.round((sfPer60 - saPer60) * 10) / 10,
-      xGDifferentialPer60: Math.round((xgfPer60 - xgaPer60) * 100) / 100,
-      quadrant,
+      cfPct,
+      xGPct,
+      xGForPerGP: Math.round((xGFor / gp) * 100) / 100,
+      xGAgainstPerGP: Math.round((xGAgainst / gp) * 100) / 100,
+      quadrant: 'elite', // Placeholder, computed below
     });
   }
 
-  // Sort by shot differential descending
-  combos.sort((a, b) => b.shotDifferentialPer60 - a.shotDifferentialPer60);
+  // Classify quadrants using team-relative medians of xGF/GP and xGA/GP
+  if (combos.length > 0) {
+    const sortedXGFpg = combos.map(c => c.xGForPerGP).sort((a, b) => a - b);
+    const sortedXGApg = combos.map(c => c.xGAgainstPerGP).sort((a, b) => a - b);
+    const medianXGFpg = sortedXGFpg[Math.floor(sortedXGFpg.length / 2)];
+    const medianXGApg = sortedXGApg[Math.floor(sortedXGApg.length / 2)];
 
-  return combos.slice(0, 12); // Top 12 combinations
+    for (const combo of combos) {
+      if (combo.xGForPerGP >= medianXGFpg && combo.xGAgainstPerGP <= medianXGApg) combo.quadrant = 'elite';
+      else if (combo.xGForPerGP >= medianXGFpg && combo.xGAgainstPerGP > medianXGApg) combo.quadrant = 'offensive';
+      else if (combo.xGForPerGP < medianXGFpg && combo.xGAgainstPerGP <= medianXGApg) combo.quadrant = 'defensive';
+      else combo.quadrant = 'poor';
+    }
+  }
+
+  // Sort by xG% descending (best overall share first)
+  combos.sort((a, b) => b.xGPct - a.xGPct);
+
+  return combos.slice(0, 12);
 }

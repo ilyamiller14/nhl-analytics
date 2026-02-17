@@ -20,7 +20,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
-import type { SkaterSpeedDetail } from '../../types/edge';
+import type { SkaterSpeedDetail, TopSkatingSpeedEntry } from '../../types/edge';
 import './SpeedProfileChart.css';
 
 // League average benchmarks by position (from NHL EDGE data)
@@ -37,6 +37,7 @@ interface PositionalAverage {
 interface SpeedProfileChartProps {
   speedData: SkaterSpeedDetail;
   playerName?: string;
+  topSkatingSpeeds?: TopSkatingSpeedEntry[];
 }
 
 // No hardcoded averages - league avg comes from EDGE API leagueAvg fields
@@ -57,6 +58,7 @@ const BURST_COLORS = {
 export default function SpeedProfileChart({
   speedData,
   playerName,
+  topSkatingSpeeds,
 }: SpeedProfileChartProps) {
   // Determine position from EDGE data
   const position = speedData.position === 'D' ? 'D' :
@@ -268,6 +270,37 @@ export default function SpeedProfileChart({
           </div>
         </div>
       </div>
+
+      {/* Fastest Moments Mini-Table */}
+      {topSkatingSpeeds && topSkatingSpeeds.length > 0 && (
+        <div className="chart-section">
+          <h4 className="section-title">Fastest Moments</h4>
+          <div className="mini-table-container">
+            <table className="mini-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Speed</th>
+                  <th>Period</th>
+                  <th>Time</th>
+                  <th>Game</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topSkatingSpeeds.slice(0, 5).map((entry, idx) => (
+                  <tr key={idx}>
+                    <td>{new Date(entry.gameDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                    <td className="highlight-value">{entry.skatingSpeed.imperial.toFixed(1)} mph</td>
+                    <td>P{entry.periodDescriptor.number}</td>
+                    <td>{entry.timeInPeriod}</td>
+                    <td>{entry.awayTeam.abbrev} @ {entry.homeTeam.abbrev}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Data Source Note */}
       <div className="data-source-note">

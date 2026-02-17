@@ -31,7 +31,17 @@ import {
   type TeamShotAggregate,
   type TeamShotLocations,
 } from '../services/teamPlayByPlayAggregator';
+import { edgeTrackingService } from '../services/edgeTrackingService';
+import type {
+  TeamZoneTimeDetail,
+  TeamDistanceDetail,
+  TeamShotSpeedDetail,
+  TeamShotLocationDetail,
+  TeamEdgeDetail,
+  TeamSpeedDetail,
+} from '../types/edge';
 import ShotChart, { type Shot } from '../components/charts/ShotChart';
+import ZoneTimeChart from '../components/charts/ZoneTimeChart';
 import './TeamProfile.css';
 
 function TeamProfile() {
@@ -44,10 +54,19 @@ function TeamProfile() {
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'schedule' | 'analytics'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'schedule' | 'analytics' | 'edge'>('overview');
   const [realAnalytics, setRealAnalytics] = useState<TeamShotAggregate | null>(null);
   const [shotLocations, setShotLocations] = useState<TeamShotLocations | null>(null);
   const [isLoadingRealAnalytics, setIsLoadingRealAnalytics] = useState(false);
+  const [edgeData, setEdgeData] = useState<{
+    detail: TeamEdgeDetail;
+    speed: TeamSpeedDetail;
+    distance: TeamDistanceDetail;
+    zoneTime: TeamZoneTimeDetail;
+    shotSpeed: TeamShotSpeedDetail;
+    shotLocation: TeamShotLocationDetail;
+  } | null>(null);
+  const [isLoadingEdge, setIsLoadingEdge] = useState(false);
 
   useEffect(() => {
     async function loadTeamData() {
@@ -112,6 +131,25 @@ function TeamProfile() {
 
     loadRealAnalytics();
   }, [teamData?.info?.teamId, teamData?.schedule]);
+
+  // Fetch EDGE tracking data when team data is available
+  useEffect(() => {
+    async function loadEdgeData() {
+      if (!teamData?.info?.teamId) return;
+
+      setIsLoadingEdge(true);
+      try {
+        const data = await edgeTrackingService.getAllTeamData(teamData.info.teamId);
+        setEdgeData(data);
+      } catch (err) {
+        console.warn('Team EDGE data not available:', err);
+      } finally {
+        setIsLoadingEdge(false);
+      }
+    }
+
+    loadEdgeData();
+  }, [teamData?.info?.teamId]);
 
   // Fetch real league averages for comparison
   const [leagueAvg, setLeagueAvg] = useState<LeagueAverages | null>(null);
@@ -244,6 +282,12 @@ function TeamProfile() {
               onClick={() => setActiveTab('analytics')}
             >
               Analytics
+            </button>
+            <button
+              className={`team-tab ${activeTab === 'edge' ? 'active' : ''}`}
+              onClick={() => setActiveTab('edge')}
+            >
+              EDGE {isLoadingEdge && <span className="loading-indicator" />}
             </button>
             <Link
               to={`/attack-dna/team/${teamAbbrev}`}
@@ -804,6 +848,248 @@ function TeamProfile() {
                     </div>
                   </div>
                 </section>
+              )}
+            </div>
+          )}
+
+          {/* EDGE Tab */}
+          {activeTab === 'edge' && (
+            <div className="tab-content">
+              {isLoadingEdge && (
+                <div className="analytics-loading">
+                  <div className="loading-spinner small"></div>
+                  <p>Loading EDGE tracking data...</p>
+                </div>
+              )}
+
+              {!isLoadingEdge && !edgeData && (
+                <div className="analytics-empty">
+                  <p>EDGE tracking data is not available for this team.</p>
+                  <p className="analytics-empty-detail">
+                    EDGE data requires the 2023-24 season onwards.
+                  </p>
+                </div>
+              )}
+
+              {!isLoadingEdge && edgeData && (
+                <>
+                  {/* Team Zone Time */}
+                  {edgeData.zoneTime && (() => {
+                    const allZone = edgeData.zoneTime.zoneTimeDetails?.find(z => z.strengthCode === 'all');
+                    if (!allZone) return null;
+                    const zoneChartData = {
+                      offensiveZoneTime: 0,
+                      defensiveZoneTime: 0,
+                      neutralZoneTime: 0,
+                      totalZoneTime: 0,
+                      offensiveZonePct: (allZone.offensiveZonePctg || 0) * 100,
+                      defensiveZonePct: (allZone.defensiveZonePctg || 0) * 100,
+                      neutralZonePct: (allZone.neutralZonePctg || 0) * 100,
+                      offensiveZoneTimePerGame: 0,
+                      defensiveZoneTimePerGame: 0,
+                      neutralZoneTimePerGame: 0,
+                    };
+                    return (
+                      <section className="team-section">
+                        <ZoneTimeChart
+                          zoneData={zoneChartData as any}
+                          playerName={info.teamName}
+                          isTeam={true}
+                        />
+                        {/* Zone Time Rankings */}
+                        <div className="analytics-stats-grid" style={{ marginTop: '1rem' }}>
+                          <div className="analytics-stat-card">
+                            <span className="analytics-stat-value">{(allZone.offensiveZonePctg * 100).toFixed(1)}%</span>
+                            <span className="analytics-stat-label">OZ Time %</span>
+                            <span className="analytics-stat-detail">Rank: {allZone.offensiveZoneRank}/32</span>
+                          </div>
+                          <div className="analytics-stat-card">
+                            <span className="analytics-stat-value">{(allZone.defensiveZonePctg * 100).toFixed(1)}%</span>
+                            <span className="analytics-stat-label">DZ Time %</span>
+                            <span className="analytics-stat-detail">Rank: {allZone.defensiveZoneRank}/32</span>
+                          </div>
+                          <div className="analytics-stat-card">
+                            <span className="analytics-stat-value">{(allZone.neutralZonePctg * 100).toFixed(1)}%</span>
+                            <span className="analytics-stat-label">NZ Time %</span>
+                            <span className="analytics-stat-detail">Rank: {allZone.neutralZoneRank}/32</span>
+                          </div>
+                        </div>
+                        {edgeData.zoneTime.shotDifferential && (
+                          <div className="analytics-stats-grid" style={{ marginTop: '1rem' }}>
+                            <div className="analytics-stat-card">
+                              <span className={`analytics-stat-value ${edgeData.zoneTime.shotDifferential.shotAttemptDifferential >= 0 ? 'positive' : 'negative'}`}>
+                                {edgeData.zoneTime.shotDifferential.shotAttemptDifferential >= 0 ? '+' : ''}
+                                {edgeData.zoneTime.shotDifferential.shotAttemptDifferential.toFixed(1)}
+                              </span>
+                              <span className="analytics-stat-label">Shot Attempt Diff/Game</span>
+                              <span className="analytics-stat-detail">Rank: {edgeData.zoneTime.shotDifferential.shotAttemptDifferentialRank}/32</span>
+                            </div>
+                            <div className="analytics-stat-card">
+                              <span className={`analytics-stat-value ${edgeData.zoneTime.shotDifferential.sogDifferential >= 0 ? 'positive' : 'negative'}`}>
+                                {edgeData.zoneTime.shotDifferential.sogDifferential >= 0 ? '+' : ''}
+                                {edgeData.zoneTime.shotDifferential.sogDifferential.toFixed(1)}
+                              </span>
+                              <span className="analytics-stat-label">SOG Diff/Game</span>
+                              <span className="analytics-stat-detail">Rank: {edgeData.zoneTime.shotDifferential.sogDifferentialRank}/32</span>
+                            </div>
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })()}
+
+                  {/* Team Shot Speed */}
+                  {edgeData.shotSpeed?.shotSpeedDetails && (() => {
+                    const allPos = edgeData.shotSpeed.shotSpeedDetails.find(s => s.position === 'all');
+                    const dPos = edgeData.shotSpeed.shotSpeedDetails.find(s => s.position === 'D');
+                    const fPos = edgeData.shotSpeed.shotSpeedDetails.find(s => s.position === 'F');
+                    if (!allPos) return null;
+                    return (
+                      <section className="team-section">
+                        <h2 className="section-title">Shot Speed</h2>
+                        <div className="analytics-stats-grid">
+                          <div className="analytics-stat-card highlight">
+                            <span className="analytics-stat-value">{allPos.topShotSpeed.imperial.toFixed(1)} mph</span>
+                            <span className="analytics-stat-label">Hardest Shot</span>
+                            <span className="analytics-stat-detail">Rank: {allPos.topShotSpeed.rank}/32 (Avg: {allPos.topShotSpeed.leagueAvg.imperial.toFixed(1)})</span>
+                          </div>
+                          <div className="analytics-stat-card">
+                            <span className="analytics-stat-value">{allPos.avgShotSpeed.imperial.toFixed(1)} mph</span>
+                            <span className="analytics-stat-label">Avg Shot Speed</span>
+                            <span className="analytics-stat-detail">Rank: {allPos.avgShotSpeed.rank}/32</span>
+                          </div>
+                          <div className="analytics-stat-card">
+                            <span className="analytics-stat-value">{allPos.shotAttempts90To100.value + allPos.shotAttemptsOver100.value}</span>
+                            <span className="analytics-stat-label">Shots 90+ mph</span>
+                            <span className="analytics-stat-detail">Rank: {allPos.shotAttempts90To100.rank}/32</span>
+                          </div>
+                        </div>
+                        {/* By Position */}
+                        {(dPos || fPos) && (
+                          <div className="analytics-stats-grid" style={{ marginTop: '1rem' }}>
+                            {fPos && (
+                              <div className="analytics-stat-card">
+                                <span className="analytics-stat-value">{fPos.avgShotSpeed.imperial.toFixed(1)} mph</span>
+                                <span className="analytics-stat-label">Forwards Avg</span>
+                                <span className="analytics-stat-detail">Rank: {fPos.avgShotSpeed.rank}/32</span>
+                              </div>
+                            )}
+                            {dPos && (
+                              <div className="analytics-stat-card">
+                                <span className="analytics-stat-value">{dPos.avgShotSpeed.imperial.toFixed(1)} mph</span>
+                                <span className="analytics-stat-label">Defensemen Avg</span>
+                                <span className="analytics-stat-detail">Rank: {dPos.avgShotSpeed.rank}/32</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {/* Hardest Shots Table */}
+                        {edgeData.shotSpeed.hardestShots.length > 0 && (
+                          <div style={{ marginTop: '1.5rem' }}>
+                            <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#374151', marginBottom: '0.75rem' }}>Hardest Shots</h3>
+                            <div style={{ overflowX: 'auto' }}>
+                              <table className="edge-mini-table">
+                                <thead>
+                                  <tr>
+                                    <th>Player</th>
+                                    <th>Speed</th>
+                                    <th>Date</th>
+                                    <th>Game</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {edgeData.shotSpeed.hardestShots.slice(0, 5).map((shot, idx) => (
+                                    <tr key={idx}>
+                                      <td>{shot.player ? `${shot.player.firstName.default} ${shot.player.lastName.default}` : '-'}</td>
+                                      <td style={{ fontWeight: 700 }}>{shot.shotSpeed.imperial.toFixed(1)} mph</td>
+                                      <td>{new Date(shot.gameDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                                      <td>{shot.awayTeam.abbrev} @ {shot.homeTeam.abbrev}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })()}
+
+                  {/* Team Shot Locations */}
+                  {edgeData.shotLocation?.shotLocationTotals && (() => {
+                    const totals = edgeData.shotLocation.shotLocationTotals.filter(t => t.position === 'all');
+                    if (totals.length === 0) return null;
+                    return (
+                      <section className="team-section">
+                        <h2 className="section-title">Shot Locations (EDGE)</h2>
+                        <div style={{ overflowX: 'auto' }}>
+                          <table className="edge-mini-table">
+                            <thead>
+                              <tr>
+                                <th>Location</th>
+                                <th>SOG</th>
+                                <th>Rank</th>
+                                <th>Goals</th>
+                                <th>Sh%</th>
+                                <th>Lg Avg Sh%</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {totals.map((loc, idx) => (
+                                <tr key={idx}>
+                                  <td style={{ fontWeight: 500 }}>{loc.locationCode === 'all' ? 'All' : loc.locationCode === 'high' ? 'High Danger' : loc.locationCode === 'mid' ? 'Mid Range' : 'Long Range'}</td>
+                                  <td>{loc.sog}</td>
+                                  <td>{loc.sogRank}/32</td>
+                                  <td>{loc.goals}</td>
+                                  <td style={{ fontWeight: loc.shootingPctg > loc.shootingPctgLeagueAvg ? 600 : 400, color: loc.shootingPctg > loc.shootingPctgLeagueAvg ? '#10b981' : '#6b7280' }}>
+                                    {(loc.shootingPctg * 100).toFixed(1)}%
+                                  </td>
+                                  <td style={{ color: '#9ca3af' }}>{(loc.shootingPctgLeagueAvg * 100).toFixed(1)}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+                    );
+                  })()}
+
+                  {/* Team Distance Trend */}
+                  {edgeData.distance?.skatingDistanceLast10 && edgeData.distance.skatingDistanceLast10.length > 0 && (
+                    <section className="team-section">
+                      <h2 className="section-title">Team Distance (Last 10 Games)</h2>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="edge-mini-table">
+                          <thead>
+                            <tr>
+                              <th>Date</th>
+                              <th>Distance</th>
+                              <th>TOI</th>
+                              <th>Game</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...edgeData.distance.skatingDistanceLast10]
+                              .sort((a, b) => new Date(b.gameDate).getTime() - new Date(a.gameDate).getTime())
+                              .slice(0, 10)
+                              .map((game, idx) => (
+                                <tr key={idx}>
+                                  <td>{new Date(game.gameDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                                  <td style={{ fontWeight: 600 }}>{game.distanceSkatedAll.imperial.toFixed(1)} mi</td>
+                                  <td>{Math.round(game.toiAll / 60)} min</td>
+                                  <td>{game.awayTeam.commonName.default} @ {game.homeTeam.commonName.default}</td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  )}
+
+                  <p className="analytics-note" style={{ marginTop: '1.5rem', color: '#10b981' }}>
+                    Data from NHL EDGE player tracking system
+                  </p>
+                </>
               )}
             </div>
           )}

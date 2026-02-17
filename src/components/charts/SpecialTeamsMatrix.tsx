@@ -4,6 +4,7 @@
  * Displays power play and penalty kill unit effectiveness as a ranked table
  * with color-coded performance metrics.
  *
+ * All metrics are real observed data — no TOI estimation or per-60 rates.
  * Used in: CoachingDashboard (team view)
  */
 
@@ -14,27 +15,18 @@ interface SpecialTeamsMatrixProps {
   data: SpecialTeamsUnitAnalysis;
 }
 
-// Color scale for metrics (green = good, red = bad)
+// Color scale for dark theme (green = good, red = bad)
 function getHeatColor(value: number, min: number, max: number, invert = false): string {
-  if (max === min) return '#f3f4f6';
+  if (max === min) return 'transparent';
   let normalized = (value - min) / (max - min);
   if (invert) normalized = 1 - normalized;
-  // Green (#10b981) to Yellow (#f59e0b) to Red (#ef4444)
   if (normalized >= 0.5) {
     const t = (normalized - 0.5) * 2;
-    return `rgba(16, 185, 129, ${0.15 + t * 0.35})`;
+    return `rgba(16, 185, 129, ${0.1 + t * 0.25})`;
   } else {
     const t = normalized * 2;
-    return `rgba(239, 68, 68, ${0.15 + (1 - t) * 0.35})`;
+    return `rgba(239, 68, 68, ${0.1 + (1 - t) * 0.25})`;
   }
-}
-
-function formatToi(seconds: number): string {
-  const minutes = Math.round(seconds / 60);
-  if (minutes >= 60) {
-    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-  }
-  return `${minutes}m`;
 }
 
 function UnitTable({ units, type }: { units: SpecialTeamsUnit[]; type: 'pp' | 'pk' }) {
@@ -42,100 +34,93 @@ function UnitTable({ units, type }: { units: SpecialTeamsUnit[]; type: 'pp' | 'p
 
   if (units.length === 0) {
     return (
-      <div style={{ padding: '1.5rem', textAlign: 'center', color: '#6b7280', fontSize: '0.875rem' }}>
+      <div style={{ padding: '1.5rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
         Not enough data to identify {isPP ? 'power play' : 'penalty kill'} units.
         More games needed for unit tracking.
       </div>
     );
   }
 
-  // Compute ranges for heat coloring — use correct metric per unit type
-  const shotValues = units.map(u => isPP ? u.shotsForPer60 : u.shotsAgainstPer60);
+  // Compute ranges for heat coloring
+  const shotValues = units.map(u => isPP ? u.shotsFor : u.shotsAgainst);
   const sfRange = { min: Math.min(...shotValues), max: Math.max(...shotValues) };
-  const hdRange = { min: Math.min(...units.map(u => u.highDangerShotsPer60)), max: Math.max(...units.map(u => u.highDangerShotsPer60)) };
-  const xgRange = { min: Math.min(...units.map(u => u.xGForPer60)), max: Math.max(...units.map(u => u.xGForPer60)) };
+  const hdValues = units.map(u => u.highDangerShotsFor);
+  const hdRange = { min: Math.min(...hdValues), max: Math.max(...hdValues) };
+  const xgValues = units.map(u => u.xGFor);
+  const xgRange = { min: Math.min(...xgValues), max: Math.max(...xgValues) };
 
   return (
     <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
         <thead>
-          <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'left', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
+          <tr style={{ borderBottom: '2px solid #334155' }}>
+            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'left', fontWeight: 600, color: '#94a3b8', whiteSpace: 'nowrap' }}>
               Unit Players
             </th>
-            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
+            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#94a3b8', whiteSpace: 'nowrap' }}>
               GP
             </th>
-            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
-              Est. TOI
+            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#94a3b8', whiteSpace: 'nowrap' }}>
+              {isPP ? 'SF' : 'SA'}
             </th>
-            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
-              {isPP ? 'SF/60' : 'SA/60'}
+            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#94a3b8', whiteSpace: 'nowrap' }}>
+              HD
             </th>
-            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
-              HD/60
+            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#94a3b8', whiteSpace: 'nowrap' }}>
+              {isPP ? 'xGF' : 'xGA'}
             </th>
-            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
-              {isPP ? 'xGF/60' : 'xGA/60'}
-            </th>
-            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
+            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#94a3b8', whiteSpace: 'nowrap' }}>
               {isPP ? 'Goals' : 'GA'}
             </th>
-            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
+            <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#94a3b8', whiteSpace: 'nowrap' }}>
               {isPP ? 'Sh%' : 'Sv%'}
             </th>
           </tr>
         </thead>
         <tbody>
           {units.map((unit, idx) => (
-            <tr key={unit.unitId} style={{ borderBottom: '1px solid #f3f4f6' }}>
+            <tr key={unit.unitId} style={{ borderBottom: '1px solid #1e293b' }}>
               <td style={{ padding: '0.625rem 0.5rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <span style={{
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     width: '20px', height: '20px', borderRadius: '50%', fontSize: '0.7rem',
-                    fontWeight: 700, background: idx < 3 ? '#003087' : '#e5e7eb',
-                    color: idx < 3 ? 'white' : '#374151', flexShrink: 0,
+                    fontWeight: 700, background: idx < 3 ? '#3b82f6' : '#334155',
+                    color: 'white', flexShrink: 0,
                   }}>
                     {idx + 1}
                   </span>
-                  <span style={{ fontSize: '0.8rem', lineHeight: 1.3 }}>
+                  <span style={{ fontSize: '0.8rem', lineHeight: 1.3, color: '#e2e8f0' }}>
                     {unit.players.map(p => p.name.split(' ').pop()).join(', ')}
                   </span>
                 </div>
               </td>
-              <td style={{ padding: '0.625rem 0.5rem', textAlign: 'center', color: '#6b7280' }}>
+              <td style={{ padding: '0.625rem 0.5rem', textAlign: 'center', color: '#94a3b8' }}>
                 {unit.gamesAppeared}
               </td>
-              <td style={{ padding: '0.625rem 0.5rem', textAlign: 'center', color: '#6b7280' }}>
-                {formatToi(unit.estimatedToi)}
+              <td style={{
+                padding: '0.625rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#e2e8f0',
+                background: getHeatColor(isPP ? unit.shotsFor : unit.shotsAgainst, sfRange.min, sfRange.max, !isPP),
+              }}>
+                {isPP ? unit.shotsFor : unit.shotsAgainst}
               </td>
               <td style={{
-                padding: '0.625rem 0.5rem', textAlign: 'center', fontWeight: 600,
-                background: getHeatColor(isPP ? unit.shotsForPer60 : unit.shotsAgainstPer60, sfRange.min, sfRange.max, !isPP),
+                padding: '0.625rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#e2e8f0',
+                background: getHeatColor(unit.highDangerShotsFor, hdRange.min, hdRange.max, !isPP),
               }}>
-                {isPP ? unit.shotsForPer60 : unit.shotsAgainstPer60}
+                {unit.highDangerShotsFor}
               </td>
               <td style={{
-                padding: '0.625rem 0.5rem', textAlign: 'center', fontWeight: 600,
-                background: getHeatColor(unit.highDangerShotsPer60, hdRange.min, hdRange.max, !isPP),
+                padding: '0.625rem 0.5rem', textAlign: 'center', fontWeight: 600, color: '#e2e8f0',
+                background: getHeatColor(unit.xGFor, xgRange.min, xgRange.max, !isPP),
               }}>
-                {unit.highDangerShotsPer60}
+                {unit.xGFor}
               </td>
-              <td style={{
-                padding: '0.625rem 0.5rem', textAlign: 'center', fontWeight: 600,
-                background: getHeatColor(unit.xGForPer60, xgRange.min, xgRange.max, !isPP),
-              }}>
-                {unit.xGForPer60}
-              </td>
-              <td style={{ padding: '0.625rem 0.5rem', textAlign: 'center', fontWeight: 700, color: '#003087' }}>
+              <td style={{ padding: '0.625rem 0.5rem', textAlign: 'center', fontWeight: 700, color: '#60a5fa' }}>
                 {isPP ? unit.goalsFor : unit.goalsAgainst}
               </td>
-              <td style={{ padding: '0.625rem 0.5rem', textAlign: 'center' }}>
-                {isPP
-                  ? `${unit.shootingPct}%`
-                  : `${unit.shotsAgainst > 0 ? Math.round(((unit.shotsAgainst - unit.goalsAgainst) / unit.shotsAgainst) * 1000) / 10 : 0}%`
-                }
+              <td style={{ padding: '0.625rem 0.5rem', textAlign: 'center', color: '#e2e8f0' }}>
+                {isPP ? `${unit.shootingPct}%` : `${unit.savePct}%`}
               </td>
             </tr>
           ))}
@@ -148,24 +133,24 @@ function UnitTable({ units, type }: { units: SpecialTeamsUnit[]; type: 'pp' | 'p
 export default function SpecialTeamsMatrix({ data }: SpecialTeamsMatrixProps) {
   const summaryCards = useMemo(() => [
     {
-      label: 'PP Opportunities',
-      value: data.ppSummary.totalOpportunities,
-      sub: `${data.ppSummary.totalGoals} goals`,
-    },
-    {
-      label: 'PP Shooting%',
-      value: `${data.ppSummary.overallPct}%`,
+      label: 'PP Goals',
+      value: data.ppSummary.totalGoals,
       sub: `${data.ppSummary.totalShots} shots`,
     },
     {
-      label: 'PK Opportunities',
-      value: data.pkSummary.totalOpportunities,
-      sub: `${data.pkSummary.goalsAllowed} GA`,
+      label: 'PP Shooting%',
+      value: `${data.ppSummary.shootingPct}%`,
+      sub: `${data.ppUnits.length} units tracked`,
+    },
+    {
+      label: 'PK Goals Allowed',
+      value: data.pkSummary.goalsAllowed,
+      sub: `${data.pkSummary.shotsAgainst} SA`,
     },
     {
       label: 'PK Save%',
-      value: `${data.pkSummary.overallPct}%`,
-      sub: `${data.pkSummary.shotsAgainst} SA`,
+      value: `${data.pkSummary.savePct}%`,
+      sub: `${data.pkUnits.length} units tracked`,
     },
   ], [data]);
 
@@ -177,17 +162,18 @@ export default function SpecialTeamsMatrix({ data }: SpecialTeamsMatrixProps) {
           <div key={card.label} style={{
             flex: '1 1 140px',
             padding: '0.75rem',
-            background: '#f9fafb',
+            background: '#1e293b',
             borderRadius: '8px',
             textAlign: 'center',
+            border: '1px solid #334155',
           }}>
-            <div style={{ fontSize: '0.7rem', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' }}>
+            <div style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' }}>
               {card.label}
             </div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1f2937' }}>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f1f5f9' }}>
               {card.value}
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
               {card.sub}
             </div>
           </div>
@@ -197,7 +183,7 @@ export default function SpecialTeamsMatrix({ data }: SpecialTeamsMatrixProps) {
       {/* Power Play Units */}
       <div style={{ marginBottom: '1.5rem' }}>
         <h4 style={{
-          fontSize: '0.9rem', fontWeight: 700, color: '#1f2937', marginBottom: '0.75rem',
+          fontSize: '0.9rem', fontWeight: 700, color: '#e2e8f0', marginBottom: '0.75rem',
           paddingBottom: '0.5rem', borderBottom: '2px solid #10b981',
           display: 'flex', alignItems: 'center', gap: '0.5rem',
         }}>
@@ -210,7 +196,7 @@ export default function SpecialTeamsMatrix({ data }: SpecialTeamsMatrixProps) {
       {/* Penalty Kill Units */}
       <div>
         <h4 style={{
-          fontSize: '0.9rem', fontWeight: 700, color: '#1f2937', marginBottom: '0.75rem',
+          fontSize: '0.9rem', fontWeight: 700, color: '#e2e8f0', marginBottom: '0.75rem',
           paddingBottom: '0.5rem', borderBottom: '2px solid #ef4444',
           display: 'flex', alignItems: 'center', gap: '0.5rem',
         }}>
@@ -222,11 +208,12 @@ export default function SpecialTeamsMatrix({ data }: SpecialTeamsMatrixProps) {
 
       {/* Analysis Info */}
       <div style={{
-        marginTop: '1rem', padding: '0.75rem', background: '#f0f9ff',
-        borderRadius: '6px', fontSize: '0.75rem', color: '#0369a1',
+        marginTop: '1rem', padding: '0.75rem', background: 'rgba(59, 130, 246, 0.1)',
+        border: '1px solid rgba(59, 130, 246, 0.2)',
+        borderRadius: '6px', fontSize: '0.75rem', color: '#93c5fd',
       }}>
-        Based on {data.gamesAnalyzed} games analyzed. Units identified by on-ice player combinations during special teams situations.
-        Rate stats estimated from shot frequency relative to total special teams ice time.
+        Based on {data.gamesAnalyzed} games analyzed. Units identified by on-ice skater combinations during special teams situations.
+        All metrics are real observed counts from play-by-play data.
       </div>
     </div>
   );

@@ -92,8 +92,16 @@ function AdvancedAnalyticsTable({
   }, [hasRealData, realShotsFor, realShotsAgainst, goals, toiMinutes, gamesPlayed, shots, points]);
 
   const war = useMemo(() =>
-    calculateWAR(goals, assists, plusMinus, toiMinutes, position),
-    [goals, assists, plusMinus, toiMinutes, position]
+    calculateWAR(goals, assists, plusMinus, toiMinutes, position,
+      advancedStats.hasOnIceData ? {
+        xGFor: advancedStats.expectedGoals,
+        xGAgainst: advancedStats.expectedGoalsAgainst,
+        goalsAboveExpected: advancedStats.goalsAboveExpected,
+        shotsFor: advancedStats.corsiFor,
+        shotsAgainst: advancedStats.corsiAgainst,
+      } : undefined
+    ),
+    [goals, assists, plusMinus, toiMinutes, position, advancedStats]
   );
 
   const assists60 = toiMinutes > 0 ? (assists / toiMinutes) * 60 : 0;
@@ -173,7 +181,7 @@ function AdvancedAnalyticsTable({
               <td className="metric-name">Offensive WAR</td>
               <td className="metric-value">{war.toFixed(2)}</td>
               <td className="metric-desc">
-                Offensive wins above replacement (based on goals, assists, +/-, TOI) - {war > 5 ? 'Elite' : war > 3 ? 'All-Star' : war > 1 ? 'Above Average' : 'Average'}
+                Wins above replacement (offense + defense, weighted by position) - {war > 5 ? 'Elite' : war > 3 ? 'All-Star' : war > 1 ? 'Above Average' : war > 0 ? 'Average' : 'Below Replacement'}
               </td>
             </tr>
             <tr>

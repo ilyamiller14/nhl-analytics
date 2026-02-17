@@ -984,6 +984,7 @@ function PlayerProfile() {
                       <SpeedProfileChart
                         speedData={edgeData.speed}
                         playerName={`${player.firstName.default} ${player.lastName.default}`}
+                        topSkatingSpeeds={(edgeData.speed as any).topSkatingSpeeds}
                       />
                     </div>
                   )}
@@ -994,6 +995,7 @@ function PlayerProfile() {
                       <ZoneTimeChart
                         zoneData={edgeData.zoneTime}
                         playerName={`${player.firstName.default} ${player.lastName.default}`}
+                        zoneStarts={(edgeData.zoneTime as any).zoneStarts}
                       />
                     </div>
                   )}
@@ -1016,6 +1018,7 @@ function PlayerProfile() {
                       <ShotVelocityChart
                         shotData={edgeData.shotSpeed}
                         playerName={`${player.firstName.default} ${player.lastName.default}`}
+                        hardestShots={(edgeData.shotSpeed as any).hardestShots}
                       />
                     </div>
                   )}
@@ -1026,6 +1029,7 @@ function PlayerProfile() {
                       <DistanceFatigueChart
                         distanceData={edgeData.distance}
                         playerName={`${player.firstName.default} ${player.lastName.default}`}
+                        distanceLast10={(edgeData.distance as any).distanceLast10}
                       />
                     </div>
                   )}

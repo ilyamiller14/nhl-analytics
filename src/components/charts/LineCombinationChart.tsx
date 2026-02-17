@@ -1,12 +1,12 @@
 /**
  * Line Combination Chart
  *
- * Scatter/bubble chart showing forward line and defense pair performance:
- * - X-axis: Shots For per 60 (offensive output)
- * - Y-axis: Shots Against per 60 (defensive exposure)
- * - Bubble size: Total shots (proxy for TOI)
+ * Scatter chart showing forward line and defense pair performance:
+ * - X-axis: xGF/GP (expected goals for per game, offensive quality)
+ * - Y-axis: xGA/GP (expected goals against per game, defensive quality)
  * - Quadrants: Elite, Offensive, Defensive, Poor
  *
+ * All metrics are real observed data — no TOI estimation.
  * Used in: ManagementDashboard
  */
 
@@ -58,11 +58,12 @@ function ComboTable({ combos, title }: { combos: LineCombination[]; title: strin
           <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
             <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Players</th>
             <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>GP</th>
-            <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>SF/60</th>
-            <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>SA/60</th>
-            <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>xGF/60</th>
-            <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>xGA/60</th>
-            <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>Diff/60</th>
+            <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>SF</th>
+            <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>SA</th>
+            <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>CF%</th>
+            <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>xGF</th>
+            <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>xGA</th>
+            <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>xG%</th>
             <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#374151' }}>Rating</th>
           </tr>
         </thead>
@@ -73,15 +74,21 @@ function ComboTable({ combos, title }: { combos: LineCombination[]; title: strin
                 {combo.players.map(p => p.name.split(' ').pop()).join(' - ')}
               </td>
               <td style={{ padding: '0.5rem', textAlign: 'center', color: '#6b7280' }}>{combo.gamesAppeared}</td>
-              <td style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600 }}>{combo.shotsForPer60}</td>
-              <td style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600 }}>{combo.shotsAgainstPer60}</td>
-              <td style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#10b981' }}>{combo.xGForPer60}</td>
-              <td style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#ef4444' }}>{combo.xGAgainstPer60}</td>
+              <td style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600 }}>{combo.shotsFor}</td>
+              <td style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600 }}>{combo.shotsAgainst}</td>
               <td style={{
                 padding: '0.5rem', textAlign: 'center', fontWeight: 700,
-                color: combo.shotDifferentialPer60 > 0 ? '#10b981' : combo.shotDifferentialPer60 < 0 ? '#ef4444' : '#6b7280',
+                color: combo.cfPct >= 50 ? '#10b981' : '#ef4444',
               }}>
-                {combo.shotDifferentialPer60 > 0 ? '+' : ''}{combo.shotDifferentialPer60}
+                {combo.cfPct}%
+              </td>
+              <td style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#10b981' }}>{combo.xGFor}</td>
+              <td style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, color: '#ef4444' }}>{combo.xGAgainst}</td>
+              <td style={{
+                padding: '0.5rem', textAlign: 'center', fontWeight: 700,
+                color: combo.xGPct >= 50 ? '#10b981' : '#ef4444',
+              }}>
+                {combo.xGPct}%
               </td>
               <td style={{ padding: '0.5rem', textAlign: 'center' }}>
                 <span style={{
@@ -111,9 +118,10 @@ function ChartTooltip({ active, payload }: any) {
       borderRadius: '8px', fontSize: '0.8rem', maxWidth: '220px',
     }}>
       <div style={{ fontWeight: 700, marginBottom: '0.25rem' }}>{data.label}</div>
-      <div>SF/60: {data.sf60}</div>
-      <div>SA/60: {data.sa60}</div>
-      <div>xG Diff/60: {data.xgDiff > 0 ? '+' : ''}{data.xgDiff}</div>
+      <div>xGF/GP: {data.xgfPerGP}</div>
+      <div>xGA/GP: {data.xgaPerGP}</div>
+      <div>xG%: {data.xgPct}%</div>
+      <div>CF%: {data.cfPct}%</div>
       <div>Games: {data.games}</div>
       <div style={{ marginTop: '0.25rem', color: QUADRANT_COLORS[data.quadrant] }}>
         {QUADRANT_LABELS[data.quadrant]}
@@ -125,32 +133,32 @@ function ChartTooltip({ active, payload }: any) {
 export default function LineCombinationChart({ data }: LineCombinationChartProps) {
   const [activeTab, setActiveTab] = useState<'chart' | 'forwards' | 'defense'>('chart');
 
-  // Transform data for scatter chart
+  // Transform data for scatter chart — real observed per-game rates
   const scatterData = useMemo(() => {
     const all = [...data.forwardLines, ...data.defensePairs];
     return all.map(combo => ({
-      sf60: combo.shotsForPer60,
-      sa60: combo.shotsAgainstPer60,
-      size: Math.max(20, Math.min(80, (combo.shotsFor + combo.shotsAgainst) * 1.5)),
+      xgfPerGP: combo.xGForPerGP,
+      xgaPerGP: combo.xGAgainstPerGP,
       label: combo.players.map(p => p.name.split(' ').pop()).join('-'),
       quadrant: combo.quadrant,
-      xgDiff: combo.xGDifferentialPer60,
+      xgPct: combo.xGPct,
+      cfPct: combo.cfPct,
       games: combo.gamesAppeared,
       type: combo.lineType,
     }));
   }, [data]);
 
   // Compute median lines for quadrant reference
-  const medianSF = useMemo(() => {
-    if (scatterData.length === 0) return 14;
-    const sorted = [...scatterData].sort((a, b) => a.sf60 - b.sf60);
-    return sorted[Math.floor(sorted.length / 2)]?.sf60 || 14;
+  const medianXGF = useMemo(() => {
+    if (scatterData.length === 0) return 0.5;
+    const sorted = [...scatterData].sort((a, b) => a.xgfPerGP - b.xgfPerGP);
+    return sorted[Math.floor(sorted.length / 2)]?.xgfPerGP || 0.5;
   }, [scatterData]);
 
-  const medianSA = useMemo(() => {
-    if (scatterData.length === 0) return 14;
-    const sorted = [...scatterData].sort((a, b) => a.sa60 - b.sa60);
-    return sorted[Math.floor(sorted.length / 2)]?.sa60 || 14;
+  const medianXGA = useMemo(() => {
+    if (scatterData.length === 0) return 0.5;
+    const sorted = [...scatterData].sort((a, b) => a.xgaPerGP - b.xgaPerGP);
+    return sorted[Math.floor(sorted.length / 2)]?.xgaPerGP || 0.5;
   }, [scatterData]);
 
   return (
@@ -185,21 +193,21 @@ export default function LineCombinationChart({ data }: LineCombinationChartProps
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis
                 type="number"
-                dataKey="sf60"
-                name="Shots For/60"
-                label={{ value: 'Shots For/60 →', position: 'bottom', offset: 10, fontSize: 12, fill: '#6b7280' }}
+                dataKey="xgfPerGP"
+                name="xGF/GP"
+                label={{ value: 'xGF/GP →', position: 'bottom', offset: 10, fontSize: 12, fill: '#6b7280' }}
                 tick={{ fontSize: 11 }}
               />
               <YAxis
                 type="number"
-                dataKey="sa60"
-                name="Shots Against/60"
-                label={{ value: '← Shots Against/60', angle: -90, position: 'left', offset: 0, fontSize: 12, fill: '#6b7280' }}
+                dataKey="xgaPerGP"
+                name="xGA/GP"
+                label={{ value: '← xGA/GP', angle: -90, position: 'left', offset: 0, fontSize: 12, fill: '#6b7280' }}
                 tick={{ fontSize: 11 }}
                 reversed
               />
-              <ReferenceLine x={medianSF} stroke="#94a3b8" strokeDasharray="5 5" />
-              <ReferenceLine y={medianSA} stroke="#94a3b8" strokeDasharray="5 5" />
+              <ReferenceLine x={medianXGF} stroke="#94a3b8" strokeDasharray="5 5" />
+              <ReferenceLine y={medianXGA} stroke="#94a3b8" strokeDasharray="5 5" />
               <Tooltip content={<ChartTooltip />} />
               <Scatter data={scatterData}>
                 {scatterData.map((entry, idx) => (
@@ -259,7 +267,7 @@ export default function LineCombinationChart({ data }: LineCombinationChartProps
         borderRadius: '6px', fontSize: '0.75rem', color: '#0369a1',
       }}>
         Based on {data.gamesAnalyzed} games. Shows 5v5 on-ice performance for identified line combinations.
-        Bubble size represents total shot involvement. Y-axis inverted: lower = fewer shots against (better defensively).
+        CF% = shot share, xG% = expected goals share. Y-axis inverted (lower = better defensively).
       </div>
     </div>
   );

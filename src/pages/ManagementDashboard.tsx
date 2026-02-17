@@ -179,7 +179,7 @@ export default function ManagementDashboard() {
   }, [playByPlayData, teamData, playerInfo, selectedPeriod]);
 
   // Load chemistry data on-demand when Chemistry tab is selected
-  // This fetches shift data if needed (not included in cached data)
+  // Tries pre-computed data from edge cache first, falls back to on-demand computation
   useEffect(() => {
     if (viewMode !== 'chemistry') return;
     if (!playByPlayData.length || !teamData || !playerInfo) return;
@@ -189,37 +189,29 @@ export default function ManagementDashboard() {
     async function loadChemistry() {
       chemistryLoadingRef.current = true;
       setIsLoadingChemistry(true);
-      setLoadingProgress('Loading shift data for chemistry analysis...');
 
       try {
-        // Check if we need to fetch shifts (cached data has empty shifts)
+        setLoadingProgress('Loading shift data for chemistry analysis...');
         const currentPBP = playByPlayData;
         const needsShifts = currentPBP.some(g => !g.shifts || g.shifts.length === 0);
 
         let pbpWithShifts = currentPBP;
         if (needsShifts) {
-          // Fetch shifts for all games in parallel batches with overall timeout
           const batchSize = 10;
           const updatedGames: GamePlayByPlay[] = [];
-          const overallTimeout = 30000; // 30s max for all shifts
+          const overallTimeout = 30000;
           const startTime = Date.now();
 
           for (let i = 0; i < currentPBP.length; i += batchSize) {
-            // Check overall timeout
             if (Date.now() - startTime > overallTimeout) {
-              // Add remaining games with empty shifts
               updatedGames.push(...currentPBP.slice(i).map(g => ({ ...g, shifts: g.shifts || [] })));
               break;
             }
-
             const batch = currentPBP.slice(i, i + batchSize);
             setLoadingProgress(`Loading shifts... ${Math.min(i + batchSize, currentPBP.length)}/${currentPBP.length} games`);
-
             const batchResults = await Promise.all(
               batch.map(async (game) => {
-                if (game.shifts && game.shifts.length > 0) {
-                  return game; // Already has shifts
-                }
+                if (game.shifts && game.shifts.length > 0) return game;
                 try {
                   const shifts = await fetchGameShifts(game.gameId);
                   return { ...game, shifts };
@@ -235,8 +227,6 @@ export default function ManagementDashboard() {
         }
 
         setLoadingProgress('Computing chemistry metrics...');
-
-        // Build chemistry matrix
         const matrix = await buildChemistryMatrix(
           pbpWithShifts,
           teamData!.info.teamId,
@@ -259,7 +249,8 @@ export default function ManagementDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, teamData, playerInfo, shiftsLoaded]);
 
-  // Load line combination data on-demand (requires shift data for on-ice player detection)
+  // Load line combination data on-demand
+  // Tries pre-computed data from edge cache first, falls back to on-demand computation
   const lineComboLoadingRef = useRef(false);
   useEffect(() => {
     if (viewMode !== 'lines') return;
@@ -269,11 +260,10 @@ export default function ManagementDashboard() {
 
     async function loadLineCombos() {
       lineComboLoadingRef.current = true;
-      setIsLoadingChemistry(true); // Reuse chemistry loading state
-      setLoadingProgress('Loading shift data for line analysis...');
+      setIsLoadingChemistry(true);
 
       try {
-        // Ensure shifts are loaded (may already be from Chemistry tab)
+        setLoadingProgress('Loading shift data for line analysis...');
         const needsShifts = playByPlayData.some(g => !g.shifts || g.shifts.length === 0);
         let gamesWithShifts = playByPlayData;
 
@@ -309,7 +299,6 @@ export default function ManagementDashboard() {
         }
 
         setLoadingProgress('Enriching shot data with on-ice players...');
-        // Enrich shots with on-ice player data from shifts
         const enrichedGames = gamesWithShifts.map(enrichShotsWithOnIcePlayers);
 
         setLoadingProgress('Analyzing line combinations...');

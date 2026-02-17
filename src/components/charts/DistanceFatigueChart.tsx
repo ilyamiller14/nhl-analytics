@@ -21,13 +21,16 @@ import {
   PieChart,
   Pie,
   Cell,
+  AreaChart,
+  Area,
 } from 'recharts';
-import type { SkaterDistanceDetail } from '../../types/edge';
+import type { SkaterDistanceDetail, DistanceLast10Entry } from '../../types/edge';
 import './DistanceFatigueChart.css';
 
 interface DistanceFatigueChartProps {
   distanceData: SkaterDistanceDetail;
   playerName?: string;
+  distanceLast10?: DistanceLast10Entry[];
 }
 
 // Zone colors
@@ -47,6 +50,7 @@ const SITUATION_COLORS = {
 export default function DistanceFatigueChart({
   distanceData,
   playerName,
+  distanceLast10,
 }: DistanceFatigueChartProps) {
   // Zone distance breakdown - REAL EDGE DATA
   const zoneBreakdown = useMemo(() => {
@@ -232,6 +236,55 @@ export default function DistanceFatigueChart({
           </div>
         </div>
       )}
+
+      {/* Distance Trend — Last 10 Games */}
+      {distanceLast10 && distanceLast10.length > 0 && (() => {
+        // Sort chronologically (API returns most recent first)
+        const trendData = [...distanceLast10]
+          .sort((a, b) => new Date(a.gameDate).getTime() - new Date(b.gameDate).getTime())
+          .map(g => ({
+            date: new Date(g.gameDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            distance: g.distanceSkatedAll.imperial,
+            toi: Math.round(g.toiAll / 60),
+            opponent: g.homeTeam.commonName.default,
+          }));
+        return (
+          <div className="chart-section">
+            <h4 className="section-title">Distance Trend (Last {trendData.length} Games)</h4>
+            <div className="chart-container">
+              <ResponsiveContainer width="100%" height={200}>
+                <AreaChart data={trendData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                  <YAxis
+                    tick={{ fontSize: 12 }}
+                    domain={['auto', 'auto']}
+                    label={{ value: 'Distance (mi)', angle: -90, position: 'insideLeft' }}
+                  />
+                  <Tooltip
+                    formatter={(value) => [`${(value as number).toFixed(2)} mi`, 'Distance']}
+                    labelFormatter={(label) => label}
+                    contentStyle={{
+                      background: 'white',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '6px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="distance"
+                    stroke="#3b82f6"
+                    fill="#3b82f6"
+                    fillOpacity={0.15}
+                    strokeWidth={2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Situation Stats Summary */}
       <div className="situation-stats">
