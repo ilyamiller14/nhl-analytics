@@ -321,6 +321,8 @@ export default function PlayerAnalyticsCard({
                     shots={shotsToShow}
                     width={220}
                     height={120}
+                    officialGoals={goals}
+                    officialSOG={shots}
                   />
                 )}
               </>

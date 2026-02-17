@@ -19,6 +19,8 @@ interface MiniShotMapProps {
   shots: Shot[];
   width?: number;
   height?: number;
+  officialGoals?: number;
+  officialSOG?: number;
 }
 
 // Convert NHL coordinates to SVG coordinates (half rink, offensive zone)
@@ -41,6 +43,8 @@ export default function MiniShotMap({
   shots,
   width = 140,
   height = 120,
+  officialGoals,
+  officialSOG,
 }: MiniShotMapProps) {
   // Convert shots to SVG coordinates
   const shotPoints = useMemo(() => {
@@ -67,7 +71,7 @@ export default function MiniShotMap({
     <div className="mini-shot-map">
       <div className="map-header">
         <span className="map-title">Shot Locations</span>
-        <span className="map-stat">{stats.goals}G / {stats.totalShots}SOG</span>
+        <span className="map-stat">{officialGoals ?? stats.goals}G / {officialSOG ?? stats.totalShots}SOG</span>
       </div>
 
       <svg
