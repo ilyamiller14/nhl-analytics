@@ -155,7 +155,7 @@ export default function XGTimeSeriesChart({
         </g>
       </svg>
       <div className="chart-footer">
-        <span className="stat-label">5-game rolling</span>
+        <span className="stat-label">10-game rolling</span>
         <span className="stat-range">
           {stats.min.toFixed(0)}-{stats.max.toFixed(0)}%
         </span>

@@ -52,6 +52,10 @@ interface PlayerAnalyticsCardProps {
   }>;
   // Real computed skater distributions for percentile calculation
   skaterAverages?: SkaterAverages | null;
+  // EDGE tracking badges
+  edgeSpeed?: { topSpeed: number; percentile: number } | null;
+  edgeShotSpeed?: { maxShotSpeed: number; percentile: number } | null;
+  edgeDistance?: { distancePer60: number; percentile: number } | null;
 }
 
 interface MetricGaugeProps {
@@ -143,6 +147,9 @@ export default function PlayerAnalyticsCard({
   gameWinningGoals,
   shotEvents,
   skaterAverages,
+  edgeSpeed,
+  edgeShotSpeed,
+  edgeDistance,
 }: PlayerAnalyticsCardProps) {
   // Get latest rolling metrics
   const latestRolling = rollingMetrics && rollingMetrics.length > 0
@@ -200,6 +207,42 @@ export default function PlayerAnalyticsCard({
         <HeroStat label="+/-" value={plusMinus >= 0 ? `+${plusMinus}` : plusMinus} />
         <HeroStat label="GP" value={gamesPlayed} sub={avgToi ? `${avgToi} TOI` : undefined} />
       </div>
+
+      {/* EDGE Tracking Badges */}
+      {(edgeSpeed || edgeShotSpeed || edgeDistance) && (
+        <div className="edge-badges-row">
+          {edgeSpeed && (
+            <div className="edge-badge">
+              <span className="edge-badge-value">{edgeSpeed.topSpeed.toFixed(1)}</span>
+              <span className="edge-badge-unit">mph</span>
+              <span className="edge-badge-label">Top Speed</span>
+              <span className={`edge-badge-pct ${edgeSpeed.percentile >= 80 ? 'elite' : edgeSpeed.percentile >= 60 ? 'good' : ''}`}>
+                {edgeSpeed.percentile.toFixed(0)}th
+              </span>
+            </div>
+          )}
+          {edgeShotSpeed && (
+            <div className="edge-badge">
+              <span className="edge-badge-value">{edgeShotSpeed.maxShotSpeed.toFixed(1)}</span>
+              <span className="edge-badge-unit">mph</span>
+              <span className="edge-badge-label">Shot Speed</span>
+              <span className={`edge-badge-pct ${edgeShotSpeed.percentile >= 80 ? 'elite' : edgeShotSpeed.percentile >= 60 ? 'good' : ''}`}>
+                {edgeShotSpeed.percentile.toFixed(0)}th
+              </span>
+            </div>
+          )}
+          {edgeDistance && (
+            <div className="edge-badge">
+              <span className="edge-badge-value">{edgeDistance.distancePer60.toFixed(2)}</span>
+              <span className="edge-badge-unit">mi/60</span>
+              <span className="edge-badge-label">Distance</span>
+              <span className={`edge-badge-pct ${edgeDistance.percentile >= 80 ? 'elite' : edgeDistance.percentile >= 60 ? 'good' : ''}`}>
+                {edgeDistance.percentile.toFixed(0)}th
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Two-column body */}
       <div className="card-body-columns">

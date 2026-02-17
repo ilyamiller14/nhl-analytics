@@ -1127,6 +1127,18 @@ function PlayerProfile() {
                     powerPlayGoals={currentSeasonStats.powerPlayGoals}
                     gameWinningGoals={currentSeasonStats.gameWinningGoals}
                     skaterAverages={skaterAverages}
+                    edgeSpeed={edgeData?.speed ? {
+                      topSpeed: edgeData.speed.topSpeed,
+                      percentile: (edgeData.speed as any).percentiles?.topSpeed || 0,
+                    } : null}
+                    edgeShotSpeed={edgeData?.shotSpeed ? {
+                      maxShotSpeed: edgeData.shotSpeed.maxShotSpeed,
+                      percentile: (edgeData.shotSpeed as any).percentiles?.maxShotSpeed || 0,
+                    } : null}
+                    edgeDistance={edgeData?.distance ? {
+                      distancePer60: edgeData.distance.distancePerGame,
+                      percentile: (edgeData.distance as any).percentiles?.distancePer60 || 0,
+                    } : null}
                   />
                 </div>
                 <div className="card-actions">

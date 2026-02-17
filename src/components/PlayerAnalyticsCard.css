@@ -195,6 +195,69 @@
   font-weight: 500;
 }
 
+/* EDGE Tracking Badges */
+.edge-badges-row {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.edge-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  flex: 1;
+  padding: 0.6rem 0.5rem;
+  background: rgba(14, 165, 233, 0.08);
+  border: 1px solid rgba(14, 165, 233, 0.2);
+  border-radius: 10px;
+  position: relative;
+}
+
+.edge-badge-value {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #7dd3fc;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.edge-badge-unit {
+  font-size: 0.55rem;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin-top: 0.1rem;
+}
+
+.edge-badge-label {
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 600;
+  margin-top: 0.3rem;
+}
+
+.edge-badge-pct {
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.3);
+  font-weight: 500;
+  margin-top: 0.15rem;
+}
+
+.edge-badge-pct.good {
+  color: #60a5fa;
+}
+
+.edge-badge-pct.elite {
+  color: #34d399;
+  font-weight: 700;
+}
+
 /* Two-column body */
 .card-body-columns {
   display: grid;
