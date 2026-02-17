@@ -258,6 +258,22 @@
   font-weight: 700;
 }
 
+/* Full-width Shot Map */
+.shot-map-full {
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: center;
+}
+
+.shot-map-full .mini-shot-map {
+  width: 100%;
+}
+
+.shot-map-full .mini-rink-svg {
+  width: 100%;
+  height: auto;
+}
+
 /* Two-column body */
 .card-body-columns {
   display: grid;

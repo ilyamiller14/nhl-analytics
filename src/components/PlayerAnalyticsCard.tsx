@@ -298,38 +298,40 @@ export default function PlayerAnalyticsCard({
           )}
         </div>
 
-        {/* Right column: visualizations */}
+        {/* Right column: xG trend */}
         <div className="card-col-right">
           {(() => {
-            const shotsToShow = shotEvents || analytics?.playerShots;
             const metricsToShow = (rollingMetrics && rollingMetrics.length > 0)
               ? rollingMetrics
               : analytics?.rollingMetrics;
 
-            return (
-              <>
-                {metricsToShow && metricsToShow.length > 1 && (
-                  <XGTimeSeriesChart
-                    rollingMetrics={metricsToShow}
-                    width={220}
-                    height={100}
-                    showLabels={true}
-                  />
-                )}
-                {shotsToShow && shotsToShow.length > 0 && (
-                  <MiniShotMap
-                    shots={shotsToShow}
-                    width={220}
-                    height={120}
-                    officialGoals={goals}
-                    officialSOG={shots}
-                  />
-                )}
-              </>
-            );
+            return metricsToShow && metricsToShow.length > 1 ? (
+              <XGTimeSeriesChart
+                rollingMetrics={metricsToShow}
+                width={220}
+                height={100}
+                showLabels={true}
+              />
+            ) : null;
           })()}
         </div>
       </div>
+
+      {/* Full-width Shot Map */}
+      {(() => {
+        const shotsToShow = shotEvents || analytics?.playerShots;
+        return shotsToShow && shotsToShow.length > 0 ? (
+          <div className="shot-map-full">
+            <MiniShotMap
+              shots={shotsToShow}
+              width={500}
+              height={200}
+              officialGoals={goals}
+              officialSOG={shots}
+            />
+          </div>
+        ) : null;
+      })()}
 
       {/* Advanced Analytics Section */}
       {analytics && (analytics.onIceXG || analytics.xGMetrics) && (
