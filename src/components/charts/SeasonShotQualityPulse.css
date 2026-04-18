@@ -3,7 +3,7 @@
 .sqp-empty { padding: 18px; border: 1px dashed #374151; border-radius: 8px; text-align: center; color: #9ca3af; font-size: 0.85rem; }
 .sqp-wrapper {
   display: grid;
-  grid-template-columns: 1fr 130px;
+  grid-template-columns: 1fr 150px;
   gap: 12px;
   align-items: flex-start;
 }
@@ -12,16 +12,19 @@
   border-radius: 8px;
   width: 100%;
   max-width: 920px;
+  height: auto;
+  display: block;
 }
 .sqp-sidebar {
   display: flex;
   flex-direction: column;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   color: #94a3b8;
+  padding-top: 0;
 }
 .sqp-meta {
   display: grid;
-  grid-template-columns: 32px 1fr 28px;
+  grid-template-columns: 58px 1fr 30px;
   gap: 6px;
   align-items: center;
   font-variant-numeric: tabular-nums;
@@ -31,3 +34,20 @@
 .sqp-xg { color: #94a3b8; }
 .sqp-goals { color: #fde68a; text-align: right; font-weight: 600; }
 .sqp-caption { font-size: 0.72rem; color: #94a3b8; }
+
+@media (max-width: 640px) {
+  .sqp-wrapper {
+    grid-template-columns: 1fr;
+  }
+  .sqp-sidebar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+  .sqp-meta {
+    grid-template-columns: 58px auto auto;
+    gap: 4px;
+    height: auto !important;
+    margin-bottom: 0 !important;
+  }
+}

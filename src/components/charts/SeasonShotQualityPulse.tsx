@@ -1,20 +1,14 @@
 /**
  * Season Shot Quality Pulse
  *
- * One horizontal strip per recent game, stacked top-to-bottom. Each
- * strip is 60 minutes of game time; each shot the team took that game
- * is a vertical tick along the strip, height proportional to shot xG,
- * color intensity scaled to xG, goals marked with a filled star.
+ * One horizontal strip per 10-game block, stacked oldest (top) →
+ * newest (bottom). Each row is divided into 10 equal-width slots; each
+ * slot holds one game's shots, positioned by fraction of game-time
+ * elapsed. Tick height scales with xG, color with danger tier; goals
+ * are gold circles.
  *
- * A season of offense visualized as a rhythm — nights the team
- * hammered high-xG chances show up as dense tall strips; quiet games
- * show up as sparse short ones. Shows shot quality *timing* not just
- * totals.
- *
- * Input: flat ShotAttempt[] with xGoal, shooter team's timing
- * (period + timeInPeriod). Groups by game via a synthetic gameKey
- * derived from the sequence of shots (same game = same run of shots
- * in input order, delimited by period 1 starting again).
+ * Shows *season-long* shot-quality rhythm — hot streaks, cold stretches,
+ * and whether finishing lines up with chance creation.
  */
 
 import { useMemo } from 'react';
@@ -24,7 +18,8 @@ import './SeasonShotQualityPulse.css';
 interface Props {
   shots: ShotAttempt[];
   title?: string;
-  height?: number; // per-strip height
+  gamesPerRow?: number;
+  rowHeight?: number;
 }
 
 interface GameGroup {
@@ -36,14 +31,10 @@ interface GameGroup {
   totalXG: number;
 }
 
-// Period length: 1200s. OT is 300s regular season but for layout we use
-// 1200s per period consistently; shots after regulation render at the
-// right edge of the strip.
 const PERIOD_SECONDS = 1200;
 const FULL_GAME_SECONDS = 3 * PERIOD_SECONDS;
 
 function parseTimeInPeriod(t: string, period: number, isOT: boolean): number {
-  // Returns seconds elapsed since start of game.
   const [mm, ss] = (t || '00:00').split(':').map(v => parseInt(v, 10) || 0);
   const periodOffset = (Math.min(period, 3) - 1) * PERIOD_SECONDS;
   const intoPeriod = mm * 60 + ss;
@@ -51,12 +42,11 @@ function parseTimeInPeriod(t: string, period: number, isOT: boolean): number {
   return Math.min(FULL_GAME_SECONDS, periodOffset + intoPeriod);
 }
 
-export default function SeasonShotQualityPulse({ shots, title, height = 18 }: Props) {
+export default function SeasonShotQualityPulse({
+  shots, title, gamesPerRow = 10, rowHeight = 24,
+}: Props) {
   const games = useMemo<GameGroup[]>(() => {
     if (!shots || shots.length === 0) return [];
-    // Group by gameId. Each ShotAttempt carries its source gameId from
-    // the aggregator. Games are ordered by their first appearance so
-    // input order (chronological in our case) is preserved.
     const byGame = new Map<number, GameGroup>();
     let order = 0;
     for (const s of shots) {
@@ -77,11 +67,13 @@ export default function SeasonShotQualityPulse({ shots, title, height = 18 }: Pr
       if (s.type === 'goal') g.goalCount += 1;
       g.totalXG += s.xGoal ?? 0;
     }
-    return Array.from(byGame.values()).sort((a, b) => {
-      const da = a.gameDate ? Date.parse(a.gameDate) : 0;
-      const db = b.gameDate ? Date.parse(b.gameDate) : 0;
-      return da - db || a.gameIndex - b.gameIndex;
-    }).map((g, i) => ({ ...g, gameIndex: i }));
+    return Array.from(byGame.values())
+      .sort((a, b) => {
+        const da = a.gameDate ? Date.parse(a.gameDate) : 0;
+        const db = b.gameDate ? Date.parse(b.gameDate) : 0;
+        return da - db || a.gameIndex - b.gameIndex;
+      })
+      .map((g, i) => ({ ...g, gameIndex: i }));
   }, [shots]);
 
   if (games.length === 0) {
@@ -93,93 +85,155 @@ export default function SeasonShotQualityPulse({ shots, title, height = 18 }: Pr
     );
   }
 
-  const rowHeight = height;
-  const rowGap = 3;
-  const totalHeight = games.length * (rowHeight + rowGap) + 40;
-  const stripWidth = 920;
+  const rowCount = Math.ceil(games.length / gamesPerRow);
+  const rows: GameGroup[][] = [];
+  for (let r = 0; r < rowCount; r++) {
+    rows.push(games.slice(r * gamesPerRow, (r + 1) * gamesPerRow));
+  }
 
-  // Max xG / shot across all games for normalization.
+  const rowGap = 4;
+  const axisHeight = 22;
+  const stripWidth = 920;
+  const slotWidth = stripWidth / gamesPerRow;
+  const totalHeight = rowCount * (rowHeight + rowGap) + axisHeight;
+
+  // Normalize tick height against the shot-level xG max across the season so
+  // a monster chance reads big everywhere — not just in its own row.
   const maxXG = Math.max(0.3, ...games.flatMap(g => g.shots.map(s => s.xGoal ?? 0)));
+
+  // Game-within-season totals for sidebar annotations.
+  const rowTotals = rows.map(rowGames => {
+    const rowShots = rowGames.reduce((n, g) => n + g.shots.length, 0);
+    const rowXG = rowGames.reduce((n, g) => n + g.totalXG, 0);
+    const rowGoals = rowGames.reduce((n, g) => n + g.goalCount, 0);
+    const first = rowGames[0]?.gameIndex ?? 0;
+    const last = rowGames[rowGames.length - 1]?.gameIndex ?? 0;
+    return { rowShots, rowXG, rowGoals, first, last };
+  });
 
   return (
     <div className="sqp">
       {title && <h3 className="sqp-title">{title}</h3>}
       <div className="sqp-wrapper">
-        <svg width={stripWidth} height={totalHeight} className="sqp-svg" preserveAspectRatio="xMidYMid meet">
-          {/* Period dividers at 1/3 and 2/3 */}
-          <line x1={stripWidth / 3} x2={stripWidth / 3} y1={0} y2={totalHeight - 40}
-            stroke="rgba(148,163,184,0.12)" strokeDasharray="2 3" />
-          <line x1={(stripWidth / 3) * 2} x2={(stripWidth / 3) * 2} y1={0} y2={totalHeight - 40}
-            stroke="rgba(148,163,184,0.12)" strokeDasharray="2 3" />
-
-          {games.map((g, idx) => {
-            const y = idx * (rowHeight + rowGap);
-            // Background lane
+        <svg
+          viewBox={`0 0 ${stripWidth} ${totalHeight}`}
+          width="100%"
+          height="auto"
+          preserveAspectRatio="xMidYMid meet"
+          className="sqp-svg"
+          role="img"
+        >
+          {rows.map((rowGames, rowIdx) => {
+            const y = rowIdx * (rowHeight + rowGap);
             return (
-              <g key={idx}>
+              <g key={`row-${rowIdx}`}>
+                {/* Background lane for the filled portion of the row only */}
                 <rect
-                  x={0} y={y} width={stripWidth} height={rowHeight}
-                  fill="rgba(30, 41, 59, 0.35)" rx={3}
+                  x={0}
+                  y={y}
+                  width={rowGames.length * slotWidth}
+                  height={rowHeight}
+                  fill="rgba(30, 41, 59, 0.45)"
+                  rx={3}
                 />
-                {g.shots.map((s, si) => {
-                  const period = s.period ?? 1;
-                  const tip = s.timeInPeriod ?? '00:00';
-                  const ts = parseTimeInPeriod(tip, period, period > 3);
-                  const x = (ts / (FULL_GAME_SECONDS + 300)) * stripWidth;
-                  const xg = s.xGoal ?? 0;
-                  const intensity = Math.min(1, xg / maxXG);
-                  // Color: low xG → pale blue, high xG → hot orange
-                  const color = xg >= 0.15
-                    ? `rgba(239, 68, 68, ${0.55 + intensity * 0.35})`
-                    : xg >= 0.08
-                    ? `rgba(251, 146, 60, ${0.45 + intensity * 0.35})`
-                    : `rgba(96, 165, 250, ${0.35 + intensity * 0.4})`;
-                  const barH = 2 + intensity * (rowHeight - 4);
-                  const isGoal = s.type === 'goal';
+                {rowGames.map((g, slotIdx) => {
+                  const slotX = slotIdx * slotWidth;
                   return (
-                    <g key={si}>
-                      <rect
-                        x={x - 0.8} y={y + (rowHeight - barH) / 2}
-                        width={1.6} height={barH}
-                        fill={color}
-                      >
-                        <title>{`xG ${(xg * 100).toFixed(1)}%${isGoal ? ' — GOAL' : ''}`}</title>
-                      </rect>
-                      {isGoal && (
-                        <circle
-                          cx={x} cy={y + rowHeight / 2} r={2.2}
-                          fill="#fde68a" stroke="#f59e0b" strokeWidth={0.6}
+                    <g key={g.gameId}>
+                      {/* Slot divider (skip the leftmost edge) */}
+                      {slotIdx > 0 && (
+                        <line
+                          x1={slotX}
+                          x2={slotX}
+                          y1={y + 2}
+                          y2={y + rowHeight - 2}
+                          stroke="rgba(148, 163, 184, 0.18)"
+                          strokeWidth={0.75}
                         />
                       )}
+                      {g.shots.map((s, si) => {
+                        const period = s.period ?? 1;
+                        const tip = s.timeInPeriod ?? '00:00';
+                        const ts = parseTimeInPeriod(tip, period, period > 3);
+                        const frac = ts / (FULL_GAME_SECONDS + 300);
+                        const x = slotX + frac * slotWidth;
+                        const xg = s.xGoal ?? 0;
+                        const intensity = Math.min(1, xg / maxXG);
+                        const color =
+                          xg >= 0.15
+                            ? `rgba(239, 68, 68, ${0.55 + intensity * 0.35})`
+                            : xg >= 0.08
+                            ? `rgba(251, 146, 60, ${0.45 + intensity * 0.35})`
+                            : `rgba(96, 165, 250, ${0.35 + intensity * 0.4})`;
+                        const barH = 2 + intensity * (rowHeight - 4);
+                        const isGoal = s.type === 'goal';
+                        return (
+                          <g key={si}>
+                            <rect
+                              x={x - 0.8}
+                              y={y + (rowHeight - barH) / 2}
+                              width={1.6}
+                              height={barH}
+                              fill={color}
+                            >
+                              <title>
+                                {`G${g.gameIndex + 1}${g.gameDate ? ` (${g.gameDate})` : ''} · xG ${(xg * 100).toFixed(1)}%${isGoal ? ' — GOAL' : ''}`}
+                              </title>
+                            </rect>
+                            {isGoal && (
+                              <circle
+                                cx={x}
+                                cy={y + rowHeight / 2}
+                                r={2.4}
+                                fill="#fde68a"
+                                stroke="#f59e0b"
+                                strokeWidth={0.7}
+                              />
+                            )}
+                          </g>
+                        );
+                      })}
                     </g>
                   );
                 })}
-                {/* Row summary to the right (outside strip) */}
               </g>
             );
           })}
 
-          {/* Time axis labels */}
-          <g transform={`translate(0, ${totalHeight - 24})`}>
-            <text x={4} y={12} fontSize={10} fill="#94a3b8">P1</text>
-            <text x={stripWidth / 3 + 4} y={12} fontSize={10} fill="#94a3b8">P2</text>
-            <text x={(stripWidth / 3) * 2 + 4} y={12} fontSize={10} fill="#94a3b8">P3</text>
-            <text x={stripWidth - 24} y={12} fontSize={10} fill="#94a3b8">OT</text>
+          {/* Bottom axis: slot positions 1..N */}
+          <g transform={`translate(0, ${rowCount * (rowHeight + rowGap) + 2})`}>
+            {Array.from({ length: gamesPerRow }, (_, i) => (
+              <text
+                key={`axis-${i}`}
+                x={i * slotWidth + slotWidth / 2}
+                y={14}
+                textAnchor="middle"
+                fontSize={10}
+                fill="#94a3b8"
+              >
+                {i + 1}
+              </text>
+            ))}
           </g>
         </svg>
-        <div className="sqp-sidebar" style={{ height: totalHeight - 40 }}>
-          {games.map((g, idx) => (
-            <div className="sqp-meta" key={idx} style={{ height: rowHeight, marginBottom: rowGap }}>
-              <span className="sqp-game-idx">G{g.gameIndex + 1}</span>
-              <span className="sqp-xg">{g.totalXG.toFixed(1)} xG</span>
-              <span className="sqp-goals">{g.goalCount}g</span>
+        <div className="sqp-sidebar">
+          {rowTotals.map((t, i) => (
+            <div
+              className="sqp-meta"
+              key={i}
+              style={{ height: rowHeight, marginBottom: rowGap }}
+            >
+              <span className="sqp-game-idx">
+                G{t.first + 1}–{t.last + 1}
+              </span>
+              <span className="sqp-xg">{t.rowXG.toFixed(1)} xG</span>
+              <span className="sqp-goals">{t.rowGoals}g</span>
             </div>
           ))}
         </div>
       </div>
       <div className="sqp-caption">
-        Each row = one game. Each tick = a shot, height scaled by xG, color by danger tier. Gold circles = goals.
-        Games stacked oldest (top) → newest (bottom).
+        Each row = {gamesPerRow} games, oldest (top) → newest (bottom). Each tick = a shot, height scaled by xG, color by danger tier. Gold circles = goals. Slot dividers separate consecutive games within the 10-game block.
       </div>
     </div>
   );

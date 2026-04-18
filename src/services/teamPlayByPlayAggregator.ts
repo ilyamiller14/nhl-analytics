@@ -182,8 +182,10 @@ export async function fetchTeamRealAnalytics(
     shotsAgainstPerGame: Math.round((shotsOnGoalAgainst / gamesAnalyzed) * 10) / 10,
   };
 
-  // Cache for 2 hours (games can be added)
-  CacheManager.set(cacheKey, aggregate, ANALYTICS_CACHE.STANDINGS);
+  // Cache for 24 hours. Completed games' play-by-play is immutable; the
+  // cache key is keyed on gameIds.length, so the entry auto-invalidates
+  // the first time the team plays a new game.
+  CacheManager.set(cacheKey, aggregate, ANALYTICS_CACHE.ADVANCED_ANALYTICS);
 
   return aggregate;
 }
@@ -323,8 +325,8 @@ export async function fetchTeamShotLocations(
     sequences,
   };
 
-  // Cache for 2 hours
-  CacheManager.set(cacheKey, locations, ANALYTICS_CACHE.STANDINGS);
+  // Cache for 24 hours. Shot locations for completed games never change.
+  CacheManager.set(cacheKey, locations, ANALYTICS_CACHE.ADVANCED_ANALYTICS);
 
   return locations;
 }

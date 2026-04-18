@@ -111,8 +111,9 @@ function TeamProfile() {
         const completedGameIds = getCompletedGameIds(teamData.schedule);
 
         if (completedGameIds.length > 0) {
-          // Fetch real analytics from play-by-play (limit to last 20 games for performance)
-          const recentGameIds = completedGameIds.slice(-20);
+          // Fetch real analytics from play-by-play for the full season so the
+          // Shot Quality Pulse and Deep Analytics views cover every game.
+          const recentGameIds = completedGameIds;
 
           // Fetch analytics and shot locations in parallel
           const [realData, locations] = await Promise.all([
