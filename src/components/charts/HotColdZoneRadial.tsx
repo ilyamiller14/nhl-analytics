@@ -128,10 +128,15 @@ export default function HotColdZoneRadial({ shots, title, size = 420, minShotsPe
 
   // Draw a half-circle (semicircle) centered at bottom middle, pointing up.
   // Net is at the bottom; shooter positions radiate outward and upward.
+  // maxR is half the width so the full semicircle (plus outer label ring)
+  // fits inside the viewBox; viewBox height is only what the semicircle
+  // actually uses so the chart doesn't leave a tall empty band up top.
+  const labelPad = 24;
   const cx = size / 2;
-  const cy = size - 30;
-  const maxR = size - 60;
-  const innerR = 18; // crease/goal area
+  const maxR = size / 2 - labelPad;
+  const cy = maxR + labelPad;
+  const vbHeight = cy + 28; // room for NET label below the goal line
+  const innerR = 14; // crease/goal area
 
   // Map dist bin indices to radii. 5 bins across maxR-innerR.
   const rStep = (maxR - innerR) / DIST_BINS.length;
@@ -188,7 +193,14 @@ export default function HotColdZoneRadial({ shots, title, size = 420, minShotsPe
         </span>
       </div>
 
-      <svg width={size} height={size} className="hcr-svg" role="img">
+      <svg
+        viewBox={`0 0 ${size} ${vbHeight}`}
+        width="100%"
+        height="auto"
+        preserveAspectRatio="xMidYMid meet"
+        className="hcr-svg"
+        role="img"
+      >
         {/* Ring guides */}
         {DIST_BINS.map((_, i) => (
           <path

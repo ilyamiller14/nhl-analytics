@@ -5,7 +5,7 @@
 .str-sep { color: #475569; }
 .str-pos { color: #34d399; font-weight: 600; }
 .str-neg { color: #f87171; font-weight: 600; }
-.str-svg { display: block; max-width: 100%; height: auto; }
+.str-svg { display: block; width: 100%; max-width: 100%; height: auto; }
 .str-legend {
   display: flex;
   flex-wrap: wrap;

@@ -27,8 +27,8 @@ interface Props {
 export default function RollingFinishingTrajectory({
   shots,
   title,
-  width = 960,
-  height = 220,
+  width = 640,
+  height = 240,
 }: Props) {
   const { ordered, cum, maxAbs, goals, xG } = useMemo(() => {
     if (!shots || shots.length === 0) {
@@ -60,7 +60,7 @@ export default function RollingFinishingTrajectory({
     );
   }
 
-  const pad = { top: 20, right: 16, bottom: 34, left: 48 };
+  const pad = { top: 20, right: 16, bottom: 34, left: 34 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
   const xStep = plotW / (ordered.length - 1 || 1);
@@ -112,7 +112,14 @@ export default function RollingFinishingTrajectory({
         </span>
       </div>
 
-      <svg width={width} height={height} className="rft-svg" role="img">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        width="100%"
+        height="auto"
+        preserveAspectRatio="xMidYMid meet"
+        className="rft-svg"
+        role="img"
+      >
         <defs>
           <linearGradient id="rft-grad-pos" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="rgba(52, 211, 153, 0.55)" />
@@ -164,10 +171,6 @@ export default function RollingFinishingTrajectory({
           <text x={pad.left + plotW} y={height - 8} textAnchor="end" fontSize={10} fill="#94a3b8">{endDate}</text>
         )}
         <text x={pad.left + plotW / 2} y={height - 8} textAnchor="middle" fontSize={10} fill="#94a3b8">shot # →</text>
-
-        {/* Y axis title */}
-        <text x={14} y={pad.top + plotH / 2} textAnchor="middle" fontSize={11} fill="#cbd5f5"
-          transform={`rotate(-90 14 ${pad.top + plotH / 2})`}>Cumulative G − xG</text>
       </svg>
 
       <p className="rft-caption">

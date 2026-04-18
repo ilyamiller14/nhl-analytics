@@ -5,5 +5,5 @@
 .rft-sep { color: #475569; }
 .rft-pos { color: #34d399; font-weight: 600; }
 .rft-neg { color: #f87171; font-weight: 600; }
-.rft-svg { background: rgba(15, 23, 42, 0.4); border-radius: 8px; max-width: 100%; height: auto; display: block; }
+.rft-svg { background: rgba(15, 23, 42, 0.4); border-radius: 8px; width: 100%; max-width: 100%; height: auto; display: block; }
 .rft-caption { font-size: 0.72rem; color: #94a3b8; margin: 0; }

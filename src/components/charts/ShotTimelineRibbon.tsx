@@ -34,7 +34,7 @@ const RESULT_COLORS: Record<RibbonShot['result'], string> = {
   block: '#334155',   // very dim (blocked)
 };
 
-export default function ShotTimelineRibbon({ shots, title, height = 140, width = 960 }: Props) {
+export default function ShotTimelineRibbon({ shots, title, height = 160, width = 640 }: Props) {
   const [hovered, setHovered] = useState<number | null>(null);
 
   const { ordered, maxXG, gameBoundaries } = useMemo(() => {
@@ -106,7 +106,14 @@ export default function ShotTimelineRibbon({ shots, title, height = 140, width =
         </span>
       </div>
 
-      <svg width={width} height={height} className="str-svg" role="img">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        width="100%"
+        height="auto"
+        preserveAspectRatio="xMidYMid meet"
+        className="str-svg"
+        role="img"
+      >
         {/* Background lane */}
         <rect x={pad.left} y={pad.top} width={plotW} height={plotH}
           fill="rgba(15, 23, 42, 0.4)" rx={4} />
