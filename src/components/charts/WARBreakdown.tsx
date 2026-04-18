@@ -176,7 +176,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
     Math.abs(c.totalGAR),
   );
 
-  const pad = { top: 24, right: 44, bottom: 34, left: 180 };
+  const pad = { top: 24, right: 44, bottom: 34, left: 150 };
   const plotW = width - pad.left - pad.right;
   const zeroX = pad.left + plotW / 2;
   const pxPerGoal = plotW / 2 / maxAbs;
@@ -213,7 +213,14 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
         </div>
       </div>
 
-      <svg width={width} height={height} className="war-svg" role="img">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        width="100%"
+        height="auto"
+        preserveAspectRatio="xMidYMid meet"
+        className="war-svg"
+        role="img"
+      >
         <line x1={zeroX} x2={zeroX}
           y1={pad.top} y2={pad.top + segments.length * (rowHeight + rowGap) + 54}
           stroke="rgba(148,163,184,0.5)" strokeDasharray="3 3" />

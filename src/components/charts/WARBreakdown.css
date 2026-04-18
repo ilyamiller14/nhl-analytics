@@ -60,8 +60,10 @@
 .war-svg {
   background: rgba(15, 23, 42, 0.4);
   border-radius: 8px;
+  width: 100%;
   max-width: 100%;
   height: auto;
+  display: block;
 }
 
 .war-notes {
