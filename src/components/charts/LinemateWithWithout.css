@@ -1,32 +1,120 @@
-.lww { color: #e5e7eb; display: flex; flex-direction: column; gap: 10px; }
-.lww-title { font-size: 1rem; font-weight: 600; margin: 0; color: #f3f4f6; }
-.lww-empty { padding: 18px; border: 1px dashed #374151; border-radius: 8px; text-align: center; color: #9ca3af; font-size: 0.85rem; }
+.lww { color: var(--chart-text); display: flex; flex-direction: column; gap: 10px; }
+.lww-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--chart-title); }
+.lww-empty {
+  padding: 18px;
+  border: 1px dashed var(--gray-700);
+  border-radius: 8px;
+  text-align: center;
+  color: var(--gray-400);
+  font-size: 0.85rem;
+}
 .lww-rows { display: flex; flex-direction: column; }
+
 .lww-header {
   display: grid;
-  grid-template-columns: 1.4fr 0.9fr 1.6fr 1fr;
+  grid-template-columns: 1.3fr 0.85fr 1.9fr 0.55fr;
   gap: 10px;
   padding: 6px 10px;
-  font-size: 0.72rem;
-  color: #94a3b8;
+  font-size: 0.7rem;
+  color: var(--chart-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  align-items: center;
 }
+.lww-num-h { text-align: right; }
+.lww-diff-h { text-align: center; }
+
 .lww-row {
   display: grid;
-  grid-template-columns: 1.4fr 0.9fr 1.6fr 1fr;
+  grid-template-columns: 1.3fr 0.85fr 1.9fr 0.55fr;
   gap: 10px;
   padding: 8px 10px;
   align-items: center;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.08);
 }
 .lww-row:last-child { border-bottom: none; }
-.lww-name { color: #e5e7eb; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lww-num { font-variant-numeric: tabular-nums; color: #cbd5f5; }
-.lww-bar { display: grid; grid-template-columns: 1fr 44px; gap: 8px; align-items: center; }
-.lww-bar-track { height: 10px; background: rgba(55, 65, 81, 0.5); border-radius: 3px; overflow: hidden; }
-.lww-bar-fill { display: block; height: 100%; background: linear-gradient(to right, #22d3ee, #4f46e5); }
-.lww-bar-value { font-variant-numeric: tabular-nums; color: #e5e7eb; text-align: right; font-size: 0.8rem; }
-.lww-caption { font-size: 0.72rem; color: #94a3b8; }
+
+.lww-name {
+  color: var(--chart-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.lww-num { font-variant-numeric: tabular-nums; color: var(--chart-value); text-align: right; }
+
+.lww-diff {
+  display: grid;
+  grid-template-columns: 1fr 52px;
+  gap: 10px;
+  align-items: center;
+}
+.lww-diff-track {
+  position: relative;
+  height: 14px;
+  background: rgba(51, 65, 85, 0.4);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.lww-diff-axis {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--chart-axis);
+}
+.lww-diff-fill {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 2px;
+}
+.lww-diff-fill.pos {
+  background: linear-gradient(to right, var(--chart-blue), var(--chart-positive));
+}
+.lww-diff-fill.neg {
+  background: linear-gradient(to left, rgba(248, 113, 113, 0.55), var(--chart-negative-strong));
+}
+
+.lww-diff-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-align: right;
+}
+.lww-diff-value.pos { color: var(--chart-positive); }
+.lww-diff-value.neg { color: var(--chart-negative); }
+
+.lww-goal-badge {
+  justify-self: end;
+  min-width: 32px;
+  text-align: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid transparent;
+}
+.lww-goal-badge.elite  { background: rgba(16, 185, 129, 0.25); color: #6ee7b7; border-color: rgba(16, 185, 129, 0.5); }
+.lww-goal-badge.good   { background: rgba(34, 197, 94, 0.15); color: #86efac; border-color: rgba(34, 197, 94, 0.35); }
+.lww-goal-badge.ok     { background: rgba(59, 130, 246, 0.15); color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); }
+.lww-goal-badge.cold   { background: rgba(71, 85, 105, 0.3); color: var(--chart-muted); border-color: rgba(71, 85, 105, 0.45); }
+
+.lww-caption { font-size: 0.72rem; color: var(--chart-muted); line-height: 1.5; }
+
+@media (max-width: 640px) {
+  .lww-header,
+  .lww-row {
+    grid-template-columns: 1.3fr 0.9fr 1.4fr 0.5fr;
+    gap: 6px;
+    padding: 6px 8px;
+    font-size: 0.78rem;
+  }
+  .lww-diff { grid-template-columns: 1fr 40px; gap: 6px; }
+  .lww-diff-value { font-size: 0.78rem; }
+  .lww-goal-badge { min-width: 28px; padding: 2px 6px; font-size: 0.7rem; }
+}

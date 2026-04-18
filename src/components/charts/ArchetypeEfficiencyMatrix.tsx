@@ -76,12 +76,16 @@ export default function ArchetypeEfficiencyMatrix({
   sequences,
   title,
   width = 720,
-  minShots = 10,
+  minShots = 5,
 }: Props) {
   const rows = useMemo(() => {
     const all = aggregateArchetypes(sequences);
     return all.filter(r => r.shots >= minShots);
   }, [sequences, minShots]);
+
+  // Below this count the quadrant-tint + corner labels read as empty
+  // space and confuse readers. Hide them and let the scatter speak.
+  const showQuadrantHints = rows.length >= 3;
 
   if (rows.length === 0) {
     return (
@@ -131,18 +135,29 @@ export default function ArchetypeEfficiencyMatrix({
   return (
     <div className="am-v2">
       {title && <h3 className="am-title">{title}</h3>}
-      <svg width={width} height={height} className="am-svg" role="img">
-        {/* Quadrant backgrounds — very subtle */}
-        <rect x={midX} y={pad.top} width={pad.left + plotW - midX} height={midY - pad.top}
-          fill="rgba(52, 211, 153, 0.05)" />
-        <rect x={pad.left} y={pad.top} width={midX - pad.left} height={midY - pad.top}
-          fill="rgba(96, 165, 250, 0.04)" />
-        <rect x={midX} y={midY} width={pad.left + plotW - midX} height={pad.top + plotH - midY}
-          fill="rgba(251, 146, 60, 0.05)" />
-        {/* Quadrant labels — faint */}
-        <text x={pad.left + plotW - 8} y={pad.top + 14} textAnchor="end" fontSize={10} fill="rgba(16, 185, 129, 0.7)">Core + converts</text>
-        <text x={pad.left + 8} y={pad.top + 14} textAnchor="start" fontSize={10} fill="rgba(59, 130, 246, 0.6)">Underused gem</text>
-        <text x={pad.left + plotW - 8} y={pad.top + plotH - 6} textAnchor="end" fontSize={10} fill="rgba(249, 115, 22, 0.65)">Over-leveraged</text>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        width="100%"
+        height="auto"
+        preserveAspectRatio="xMidYMid meet"
+        className="am-svg"
+        role="img"
+      >
+        {showQuadrantHints && (
+          <>
+            {/* Quadrant backgrounds — very subtle */}
+            <rect x={midX} y={pad.top} width={pad.left + plotW - midX} height={midY - pad.top}
+              fill="rgba(52, 211, 153, 0.05)" />
+            <rect x={pad.left} y={pad.top} width={midX - pad.left} height={midY - pad.top}
+              fill="rgba(96, 165, 250, 0.04)" />
+            <rect x={midX} y={midY} width={pad.left + plotW - midX} height={pad.top + plotH - midY}
+              fill="rgba(251, 146, 60, 0.05)" />
+            {/* Quadrant labels — faint */}
+            <text x={pad.left + plotW - 8} y={pad.top + 14} textAnchor="end" fontSize={10} fill="rgba(16, 185, 129, 0.7)">Core + converts</text>
+            <text x={pad.left + 8} y={pad.top + 14} textAnchor="start" fontSize={10} fill="rgba(59, 130, 246, 0.6)">Underused gem</text>
+            <text x={pad.left + plotW - 8} y={pad.top + plotH - 6} textAnchor="end" fontSize={10} fill="rgba(249, 115, 22, 0.65)">Over-leveraged</text>
+          </>
+        )}
 
         {/* Gridlines at tick positions */}
         {xTickValues.map(t => (

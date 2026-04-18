@@ -1,6 +1,13 @@
-.sqp { color: #e5e7eb; display: flex; flex-direction: column; gap: 10px; }
-.sqp-title { font-size: 1rem; font-weight: 600; margin: 0; color: #f3f4f6; }
-.sqp-empty { padding: 18px; border: 1px dashed #374151; border-radius: 8px; text-align: center; color: #9ca3af; font-size: 0.85rem; }
+.sqp { color: var(--chart-text); display: flex; flex-direction: column; gap: 10px; }
+.sqp-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--chart-title); }
+.sqp-empty {
+  padding: 18px;
+  border: 1px dashed var(--gray-700);
+  border-radius: 8px;
+  text-align: center;
+  color: var(--gray-400);
+  font-size: 0.85rem;
+}
 .sqp-wrapper {
   display: grid;
   grid-template-columns: 1fr 150px;
@@ -8,7 +15,7 @@
   align-items: flex-start;
 }
 .sqp-svg {
-  background: rgba(15, 23, 42, 0.4);
+  background: var(--chart-bg);
   border-radius: 8px;
   width: 100%;
   max-width: 920px;
@@ -19,7 +26,7 @@
   display: flex;
   flex-direction: column;
   font-size: 0.72rem;
-  color: #94a3b8;
+  color: var(--chart-muted);
   padding-top: 0;
 }
 .sqp-meta {
@@ -30,10 +37,10 @@
   font-variant-numeric: tabular-nums;
   padding: 0 6px;
 }
-.sqp-game-idx { color: #cbd5f5; font-weight: 500; }
-.sqp-xg { color: #94a3b8; }
-.sqp-goals { color: #fde68a; text-align: right; font-weight: 600; }
-.sqp-caption { font-size: 0.72rem; color: #94a3b8; }
+.sqp-game-idx { color: var(--chart-value); font-weight: 500; }
+.sqp-xg { color: var(--chart-muted); }
+.sqp-goals { color: var(--chart-gold); text-align: right; font-weight: 600; }
+.sqp-caption { font-size: 0.72rem; color: var(--chart-muted); }
 
 @media (max-width: 640px) {
   .sqp-wrapper {

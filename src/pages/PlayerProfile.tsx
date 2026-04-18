@@ -27,6 +27,8 @@ import ShotTimelineRibbon from '../components/charts/ShotTimelineRibbon';
 import HotColdZoneRadial from '../components/charts/HotColdZoneRadial';
 import RollingFinishingTrajectory from '../components/charts/RollingFinishingTrajectory';
 import WARBreakdown from '../components/charts/WARBreakdown';
+import LinemateWithWithout from '../components/charts/LinemateWithWithout';
+import { usePlayerLinemateChemistry } from '../hooks/usePlayerLinemateChemistry';
 import { computeSkaterWAR } from '../services/warService';
 import { loadWARTables, type WARTables } from '../services/warTableService';
 import { edgeTrackingService } from '../services/edgeTrackingService';
@@ -237,6 +239,17 @@ function PlayerProfile() {
   } = useAdvancedPlayerAnalytics(
     player?.playerId || null,
     player?.currentTeamId || null,
+    player?.featuredStats?.season?.toString() || getCurrentSeason()
+  );
+
+  // Linemate WOWY — loaded lazily when the Deep tab is first opened.
+  const {
+    result: linemateChemistry,
+    isLoading: linemateLoading,
+  } = usePlayerLinemateChemistry(
+    activeTab === 'deep' && player?.playerId ? player.playerId : null,
+    activeTab === 'deep' && player?.currentTeamId ? player.currentTeamId : null,
+    activeTab === 'deep' && player?.currentTeamAbbrev ? player.currentTeamAbbrev : null,
     player?.featuredStats?.season?.toString() || getCurrentSeason()
   );
 
@@ -1271,6 +1284,28 @@ function PlayerProfile() {
                       shots={advancedAnalytics.playerShots}
                     />
                   </div>
+
+                  {!isGoalie && (
+                    <div className="deep-panel">
+                      {linemateLoading && !linemateChemistry ? (
+                        <div className="loading" style={{ padding: '1rem 0' }}>
+                          <div className="loading-spinner"></div>
+                          <p>Loading linemate chemistry…</p>
+                        </div>
+                      ) : linemateChemistry && linemateChemistry.pairs.length > 0 ? (
+                        <LinemateWithWithout
+                          title={`Linemate With/Without — ${linemateChemistry.gamesAnalyzed} games`}
+                          focusPlayerId={player.playerId}
+                          focusPlayerName={`${player.firstName.default} ${player.lastName.default}`}
+                          pairs={linemateChemistry.pairs}
+                        />
+                      ) : (
+                        <div className="empty-state">
+                          <p>No linemate chemistry yet — not enough shared ice time in the loaded games.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="empty-state">
