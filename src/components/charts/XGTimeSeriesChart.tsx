@@ -114,7 +114,7 @@ export default function XGTimeSeriesChart({
           />
 
           {/* Area fill */}
-          <path d={areaPath} className="area-fill" />
+          <path d={areaPath} className="area-fill" style={{ fill: trendColor }} />
 
           {/* Main line */}
           <path d={path} className="main-line" style={{ stroke: trendColor }} />

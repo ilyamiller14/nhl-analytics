@@ -1,9 +1,16 @@
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { CacheManager } from '../utils/cacheUtils';
 import './Navigation.css';
 
 function Navigation() {
   const location = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close menu on route change
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
 
   const isActive = (path: string) => {
     if (path === '/') {
@@ -14,7 +21,6 @@ function Navigation() {
 
   const handleClearCache = () => {
     CacheManager.clear();
-    // Also clear React Query cache if available
     window.location.reload();
   };
 
@@ -25,7 +31,18 @@ function Navigation() {
           <span className="logo-text">NHL Analytics</span>
         </Link>
 
-        <ul className="nav-links">
+        <button
+          className="nav-hamburger"
+          onClick={() => setMenuOpen(!menuOpen)}
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={menuOpen}
+        >
+          <span className={`hamburger-line ${menuOpen ? 'open' : ''}`} />
+          <span className={`hamburger-line ${menuOpen ? 'open' : ''}`} />
+          <span className={`hamburger-line ${menuOpen ? 'open' : ''}`} />
+        </button>
+
+        <ul className={`nav-links ${menuOpen ? 'nav-open' : ''}`}>
           <li>
             <Link to="/" className={`nav-link ${isActive('/')}`}>
               Home
@@ -42,6 +59,11 @@ function Navigation() {
             </Link>
           </li>
           <li>
+            <Link to="/contracts" className={`nav-link ${isActive('/contracts')}`}>
+              Contracts
+            </Link>
+          </li>
+          <li>
             <Link to="/compare" className={`nav-link ${isActive('/compare')}`}>
               Compare
             </Link>
@@ -52,8 +74,8 @@ function Navigation() {
             </Link>
           </li>
           <li>
-            <Link to="/coaching" className={`nav-link ${isActive('/coaching')}`}>
-              Coaching
+            <Link to="/deep" className={`nav-link ${isActive('/deep')}`}>
+              Deep
             </Link>
           </li>
           <li>
@@ -67,7 +89,7 @@ function Navigation() {
               className="nav-link nav-button"
               title="Clear cached data and reload fresh stats"
             >
-              ↻ Refresh Data
+              ↻ Refresh
             </button>
           </li>
         </ul>

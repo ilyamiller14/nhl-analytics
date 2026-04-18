@@ -1,0 +1,33 @@
+.sqp { color: #e5e7eb; display: flex; flex-direction: column; gap: 10px; }
+.sqp-title { font-size: 1rem; font-weight: 600; margin: 0; color: #f3f4f6; }
+.sqp-empty { padding: 18px; border: 1px dashed #374151; border-radius: 8px; text-align: center; color: #9ca3af; font-size: 0.85rem; }
+.sqp-wrapper {
+  display: grid;
+  grid-template-columns: 1fr 130px;
+  gap: 12px;
+  align-items: flex-start;
+}
+.sqp-svg {
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 920px;
+}
+.sqp-sidebar {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+.sqp-meta {
+  display: grid;
+  grid-template-columns: 32px 1fr 28px;
+  gap: 6px;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+  padding: 0 6px;
+}
+.sqp-game-idx { color: #cbd5f5; font-weight: 500; }
+.sqp-xg { color: #94a3b8; }
+.sqp-goals { color: #fde68a; text-align: right; font-weight: 600; }
+.sqp-caption { font-size: 0.72rem; color: #94a3b8; }

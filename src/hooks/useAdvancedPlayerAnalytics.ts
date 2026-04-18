@@ -3,7 +3,6 @@
  *
  * Calculates comprehensive analytics from play-by-play data:
  * - xG metrics (using canonical xgModel.ts)
- * - Royal road passes
  * - Defensive coverage
  */
 
@@ -15,7 +14,6 @@ import {
   calculateShotMetrics,
   type ShotEvent,
 } from '../services/playByPlayService';
-import { calculateRoyalRoadAnalytics, detectRoyalRoadPasses } from '../services/advancedPassAnalytics';
 import { analyzeDefensiveCoverage } from '../services/defensiveAnalytics';
 import { calculateXG, calculateXGDifferential } from '../services/xgModel';
 import { calculateRollingMetrics, type GameMetrics, type RollingMetrics } from '../services/rollingAnalytics';
@@ -40,19 +38,23 @@ export interface AdvancedPlayerAnalytics {
     ixGPer60: number;      // ixG per 60 minutes (estimated)
   };
 
-  // Shot data for visualizations
+  // Shot data for visualizations. Enriched with chronological context
+  // (gameId, period, timeInPeriod) so downstream vizes can plot by
+  // time, game order, or shot type.
   playerShots: Array<{
     x: number;
     y: number;
     result: 'goal' | 'shot' | 'miss' | 'block';
     xGoal: number;
+    shotType?: string;
+    gameId?: number;
+    gameDate?: string;
+    period?: number;
+    timeInPeriod?: string;
   }>;
 
   // Rolling metrics for time series visualization
   rollingMetrics: RollingMetrics[];
-
-  // Royal Road Passes
-  royalRoadPasses: ReturnType<typeof calculateRoyalRoadAnalytics>;
 
   // Zone Entries/Exits (stub for backward compatibility)
   zoneAnalytics: {
@@ -131,7 +133,8 @@ export function useAdvancedPlayerAnalytics(
         const allShots: ShotEvent[] = [];
         const playerOnIceShotsFor: ShotEvent[] = [];
         const playerOnIceShotsAgainst: ShotEvent[] = [];
-        const allRoyalRoadPasses: import('../services/advancedPassAnalytics').RoyalRoadPass[] = [];
+        // Per-shot chronological context for deep analytics visuals.
+        const playerOwnShotContexts: Array<{ gameId: number; gameDate: string; shot: ShotEvent }> = [];
 
         // Per-game data for rolling metrics
         const perGameMetrics: GameMetrics[] = [];
@@ -157,11 +160,6 @@ export function useAdvancedPlayerAnalytics(
             playerOnIceShotsFor.push(...shotsFor);
             playerOnIceShotsAgainst.push(...shotsAgainst);
 
-            // Detect royal road passes per-game (eventIds are only unique within a game)
-            // Uses event-based detection — no dependency on explicit pass events
-            const gameRoyalRoad = detectRoyalRoadPasses(playByPlay.allEvents, shotsFor);
-            allRoyalRoadPasses.push(...gameRoyalRoad);
-
             // Compute per-game metrics for rolling analytics
             const gamePlayerShots = playByPlay.shots.filter(
               (s) => s.shootingPlayerId === playerId
@@ -170,6 +168,11 @@ export function useAdvancedPlayerAnalytics(
 
             // Use actual game date from play-by-play data
             const gameDate = playByPlay.gameDate || new Date().toISOString().split('T')[0];
+
+            // Attach gameId/gameDate to each of this player's own shots.
+            for (const shot of gamePlayerShots) {
+              playerOwnShotContexts.push({ gameId, gameDate, shot });
+            }
 
             // Count assists from goal events where this player is listed as an assister
             const gamePlayerAssists = playByPlay.allEvents.filter(
@@ -256,13 +259,10 @@ export function useAdvancedPlayerAnalytics(
         // Calculate player on-ice xG metrics using actual on-ice data
         const xGMetrics = calculateXGDifferential(shotsForFeatures, shotsAgainstFeatures);
 
-        // Filter shots for player's personal shots (not on-ice, but actually taken by player)
-        const playerPersonalShots = allShots.filter(
-          (shot) => shot.shootingPlayerId === playerId
-        );
-
-        // Calculate Individual xG (ixG) using canonical xG model for consistency
-        const playerShotsWithXG = playerPersonalShots.map((shot) => {
+        // Calculate Individual xG (ixG) using canonical xG model for
+        // consistency. Enrich each shot with chronological context
+        // (gameId, gameDate, period, timeInPeriod) for downstream visuals.
+        const playerShotsWithXG = playerOwnShotContexts.map(({ gameId: gid, gameDate: gdate, shot }) => {
           const distance = calculateDistance(shot.xCoord, shot.yCoord);
           const angle = calculateShotAngle(shot.xCoord, shot.yCoord);
           const prediction = calculateXG({
@@ -278,15 +278,17 @@ export function useAdvancedPlayerAnalytics(
                     shot.result === 'shot-on-goal' ? 'shot' as const :
                     shot.result === 'missed-shot' ? 'miss' as const : 'block' as const,
             xGoal: prediction.xGoal,
+            shotType: mapShotType(shot.shotType),
+            period: shot.period,
+            timeInPeriod: shot.timeInPeriod,
+            gameId: gid,
+            gameDate: gdate,
           };
         });
 
         const totalIxG = playerShotsWithXG.reduce((sum, shot) => sum + shot.xGoal, 0);
-        const personalGoals = playerPersonalShots.filter((s) => s.result === 'goal').length;
+        const personalGoals = playerShotsWithXG.filter((s) => s.result === 'goal').length;
         const goalsAboveExpected = personalGoals - totalIxG;
-
-        // Royal road passes — aggregated from per-game detection above
-        const royalRoadAnalytics = calculateRoyalRoadAnalytics(allRoyalRoadPasses);
 
         // Zone/Rush stubs — no real API data exists for these
         const zoneAnalytics = {
@@ -336,12 +338,11 @@ export function useAdvancedPlayerAnalytics(
             xGPercent: xGMetrics.xGPercent,
           },
 
-          royalRoadPasses: royalRoadAnalytics,
           zoneAnalytics,
           rushAnalytics,
           defensiveAnalytics,
           totalGames: gameIds.length,
-          totalShots: playerPersonalShots.length,
+          totalShots: playerShotsWithXG.length,
           totalGoals: personalGoals,
         });
       } catch (err) {

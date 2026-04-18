@@ -1,15 +1,15 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchAllLeaguePlayers } from '../services/leagueStatsService';
+import { fetchAllLeaguePlayers, fetchSkaterPercentages, type NHLAdvancedStats } from '../services/leagueStatsService';
 import { computeAdvancedMetricsForPlayers, type AdvancedPlayerMetrics } from '../services/advancedMetrics';
-import { computeLeagueStatsFromPBP, type PBPComputedStats } from '../services/pbpComputedStats';
+import { getLeagueAverages } from '../services/leagueAveragesService';
 import { CacheManager, CACHE_DURATION } from '../utils/cacheUtils';
 import { getCurrentSeason } from '../utils/seasonUtils';
 import './LeagueAdvancedAnalytics.css';
 
-// Extended player data with real PBP-computed advanced stats
+// Extended player data with NHL Stats API advanced stats
 interface PlayerTableData extends AdvancedPlayerMetrics {
-  advancedStats?: PBPComputedStats;
+  advancedStats?: NHLAdvancedStats;
 }
 
 function LeagueAdvancedAnalytics() {
@@ -24,10 +24,11 @@ function LeagueAdvancedAnalytics() {
   const [positionFilter, setPositionFilter] = useState<string>('all');
   const [minGames, setMinGames] = useState<number>(10);
 
-  // Fetch real NHL API data and merge with PBP-computed advanced stats
+  // Fetch real NHL Stats API data (roster + pre-computed advanced stats)
   useEffect(() => {
     async function loadLeagueData() {
-      const CACHE_KEY = 'league_analytics_pbp_2025_26';
+      const season = getCurrentSeason();
+      const CACHE_KEY = `league_analytics_api_${season}`;
 
       // Try to get cached data first
       const cachedData = CacheManager.get<{
@@ -36,7 +37,6 @@ function LeagueAdvancedAnalytics() {
       }>(CACHE_KEY);
 
       if (cachedData) {
-        console.log('Loading analytics from cache');
         setLeagueData(cachedData.players);
         setDataSource(cachedData.dataSource + ' (cached)');
         setIsLoading(false);
@@ -45,25 +45,36 @@ function LeagueAdvancedAnalytics() {
 
       setIsLoading(true);
       try {
-        // Fetch NHL API roster data + compute PBP stats in parallel
-        const [realPlayers, pbpStatsMap] = await Promise.all([
-          fetchAllLeaguePlayers(getCurrentSeason()),
-          computeLeagueStatsFromPBP(),
+        // Fetch roster data + advanced stats + league averages in parallel
+        const [realPlayers, percentagesMap, leagueAvg] = await Promise.all([
+          fetchAllLeaguePlayers(season),
+          fetchSkaterPercentages(season),
+          getLeagueAverages(season),
         ]);
+
+        const leagueSHRate = leagueAvg ? leagueAvg.shootingPct / 100 : 0;
 
         // Compute basic rate metrics from NHL API data
         const processedPlayers = computeAdvancedMetricsForPlayers(
           realPlayers.filter((p: { gamesPlayed: number }) => p.gamesPlayed > 0)
         );
 
-        // Merge real PBP-computed stats by player ID
-        const playersWithAdvancedStats: PlayerTableData[] = processedPlayers.map(player => ({
-          ...player,
-          advancedStats: pbpStatsMap.get(player.playerId) || undefined,
-        }));
+        // Merge pre-computed advanced stats and compute xG
+        const playersWithAdvancedStats: PlayerTableData[] = processedPlayers.map(player => {
+          const advanced = percentagesMap.get(player.playerId);
+          if (advanced && leagueSHRate > 0) {
+            const xg = player.shots * leagueSHRate;
+            advanced.xGoals = parseFloat(xg.toFixed(1));
+            advanced.xGoalsDifference = parseFloat((player.goals - xg).toFixed(1));
+          }
+          return {
+            ...player,
+            advancedStats: advanced || undefined,
+          };
+        });
 
-        const pbpCount = pbpStatsMap.size;
-        const sourceText = `NHL API + PBP Data — 2025-26 Season — ${realPlayers.length} players, ${pbpCount} with PBP stats`;
+        const advCount = percentagesMap.size;
+        const sourceText = `NHL Stats API — ${season.slice(0, 4)}-${season.slice(6)} Season — ${realPlayers.length} players, ${advCount} with advanced stats`;
 
         CacheManager.set(CACHE_KEY, {
           players: playersWithAdvancedStats,
@@ -267,8 +278,8 @@ function LeagueAdvancedAnalytics() {
                 <th onClick={() => handleSort('advancedStats.onIceShootingPct')} className="sortable">
                   oiSH% {getSortIcon('advancedStats.onIceShootingPct')}
                 </th>
-                <th onClick={() => handleSort('advancedStats.highDangerShotPercentage')} className="sortable">
-                  HD% {getSortIcon('advancedStats.highDangerShotPercentage')}
+                <th onClick={() => handleSort('advancedStats.zoneStartPct')} className="sortable">
+                  ZS% {getSortIcon('advancedStats.zoneStartPct')}
                 </th>
                 <th onClick={() => handleSort('pointsPer60')} className="sortable">
                   P/60 {getSortIcon('pointsPer60')}
@@ -292,26 +303,26 @@ function LeagueAdvancedAnalytics() {
                   <td>{player.points}</td>
                   <td>{player.goals}</td>
                   <td>{player.avgToi}</td>
-                  <td className="highlight-cell"><strong>{player.advancedStats?.corsiForPercentage.toFixed(1) ?? '-'}</strong></td>
+                  <td className="highlight-cell"><strong>{player.advancedStats?.corsiForPercentage != null ? player.advancedStats.corsiForPercentage.toFixed(1) : '-'}</strong></td>
                   <td className={
                     (player.advancedStats?.relativeCorsi ?? 0) > 0 ? 'positive' :
                     (player.advancedStats?.relativeCorsi ?? 0) < 0 ? 'negative' : ''
                   }>
-                    {player.advancedStats ? (player.advancedStats.relativeCorsi > 0 ? '+' : '') + player.advancedStats.relativeCorsi.toFixed(1) : '-'}
+                    {player.advancedStats?.relativeCorsi != null ? (player.advancedStats.relativeCorsi > 0 ? '+' : '') + player.advancedStats.relativeCorsi.toFixed(1) : '-'}
                   </td>
-                  <td className="highlight-cell"><strong>{player.advancedStats?.fenwickForPercentage.toFixed(1) ?? '-'}</strong></td>
-                  <td className="highlight-cell"><strong>{player.advancedStats?.xGoals.toFixed(1) ?? '-'}</strong></td>
+                  <td className="highlight-cell"><strong>{player.advancedStats?.fenwickForPercentage != null ? player.advancedStats.fenwickForPercentage.toFixed(1) : '-'}</strong></td>
+                  <td className="highlight-cell"><strong>{player.advancedStats?.xGoals != null ? player.advancedStats.xGoals.toFixed(1) : '-'}</strong></td>
                   <td className={
                     (player.advancedStats?.xGoalsDifference ?? 0) > 0 ? 'positive' :
                     (player.advancedStats?.xGoalsDifference ?? 0) < 0 ? 'negative' : ''
                   }>
-                    {player.advancedStats ? (player.advancedStats.xGoalsDifference > 0 ? '+' : '') + player.advancedStats.xGoalsDifference.toFixed(1) : '-'}
+                    {player.advancedStats?.xGoalsDifference != null ? (player.advancedStats.xGoalsDifference > 0 ? '+' : '') + player.advancedStats.xGoalsDifference.toFixed(1) : '-'}
                   </td>
-                  <td className="highlight-cell"><strong>{player.advancedStats?.pdo.toFixed(1) ?? '-'}</strong></td>
-                  <td>{player.advancedStats?.onIceShootingPct.toFixed(1) ?? '-'}%</td>
-                  <td>{player.advancedStats?.highDangerShotPercentage.toFixed(1) ?? '-'}%</td>
-                  <td>{player.pointsPer60.toFixed(2)}</td>
-                  <td>{player.goalsPer60.toFixed(2)}</td>
+                  <td className="highlight-cell"><strong>{player.advancedStats?.pdo != null ? player.advancedStats.pdo.toFixed(1) : '-'}</strong></td>
+                  <td>{player.advancedStats?.onIceShootingPct != null ? player.advancedStats.onIceShootingPct.toFixed(1) + '%' : '-'}</td>
+                  <td>{player.advancedStats?.zoneStartPct != null ? player.advancedStats.zoneStartPct.toFixed(1) + '%' : '-'}</td>
+                  <td>{player.pointsPer60 != null ? player.pointsPer60.toFixed(2) : '-'}</td>
+                  <td>{player.goalsPer60 != null ? player.goalsPer60.toFixed(2) : '-'}</td>
                 </tr>
               ))}
             </tbody>
@@ -323,10 +334,10 @@ function LeagueAdvancedAnalytics() {
         <strong>Metrics Legend:</strong>
         <br />
         CF% = Corsi For % | Rel CF% = Relative Corsi | FF% = Fenwick For % |
-        xG = Expected Goals | G-xG = Goals Above Expected | PDO = On-Ice SH% + SV% |
-        oiSH% = On-Ice Shooting % | HD% = High-Danger Shot %
+        xG = Expected Goals (shots × league SH%) | G-xG = Goals Above Expected |
+        PDO = On-Ice SH% + SV% | oiSH% = On-Ice Shooting % | ZS% = Offensive Zone Start %
         <br />
-        <em>Computed from play-by-play data. Click any player for detailed analytics.</em>
+        <em>All stats from NHL Stats API (5v5). Click any player for detailed analytics.</em>
       </div>
     </div>
   );

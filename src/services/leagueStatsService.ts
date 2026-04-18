@@ -1,4 +1,5 @@
 import { NHL_API_BASE_URL } from './nhlApi';
+import { getNhlStatsUrl } from '../config/api';
 import { getCurrentSeason, getCurrentSeasonId } from '../utils/seasonUtils';
 
 export interface LeaguePlayerStats {
@@ -130,6 +131,72 @@ import { NHL_TEAM_ABBREVS } from '../constants/teams';
 
 // Re-export for backward compatibility
 export const NHL_TEAMS = NHL_TEAM_ABBREVS;
+
+/**
+ * Pre-computed advanced stats from the NHL Stats API percentages endpoint.
+ * All values from real NHL data — no PBP processing required.
+ */
+export interface NHLAdvancedStats {
+  /** Corsi For % (shot attempts for / total shot attempts, 5v5) */
+  corsiForPercentage: number;
+  /** Relative Corsi (player CF% minus team CF% without player) */
+  relativeCorsi: number;
+  /** Fenwick For % (unblocked shot attempts, 5v5) */
+  fenwickForPercentage: number;
+  /** PDO (on-ice SH% + SV%, 5v5) — 100 = neutral */
+  pdo: number;
+  /** On-ice shooting % at 5v5 */
+  onIceShootingPct: number;
+  /** On-ice save % at 5v5 */
+  onIceSavePct: number;
+  /** Offensive zone start % at 5v5 */
+  zoneStartPct: number;
+  /** Individual expected goals (shots × league SH%) */
+  xGoals: number;
+  /** Goals above expected (goals - xG) */
+  xGoalsDifference: number;
+}
+
+/**
+ * Fetch pre-computed advanced stats (CF%, FF%, PDO, etc.) from the NHL Stats API.
+ * Single API call returns all skaters — no PBP preloading needed.
+ */
+export async function fetchSkaterPercentages(
+  season: string = getCurrentSeason()
+): Promise<Map<number, NHLAdvancedStats>> {
+  const result = new Map<number, NHLAdvancedStats>();
+
+  try {
+    const url = getNhlStatsUrl(
+      `/skater/percentages?cayenneExp=seasonId=${season} and gameTypeId=2&limit=-1`
+    );
+    const response = await fetch(url);
+    if (!response.ok) return result;
+
+    const data = await response.json();
+    const skaters = data.data || [];
+
+    for (const s of skaters) {
+      result.set(s.playerId, {
+        corsiForPercentage: (s.satPercentage || 0) * 100,
+        relativeCorsi: (s.satRelative || 0) * 100,
+        fenwickForPercentage: (s.usatPercentage || 0) * 100,
+        pdo: (s.skaterShootingPlusSavePct5v5 || 0) * 100,
+        onIceShootingPct: (s.shootingPct5v5 || 0) * 100,
+        onIceSavePct: (s.skaterSavePct5v5 || 0) * 100,
+        zoneStartPct: (s.zoneStartPct5v5 || 0) * 100,
+        // xG fields filled in after merging with player shot counts
+        xGoals: 0,
+        xGoalsDifference: 0,
+      });
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Failed to fetch skater percentages:', error);
+    return result;
+  }
+}
 
 /**
  * Fetch league-wide stats by aggregating ALL 32 team rosters

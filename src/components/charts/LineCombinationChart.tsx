@@ -266,8 +266,10 @@ export default function LineCombinationChart({ data }: LineCombinationChartProps
         marginTop: '1rem', padding: '0.75rem', background: '#f0f9ff',
         borderRadius: '6px', fontSize: '0.75rem', color: '#0369a1',
       }}>
-        Based on {data.gamesAnalyzed} games. Shows 5v5 on-ice performance for identified line combinations.
-        CF% = shot share, xG% = expected goals share. Y-axis inverted (lower = better defensively).
+        Computed from {data.gamesAnalyzed} team games. Each line's own "GP" column reflects the
+        games that specific combination was actually on the ice together at 5v5. Shows 5v5 on-ice
+        performance for identified line combinations. CF% = shot share, xG% = expected goals share.
+        Y-axis inverted (lower = better defensively).
       </div>
     </div>
   );

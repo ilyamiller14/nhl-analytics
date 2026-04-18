@@ -71,11 +71,11 @@ export const METRIC_GROUPS: MetricGroup[] = [
   {
     label: 'xG Analytics',
     metrics: [
-      { key: '@ixG', label: 'ixG', description: 'Individual Expected Goals', format: 'decimal' },
-      { key: '@gax', label: 'G-ixG', description: 'Goals Above Expected (finishing talent)', format: 'decimal' },
-      { key: '@ixGPerGame', label: 'ixG/GP', description: 'Individual xG per Game', format: 'decimal' },
-      { key: '@xGPct', label: 'xG%', description: 'On-Ice xG Share (xGF / (xGF + xGA))', format: 'percentage' },
-      { key: '@xGDiff', label: 'xG+/-', description: 'On-Ice xG Differential', format: 'decimal' },
+      { key: '_ixG', label: 'ixG', description: 'Individual Expected Goals (shots × league SH%)', format: 'decimal' },
+      { key: '_gax', label: 'G-ixG', description: 'Goals Above Expected (finishing talent)', format: 'decimal' },
+      { key: '_ixGPerGame', label: 'ixG/GP', description: 'Individual xG per Game', format: 'decimal' },
+      { key: '_gaxPerGame', label: 'GAX/GP', description: 'Goals Above Expected per Game', format: 'decimal' },
+      { key: '_shotQuality', label: 'Finish%', description: 'Actual SH% vs League SH% (>1 = elite finisher)', format: 'decimal' },
     ],
   },
 ];
@@ -84,12 +84,28 @@ export const METRIC_GROUPS: MetricGroup[] = [
 export const DEFAULT_METRICS: StatCategory[] = METRIC_GROUPS.flatMap((g) => g.metrics);
 
 /**
- * Compute derived analytics from raw SeasonStats
+ * League context for derived stat computation.
+ * All values computed from real NHL Stats API data via leagueAveragesService.
  */
-export function computeDerivedStat(stats: any, key: string): number | string | undefined {
+export interface LeagueContext {
+  /** League-wide shooting % (e.g. 10.2 for 10.2%) — from getLeagueAverages().shootingPct */
+  leagueShootingPct: number;
+  /** League-wide goals per game — from getLeagueAverages().goalsPerGame */
+  leagueGPG: number;
+}
+
+/**
+ * Compute derived analytics from raw SeasonStats.
+ * Requires LeagueContext for xG and team-share metrics — all values from real API data.
+ */
+export function computeDerivedStat(stats: any, key: string, ctx?: LeagueContext): number | string | undefined {
   if (!stats) return undefined;
   const gp = stats.gamesPlayed || 0;
   if (gp === 0 && key.startsWith('_')) return 0;
+
+  // League shooting rate as decimal (e.g. 0.102 for 10.2%)
+  const leagueSHRate = ctx ? ctx.leagueShootingPct / 100 : 0;
+  const leagueGPG = ctx?.leagueGPG || 0;
 
   switch (key) {
     case '_ppg': return gp > 0 ? (stats.points || 0) / gp : 0;
@@ -101,11 +117,47 @@ export function computeDerivedStat(stats: any, key: string): number | string | u
     case '_blkpg': return gp > 0 ? (stats.blockedShots || 0) / gp : 0;
     case '_goalsPerShot': return (stats.shots || 0) > 0 ? (stats.goals || 0) / stats.shots : 0;
     case '_ptsPerShot': return (stats.shots || 0) > 0 ? (stats.points || 0) / stats.shots : 0;
-    case '_goalsPctTeam': return gp > 0 ? ((stats.goals || 0) / gp) * 100 / 3.1 : 0; // ~3.1 G/GP league avg
-    case '_ptsPctTeam': return gp > 0 ? ((stats.points || 0) / gp) * 100 / 6.2 : 0; // ~6.2 pts/GP avg
+    case '_goalsPctTeam': {
+      if (gp === 0 || leagueGPG === 0) return undefined;
+      return ((stats.goals || 0) / gp) * 100 / leagueGPG;
+    }
+    case '_ptsPctTeam': {
+      // ~2x goals per game for points (each goal produces ~2 pts on average)
+      const leaguePPG = leagueGPG * 2;
+      if (gp === 0 || leaguePPG === 0) return undefined;
+      return ((stats.points || 0) / gp) * 100 / leaguePPG;
+    }
     case '_ppEff': {
       const ppg = stats.powerPlayGoals || 0;
       return ppg > 0 ? (stats.powerPlayPoints || 0) / ppg : 0;
+    }
+    // xG Analytics — computed using real league shooting % from NHL Stats API
+    case '_ixG': {
+      if (!leagueSHRate) return undefined;
+      return (stats.shots || 0) * leagueSHRate;
+    }
+    case '_gax': {
+      if (!leagueSHRate) return undefined;
+      const ixg = (stats.shots || 0) * leagueSHRate;
+      return (stats.goals || 0) - ixg;
+    }
+    case '_ixGPerGame': {
+      if (!leagueSHRate) return undefined;
+      const ixg = (stats.shots || 0) * leagueSHRate;
+      return gp > 0 ? ixg / gp : 0;
+    }
+    case '_gaxPerGame': {
+      if (!leagueSHRate) return undefined;
+      const ixg = (stats.shots || 0) * leagueSHRate;
+      const gax = (stats.goals || 0) - ixg;
+      return gp > 0 ? gax / gp : 0;
+    }
+    case '_shotQuality': {
+      if (!leagueSHRate) return undefined;
+      const shots = stats.shots || 0;
+      if (shots === 0) return 0;
+      const actualSHRate = (stats.goals || 0) / shots;
+      return actualSHRate / leagueSHRate;
     }
     default: return undefined;
   }

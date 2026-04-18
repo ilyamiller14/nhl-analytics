@@ -479,7 +479,6 @@ export function computeFlowField(
         successRate: 0,
         eventCount: 0,
         shotCount: 0,
-        passCount: 0,
         turnoverCount: 0,
         directionSum: 0,
         successSum: 0,
@@ -515,8 +514,6 @@ export function computeFlowField(
         cell.shotCount += 1;
       } else if (from.eventType === 'giveaway' || from.eventType === 'turnover') {
         cell.turnoverCount += 1;
-      } else {
-        cell.passCount += 1;
       }
 
       // Track success (shot outcomes)
@@ -552,7 +549,6 @@ export function computeFlowField(
       successRate: cell.successRate,
       eventCount: cell.eventCount,
       shotCount: cell.shotCount,
-      passCount: cell.passCount,
       turnoverCount: cell.turnoverCount,
     });
   });
@@ -1251,7 +1247,8 @@ export function calculateAttackProfile(
   metrics: AttackMetrics,
   teamId: number,
   playerId?: number,
-  sampleGames: number = 0
+  sampleGames: number = 0,
+  position?: string
 ): AttackProfile {
   // Direct 0-100 scaling from actual computed metrics
   // Each axis uses a physical scale, not comparison to assumed averages
@@ -1274,12 +1271,13 @@ export function calculateAttackProfile(
     (1 - metrics.avgShotDistance / 60) * 100
   ));
 
-  // Classify primary style
-  const axes = [
-    { name: 'Speed', value: attackSpeed },
-    { name: 'Cycle', value: 100 - attackSpeed }, // Slow = cycle
-    { name: 'Perimeter', value: 100 - shootingDepth },
+  // Classify primary style using 4 REAL axes with position-aware labels
+  const isDefenseman = position === 'D';
+  const axes: { name: AttackProfile['primaryStyle']; value: number }[] = [
+    { name: isDefenseman ? 'Point Shot' : 'Speed', value: attackSpeed },
     { name: 'Slot-Focused', value: dangerZoneFocus },
+    { name: isDefenseman ? 'Accurate' : 'Sniper', value: shootingAccuracy },
+    { name: isDefenseman ? 'Activation' : 'Depth', value: shootingDepth },
   ];
 
   axes.sort((a, b) => b.value - a.value);
@@ -1292,10 +1290,7 @@ export function calculateAttackProfile(
   // Determine primary style
   let primaryStyle: AttackProfile['primaryStyle'] = 'Balanced';
   if (styleStrength > 40) {
-    if (topAxis.name === 'Speed') primaryStyle = 'Speed';
-    else if (topAxis.name === 'Cycle') primaryStyle = 'Cycle';
-    else if (topAxis.name === 'Perimeter') primaryStyle = 'Perimeter';
-    else if (topAxis.name === 'Slot-Focused') primaryStyle = 'Slot-Focused';
+    primaryStyle = topAxis.name;
   }
 
   return {
@@ -1472,7 +1467,8 @@ export function buildSeasonTrend(
 export function computeAttackDNAv2(
   playByPlay: GamePlayByPlay | GamePlayByPlay[],
   teamId: number,
-  playerId?: number
+  playerId?: number,
+  position?: string
 ): AttackDNAv2 {
   const games = Array.isArray(playByPlay) ? playByPlay : [playByPlay];
 
@@ -1496,7 +1492,7 @@ export function computeAttackDNAv2(
   const metrics = calculateAttackMetrics(shots, allSequences);
 
   // Calculate attack profile
-  const profile = calculateAttackProfile(metrics, teamId, playerId, games.length);
+  const profile = calculateAttackProfile(metrics, teamId, playerId, games.length, position);
 
   // Summary
   const totalGoals = shots.filter((s) => s.result === 'goal').length;
@@ -1510,5 +1506,6 @@ export function computeAttackDNAv2(
     totalShots: shots.length,
     totalGoals,
     gamesAnalyzed: games.length,
+    sequences: allSequences,
   };
 }

@@ -77,7 +77,7 @@ export default function MiniShotMap({
       <svg
         viewBox="0 0 100 85"
         className="mini-rink-svg"
-        style={{ width, height }}
+        style={{ width, height, maxWidth: '100%' }}
       >
         {/* Rink outline */}
         <rect

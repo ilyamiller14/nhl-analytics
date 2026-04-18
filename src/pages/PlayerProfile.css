@@ -238,18 +238,18 @@
 /* Profile Tabs */
 .profile-tabs {
   display: flex;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.25rem;
   margin-bottom: 2rem;
   border-bottom: 2px solid var(--gray-200);
-  overflow-x: auto;
 }
 
 .profile-tab {
-  padding: 1rem 1.5rem;
+  padding: 0.75rem 1.25rem;
   border: none;
   background: none;
   font-weight: 600;
-  font-size: 1rem;
+  font-size: 0.95rem;
   color: var(--gray-600);
   cursor: pointer;
   transition: all 0.2s;
@@ -257,7 +257,7 @@
   white-space: nowrap;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
 .profile-tab:hover {
@@ -273,13 +273,13 @@
 /* Charts */
 .charts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(500px, 100%), 1fr));
   gap: 2rem;
 }
 
 .ice-rink-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(450px, 100%), 1fr));
   gap: 2rem;
 }
 
@@ -390,18 +390,9 @@
     gap: 1.5rem;
   }
 
-  .profile-tabs {
-    gap: 0.25rem;
-  }
-
   .profile-tab {
-    padding: 1rem 1.25rem; /* Min 44px touch target */
-    font-size: 0.9rem;
-  }
-
-  .profile-tabs {
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.85rem;
   }
 }
 
@@ -452,10 +443,12 @@
 /* Season History Table */
 .table-wrapper {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   margin-top: 1rem;
   background: white;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  scrollbar-width: thin;
 }
 
 .season-history-table {
@@ -554,6 +547,33 @@
   background: var(--gray-100);
   border-radius: 16px;
   margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+
+/*
+ * Card zoom is computed dynamically via ResizeObserver in PlayerProfile.tsx.
+ * The wrapper div gets style={{ zoom: cardZoom }} which fits the card to the container.
+ */
+@media (max-width: 960px) {
+  .card-preview {
+    padding: 0.5rem;
+  }
+}
+@media (max-width: 768px) {
+  /* Hide clutter on mobile - go straight to the card */
+  .card-section .section-title,
+  .card-section .section-description,
+  .card-section .card-search-section {
+    display: none;
+  }
+
+  .card-preview {
+    padding: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    background: transparent;
+    margin-bottom: 1rem;
+  }
 }
 
 .card-actions {
@@ -568,6 +588,22 @@
   color: var(--gray-500);
   font-style: italic;
   margin: 0;
+}
+
+@media (max-width: 768px) {
+  .card-actions {
+    gap: 0.5rem;
+  }
+
+  .card-tip {
+    display: none;
+  }
+
+  .share-btn {
+    width: 100%;
+    padding: 1rem !important;
+    font-size: 1.1rem !important;
+  }
 }
 
 /* Card Search Section */
@@ -633,4 +669,17 @@
   border-radius: 4px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+/* Deep Analytics tab */
+.deep-analytics {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.deep-panel {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 10px;
+  padding: 16px 18px;
 }

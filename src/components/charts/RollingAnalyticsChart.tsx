@@ -112,12 +112,12 @@ export default function RollingAnalyticsChart({
   // Calculate trend (is the player improving?)
   const recentGames = data.slice(-5);
   const earlierGames = data.slice(0, 5);
-  const recentAvg =
-    recentGames.reduce((sum, g) => sum + (g as any)[currentMetric.dataKey], 0) /
-    recentGames.length;
-  const earlierAvg =
-    earlierGames.reduce((sum, g) => sum + (g as any)[currentMetric.dataKey], 0) /
-    earlierGames.length;
+  const recentAvg = recentGames.length > 0
+    ? recentGames.reduce((sum, g) => sum + (g as any)[currentMetric.dataKey], 0) / recentGames.length
+    : 0;
+  const earlierAvg = earlierGames.length > 0
+    ? earlierGames.reduce((sum, g) => sum + (g as any)[currentMetric.dataKey], 0) / earlierGames.length
+    : 0;
   const trend = recentAvg - earlierAvg;
 
   return (

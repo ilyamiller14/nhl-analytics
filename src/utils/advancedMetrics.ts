@@ -199,87 +199,6 @@ export function calculateAdvancedMetrics(
 }
 
 /**
- * Calculate WAR (Wins Above Replacement)
- *
- * Modeled after Evolving Hockey's GAR/WAR methodology with available data:
- * Components: EV Offense, EV Defense, Shooting Talent, Penalties (when available)
- *
- * Uses on-ice xGF/xGA when play-by-play data is available, falls back to
- * box-score approximation (points, +/-) otherwise.
- *
- * ~5.15 goal differential = 1 win (NHL standard conversion)
- */
-export function calculateWAR(
-  goals: number,
-  assists: number,
-  plusMinus: number,
-  toiMinutes: number,
-  position: string,
-  onIceData?: {
-    xGFor: number;         // on-ice expected goals for
-    xGAgainst: number;     // on-ice expected goals against
-    goalsAboveExpected: number; // actual goals - individual xG (shooting talent)
-    shotsFor: number;      // on-ice shot attempts for (Corsi)
-    shotsAgainst: number;  // on-ice shot attempts against
-  }
-): number {
-  if (toiMinutes === 0) return 0;
-
-  const isDef = position.includes('D');
-  const GOALS_PER_WIN = 5.15;
-
-  if (onIceData && (onIceData.xGFor > 0 || onIceData.xGAgainst > 0)) {
-    // ── xG-based WAR (when play-by-play data available) ──
-
-    // EV Offense: on-ice xGF/60 above replacement
-    // Replacement level: ~2.0 xGF/60 for forwards, ~1.5 for defensemen
-    const xGFper60 = (onIceData.xGFor / toiMinutes) * 60;
-    const replXGF = isDef ? 1.5 : 2.0;
-    const evOffense = ((xGFper60 - replXGF) / 60) * toiMinutes;
-
-    // EV Defense: on-ice xGA/60 below replacement (lower = better)
-    // Replacement level: ~2.8 xGA/60 for forwards, ~2.6 for defensemen
-    const xGAper60 = (onIceData.xGAgainst / toiMinutes) * 60;
-    const replXGA = isDef ? 2.6 : 2.8;
-    const evDefense = ((replXGA - xGAper60) / 60) * toiMinutes;
-
-    // Shooting talent: goals scored above expected (individual finishing)
-    const shootingTalent = onIceData.goalsAboveExpected * 0.5; // regressed
-
-    // Combine with position weighting
-    const offWeight = isDef ? 0.35 : 0.50;
-    const defWeight = isDef ? 0.50 : 0.35;
-    const shootWeight = 0.15;
-
-    const gar = evOffense * offWeight + evDefense * defWeight + shootingTalent * shootWeight;
-    return Math.round((gar / GOALS_PER_WIN) * 100) / 100;
-  }
-
-  // ── Box-score fallback (no play-by-play data) ──
-
-  // Offense: points per 60 above replacement
-  const points = goals + assists;
-  const ptsPer60 = (points / toiMinutes) * 60;
-  const replPts = isDef ? 0.8 : 1.5; // replacement-level pts/60
-  const offenseGAR = ((ptsPer60 - replPts) / 60) * toiMinutes;
-
-  // Defense: +/- per 60 above replacement
-  const pmPer60 = (plusMinus / toiMinutes) * 60;
-  const replPM = isDef ? -1.0 : -0.6; // replacement players are negative
-  const defenseGAR = ((pmPer60 - replPM) / 60) * toiMinutes;
-
-  // Shooting talent from box score: (goals / shots) vs league avg ~10%
-  // Approximated simply — this is weaker without xG data
-  const shootGAR = (goals - (goals + assists > 0 ? goals : 0) * 0.1) * 0.1;
-
-  const offW = isDef ? 0.35 : 0.50;
-  const defW = isDef ? 0.50 : 0.35;
-
-  const gar = offenseGAR * offW + defenseGAR * defW + shootGAR * 0.15;
-  return Math.round((gar / GOALS_PER_WIN) * 100) / 100;
-}
-
-/**
  * Calculate GSAA (Goals Saved Above Average)
  * For goalies
  */
@@ -316,7 +235,6 @@ export function formatAdvancedStat(value: number, metric: string): string {
     case 'expectedGoals':
     case 'expectedGoalsAgainst':
     case 'goalsAboveExpected':
-    case 'war':
       return value >= 0 ? `+${value.toFixed(2)}` : value.toFixed(2);
 
     default:

@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   calculatePairChemistry,
-  evaluateLineCombination,
   findChemistryExtremes,
   buildChemistryMatrix,
 } from '../services/chemistryAnalytics';
@@ -54,8 +53,7 @@ describe('calculatePairChemistry', () => {
 
     expect(result.player1Id).toBeLessThan(result.player2Id);
     expect(result.gamesAnalyzed).toBe(1);
-    expect(result.chemistryIndex).toBeGreaterThanOrEqual(0);
-    expect(result.chemistryIndex).toBeLessThanOrEqual(100);
+    expect(typeof result.shotDiffPer60Together).toBe('number');
   });
 
   it('works with on-ice data instead of shifts', async () => {
@@ -73,7 +71,7 @@ describe('calculatePairChemistry', () => {
     const game = makeGame([], []);
     const result = await calculatePairChemistry([game], 100, 200, 10);
     expect(result.together.shots).toBe(0);
-    expect(result.chemistryIndex).toBeGreaterThanOrEqual(0);
+    expect(result.shotsPer60Together).toBe(0);
   });
 
   it('sorts player IDs canonically', async () => {
@@ -99,7 +97,7 @@ describe('calculatePairChemistry', () => {
     const game = makeGame(shots, []);
     const r1 = await calculatePairChemistry([game], 100, 200, 10);
     const r2 = await calculatePairChemistry([game], 100, 200, 10);
-    expect(r1.chemistryIndex).toBe(r2.chemistryIndex);
+    expect(r1.shotDiffPer60Together).toBe(r2.shotDiffPer60Together);
   });
 });
 
@@ -110,22 +108,10 @@ describe('buildChemistryMatrix', () => {
     );
     const game = makeGame(shots, []);
     const names = new Map([[1, 'P1'], [2, 'P2'], [3, 'P3']]);
-    const matrix = await buildChemistryMatrix([game], 10, [1, 2, 3], names);
+    const positions = new Map<number, 'F' | 'D'>([[1, 'F'], [2, 'F'], [3, 'F']]);
+    const matrix = await buildChemistryMatrix([game], 10, [1, 2, 3], names, positions);
     expect(matrix.teamId).toBe(10);
     expect(matrix.players).toHaveLength(3);
-  });
-});
-
-describe('evaluateLineCombination', () => {
-  it('returns a rating string', async () => {
-    const shots = Array.from({ length: 20 }, (_, i) =>
-      makeShot({ teamId: 10, period: 1, timeInPeriod: `${i}:00`, homePlayersOnIce: [1, 2, 3], awayPlayersOnIce: [4] })
-    );
-    const game = makeGame(shots, []);
-    const names = new Map([[1, 'P1'], [2, 'P2'], [3, 'P3']]);
-    const matrix = await buildChemistryMatrix([game], 10, [1, 2, 3], names);
-    const result = evaluateLineCombination(matrix, [1, 2, 3], names);
-    expect(['excellent', 'good', 'average', 'below_average', 'poor']).toContain(result.rating);
   });
 });
 
@@ -136,7 +122,8 @@ describe('findChemistryExtremes', () => {
     );
     const game = makeGame(shots, []);
     const names = new Map([[1, 'P1'], [2, 'P2']]);
-    const matrix = await buildChemistryMatrix([game], 10, [1, 2], names);
+    const positions = new Map<number, 'F' | 'D'>([[1, 'F'], [2, 'F']]);
+    const matrix = await buildChemistryMatrix([game], 10, [1, 2], names, positions);
     const result = findChemistryExtremes(matrix);
     expect(Array.isArray(result.bestPairs)).toBe(true);
     expect(Array.isArray(result.worstPairs)).toBe(true);

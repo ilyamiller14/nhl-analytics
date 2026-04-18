@@ -542,6 +542,15 @@ export interface ShotAttempt {
   rebound?: boolean;
   rushShot?: boolean;
   xGoal?: number; // Expected goals probability (0-1)
+  shooterId?: number; // NHL playerId of the shooter — attached when the
+                      // upstream source has it (e.g. team-level aggregation).
+  scoreState?: 'leading' | 'trailing' | 'tied'; // Shooter-perspective score
+                      // state at the time of the shot. Attached by
+                      // aggregators that walk goals in order.
+  period?: number;    // Game period (1-3 regular, 4+ OT)
+  timeInPeriod?: string;  // "MM:SS" within period
+  gameId?: number;
+  gameDate?: string;  // ISO or YYYY-MM-DD from NHL API
 }
 
 /**
@@ -613,6 +622,7 @@ export function convertToShotAttempt(shotEvent: ShotEvent): ShotAttempt {
     rebound: false,
     rushShot: false,
     xGoal: xgPrediction.xGoal,
+    shooterId: shotEvent.shootingPlayerId,
   };
 }
 

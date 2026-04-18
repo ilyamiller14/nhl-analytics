@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { ComparisonProvider } from './context/ComparisonContext';
 import Navigation from './components/Navigation';
 import LoadingFallback from './components/LoadingFallback';
@@ -15,8 +15,8 @@ const Trends = lazy(() => import('./pages/Trends'));
 const Teams = lazy(() => import('./pages/Teams'));
 const TeamProfile = lazy(() => import('./pages/TeamProfile'));
 const AttackDNAPage = lazy(() => import('./pages/AttackDNAPage'));
-const CoachingDashboard = lazy(() => import('./pages/CoachingDashboard'));
 const ManagementDashboard = lazy(() => import('./pages/ManagementDashboard'));
+const DeepLeaderboards = lazy(() => import('./pages/DeepLeaderboards'));
 
 function LazyRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -45,10 +45,11 @@ function App() {
               <Route path="/team/:teamAbbrev" element={<LazyRoute><TeamProfile /></LazyRoute>} />
               <Route path="/attack-dna/player/:playerId" element={<LazyRoute><AttackDNAPage /></LazyRoute>} />
               <Route path="/attack-dna/team/:teamAbbrev" element={<LazyRoute><AttackDNAPage /></LazyRoute>} />
-              <Route path="/coaching" element={<LazyRoute><CoachingDashboard /></LazyRoute>} />
-              <Route path="/coaching/:teamAbbrev" element={<LazyRoute><CoachingDashboard /></LazyRoute>} />
+              <Route path="/contracts" element={<LazyRoute><ManagementDashboard /></LazyRoute>} />
+              <Route path="/contracts/:teamAbbrev" element={<LazyRoute><ManagementDashboard /></LazyRoute>} />
               <Route path="/management" element={<LazyRoute><ManagementDashboard /></LazyRoute>} />
               <Route path="/management/:teamAbbrev" element={<LazyRoute><ManagementDashboard /></LazyRoute>} />
+              <Route path="/deep" element={<LazyRoute><DeepLeaderboards /></LazyRoute>} />
               <Route path="*" element={
                 <LazyRoute>
                   <div className="page-container" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
@@ -57,7 +58,7 @@ function App() {
                     <p style={{ marginBottom: '2rem', color: '#6b7280' }}>
                       The page you're looking for doesn't exist or has been moved.
                     </p>
-                    <a href="/" className="btn btn-primary">Go Home</a>
+                    <Link to="/" className="btn btn-primary">Go Home</Link>
                   </div>
                 </LazyRoute>
               } />

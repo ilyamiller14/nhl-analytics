@@ -22,11 +22,14 @@
 /* Comparison Table */
 .comparison-table-container {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  position: relative;
 }
 
 .comparison-table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 500px;
 }
 
 .comparison-table thead {
@@ -44,6 +47,14 @@
 .comparison-table td:first-child {
   text-align: left;
   font-weight: 600;
+  position: sticky;
+  left: 0;
+  background: white;
+  z-index: 1;
+}
+
+.comparison-table thead th:first-child {
+  background: var(--gray-50);
 }
 
 .player-header {
@@ -109,15 +120,24 @@
   }
 
   .table-player-headshot {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
+  }
+
+  .player-header {
+    flex-direction: column;
+    gap: 0.25rem;
   }
 
   .player-name-short {
-    font-size: 0.85rem;
+    font-size: 0.8rem;
   }
 
   .player-team-short {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
+  }
+
+  .stat-value {
+    font-size: 1rem;
   }
 }

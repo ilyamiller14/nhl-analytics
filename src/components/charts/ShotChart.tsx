@@ -50,12 +50,14 @@ export default function ShotChart({
   const height = propHeight ?? (halfRink ? Math.round(width * (85 / 100)) : Math.round(width * (85 / 200)));
 
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
-    const svg = e.currentTarget;
-    const rect = svg.getBoundingClientRect();
-    setMousePos({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    });
+    const container = e.currentTarget.closest('.shot-chart-container');
+    if (container) {
+      const rect = container.getBoundingClientRect();
+      setMousePos({
+        x: Math.min(e.clientX - rect.left + 10, rect.width - 180),
+        y: Math.min(e.clientY - rect.top + 10, rect.height - 120),
+      });
+    }
   };
 
   // Calculate shot statistics
@@ -188,8 +190,8 @@ export default function ShotChart({
           <div
             className="shot-tooltip"
             style={{
-              left: `${Math.min(mousePos.x + 10, window.innerWidth - 180)}px`,
-              top: `${Math.min(mousePos.y + 10, window.innerHeight - 120)}px`,
+              left: `${mousePos.x}px`,
+              top: `${mousePos.y}px`,
             }}
           >
             <div className="tooltip-row">

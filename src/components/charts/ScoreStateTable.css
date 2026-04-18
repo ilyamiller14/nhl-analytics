@@ -1,0 +1,30 @@
+.sst { color: #e5e7eb; display: flex; flex-direction: column; gap: 8px; }
+.sst-title { font-size: 1rem; font-weight: 600; margin: 0; color: #f3f4f6; }
+.sst-empty { padding: 18px; border: 1px dashed #374151; border-radius: 8px; text-align: center; color: #9ca3af; font-size: 0.85rem; }
+.sst-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+.sst-table thead {
+  background: rgba(30, 41, 59, 0.6);
+}
+.sst-table th, .sst-table td {
+  padding: 8px 12px;
+  text-align: right;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+.sst-th-label, .sst-label { text-align: left; }
+.sst-th-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #cbd5f5; font-weight: 500; }
+.sst-table th {
+  color: #cbd5f5;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+.sst-label { color: #f3f4f6; font-weight: 600; }
+.sst-table .pos { color: #34d399; font-weight: 600; }
+.sst-table .neg { color: #f87171; font-weight: 600; }
+.sst-caption { font-size: 0.72rem; color: #94a3b8; padding-top: 4px; }

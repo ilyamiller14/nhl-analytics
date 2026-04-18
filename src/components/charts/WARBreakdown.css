@@ -1,0 +1,82 @@
+.war-break { color: #e5e7eb; display: flex; flex-direction: column; gap: 12px; }
+.war-title { font-size: 1rem; font-weight: 600; margin: 0; color: #f3f4f6; }
+.war-empty { padding: 18px; border: 1px dashed #374151; border-radius: 8px; text-align: center; color: #9ca3af; font-size: 0.85rem; }
+
+.war-headline {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 24px;
+  align-items: center;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.7), rgba(30, 41, 59, 0.5));
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+}
+.war-number {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-right: 20px;
+  border-right: 1px solid rgba(148, 163, 184, 0.2);
+}
+.war-number.pos { color: #34d399; }
+.war-number.neg { color: #f87171; }
+.war-number.neutral { color: #cbd5f5; }
+.war-value {
+  font-size: 2.6rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.war-unit {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+.war-meta {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.war-meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.war-label {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.war-pace { font-size: 1.1rem; font-weight: 600; color: #e5e7eb; font-variant-numeric: tabular-nums; }
+.war-pct.pos { color: #34d399; }
+.war-pct.neg { color: #f87171; }
+.war-pct.neutral { color: #cbd5f5; }
+.war-pct { font-size: 1rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.war-svg {
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 8px;
+  max-width: 100%;
+  height: auto;
+}
+
+.war-notes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  line-height: 1.55;
+}
+.war-notes li { margin-bottom: 2px; }
+
+.war-footer {
+  margin: 0;
+  font-size: 0.7rem;
+  color: #64748b;
+  font-style: italic;
+  line-height: 1.4;
+}

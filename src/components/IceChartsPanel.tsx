@@ -14,7 +14,6 @@ import ShotQualityHeatMap from './charts/ShotQualityHeatMap';
 import AttackDNA from './charts/AttackDNA';
 import TurnoverMap, { type Turnover } from './charts/TurnoverMap';
 import ZoneHeatMap, { type IceTimeEvent } from './charts/ZoneHeatMap';
-import ConversionZoneChart from './charts/ConversionZoneChart';
 import type { AttackDNAAnalytics, PlayStyleFingerprint } from '../types/playStyle';
 import './IceChartsPanel.css';
 
@@ -45,7 +44,7 @@ export default function IceChartsPanel({
   gamesAnalyzed = 0,
   isLoading = false,
 }: IceChartsPanelProps) {
-  const [activeView, setActiveView] = useState<'shots' | 'heatmap' | 'hits' | 'faceoffs' | 'passes' | 'attack-dna' | 'turnovers' | 'zone-heat' | 'conversion'>('shots');
+  const [activeView, setActiveView] = useState<'shots' | 'heatmap' | 'hits' | 'faceoffs' | 'passes' | 'attack-dna' | 'turnovers' | 'zone-heat'>('shots');
 
   // Use real turnover and ice time event data only — no fabricated data
   const turnovers: Turnover[] = propTurnovers || [];
@@ -109,15 +108,6 @@ export default function IceChartsPanel({
           >
             Shot Quality
             <span className="tab-count">xG</span>
-          </button>
-        )}
-        {hasShots && (
-          <button
-            className={`chart-tab ${activeView === 'conversion' ? 'active' : ''}`}
-            onClick={() => setActiveView('conversion')}
-          >
-            Zone Conversion
-            <span className="tab-count">%</span>
           </button>
         )}
         {hasHits && (
@@ -248,16 +238,20 @@ export default function IceChartsPanel({
               <div className="insight-card">
                 <h4>Avg Shot Quality</h4>
                 <p className="insight-value">
-                  {(shots.reduce((sum, s) => sum + (s.xGoal || 0), 0) / shots.length).toFixed(3)}
+                  {shots.length > 0 ? (shots.reduce((sum, s) => sum + (s.xGoal || 0), 0) / shots.length).toFixed(3) : '0.000'}
                 </p>
                 <p className="insight-label">Average xG per shot</p>
               </div>
               <div className="insight-card">
                 <h4>Shooting Efficiency</h4>
                 <p className="insight-value">
-                  {shots.filter(s => s.result === 'goal').length > 0
-                    ? ((shots.filter(s => s.result === 'goal').length / shots.reduce((sum, s) => sum + (s.xGoal || 0), 0)) * 100).toFixed(0)
-                    : '0'}%
+                  {(() => {
+                    const goalCount = shots.filter(s => s.result === 'goal').length;
+                    const totalXG = shots.reduce((sum, s) => sum + (s.xGoal || 0), 0);
+                    return goalCount > 0 && totalXG > 0
+                      ? ((goalCount / totalXG) * 100).toFixed(0)
+                      : '0';
+                  })()}%
                 </p>
                 <p className="insight-label">Goals vs Expected</p>
               </div>
@@ -414,14 +408,6 @@ export default function IceChartsPanel({
           </div>
         )}
 
-        {activeView === 'conversion' && hasShots && (
-          <div className="chart-view">
-            <ConversionZoneChart
-              shots={shots}
-              playerName={playerName}
-            />
-          </div>
-        )}
       </div>
     </div>
   );

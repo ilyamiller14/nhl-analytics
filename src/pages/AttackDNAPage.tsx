@@ -21,6 +21,14 @@ import {
   calculateGameMetrics,
   buildSeasonTrend,
 } from '../services/playStyleAnalytics';
+import {
+  getLeagueAttackDna,
+  computeTeamAttackDnaPercentiles,
+} from '../services/leagueAttackDnaService';
+import {
+  getLeagueSkaterAttackDna,
+  computePlayerAttackDnaPercentiles,
+} from '../services/leagueSkaterAttackDnaService';
 import { fetchGamePlayByPlay, fetchPlayerSeasonGames, type GamePlayByPlay } from '../services/playByPlayService';
 import { fetchCachedTeamPBP, convertCachedToGamePBP } from '../services/cachedDataService';
 import { API_CONFIG } from '../config/api';
@@ -55,11 +63,15 @@ export default function AttackDNAPage() {
   const [viewMode, setViewMode] = useState<ViewMode>(playerId ? 'player' : 'team');
   const [tabMode, setTabMode] = useState<TabMode>('profile');
   const [analytics, setAnalytics] = useState<AttackDNAv2Type | null>(null);
+  // When the Speed axis is backed by real NHL EDGE skating data, label it
+  // "Skating Speed". Otherwise (fallback to possession-to-shot time), label
+  // it "Tempo" to avoid mislabeling.
+  const [speedAxisLabel, setSpeedAxisLabel] = useState<'Skating Speed' | 'Tempo'>('Tempo');
   const [seasonTrend, setSeasonTrend] = useState<SeasonTrend | null>(null);
   const [entityInfo, setEntityInfo] = useState<EntityInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [gameRange, setGameRange] = useState<GameRange>(10);
+  const [gameRange, setGameRange] = useState<GameRange>('all');
   const [cachedData, setCachedData] = useState<CachedData | null>(null);
   const [totalGamesAvailable, setTotalGamesAvailable] = useState(0);
 
@@ -267,8 +279,61 @@ export default function AttackDNAPage() {
     const dna = computeAttackDNAv2(
       playByPlayData,
       data.teamId,
-      playerId ? parseInt(playerId, 10) : undefined
+      playerId ? parseInt(playerId, 10) : undefined,
+      data.entityInfo.position
     );
+
+    // For TEAM view, replace the absolute-scale profile axes with league
+    // percentile ranks (0-100 = rank within the 32-team distribution for
+    // that metric). This gives real differentiation — fast teams show up
+    // as fast, slow teams as slow — instead of bunching every team in a
+    // narrow physical-scale band.
+    if (teamAbbrev && dna) {
+      try {
+        const league = await getLeagueAttackDna();
+        if (league) {
+          const pct = computeTeamAttackDnaPercentiles(teamAbbrev, league);
+          if (pct) {
+            dna.profile = {
+              ...dna.profile,
+              attackSpeed: pct.speedPct,
+              dangerZoneFocus: pct.dangerPct,
+              shootingAccuracy: pct.shootingPct,
+              shootingDepth: pct.depthPct,
+            };
+            setSpeedAxisLabel(pct.speedSource === 'edge' ? 'Skating Speed' : 'Tempo');
+          }
+        }
+      } catch (err) {
+        console.warn('League Attack DNA unavailable, using absolute-scale axes:', err);
+      }
+    }
+
+    // For PLAYER view, do the same with the league skater distribution — a
+    // skater's axes become percentile ranks within the pool of ≥50-shot
+    // shooters. If the player has been enriched via the EDGE batched
+    // pipeline, their Speed axis reflects real NHL EDGE skating-speed rank;
+    // otherwise it falls back to possession-to-shot tempo.
+    if (playerId && !teamAbbrev && dna) {
+      try {
+        const leagueSk = await getLeagueSkaterAttackDna();
+        if (leagueSk) {
+          const pct = computePlayerAttackDnaPercentiles(parseInt(playerId, 10), leagueSk);
+          if (pct) {
+            dna.profile = {
+              ...dna.profile,
+              attackSpeed: pct.speedPct,
+              dangerZoneFocus: pct.dangerPct,
+              shootingAccuracy: pct.shootingPct,
+              shootingDepth: pct.depthPct,
+            };
+            setSpeedAxisLabel(pct.speedSource === 'edge' ? 'Skating Speed' : 'Tempo');
+          }
+        }
+      } catch (err) {
+        console.warn('League Skater Attack DNA unavailable, using absolute-scale axes:', err);
+      }
+    }
 
     setAnalytics(dna);
 
@@ -472,6 +537,7 @@ export default function AttackDNAPage() {
             showZoneDistribution={true}
             showProfile={true}
             showMetrics={true}
+            speedAxisLabel={speedAxisLabel}
           />
         ) : (
           seasonTrend && <SeasonTrends trend={seasonTrend} />

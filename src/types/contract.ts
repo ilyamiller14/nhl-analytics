@@ -1,75 +1,84 @@
-// Contract and salary cap types
+// Contract and salary cap types — matches contracts-2025-26.json schema
 
-export interface PlayerContract {
-  playerId: number;
-  playerName: string;
-  currentTeam: string;
-  capHit: number; // Average Annual Value (AAV)
-  salary: number; // Current year salary
-  signingBonus?: number;
-  performanceBonus?: number;
-  contractYears: number;
-  yearsRemaining: number;
-  expiryYear: number;
-  contractType: 'Standard' | 'Entry Level' | 'Two-Way' | 'PTO';
-  nmc: boolean; // No Movement Clause
-  ntc: boolean; // No Trade Clause
-  clauseDetails?: string;
-  signedAs: 'UFA' | 'RFA' | 'Extension';
-  signedDate?: string;
-  yearByYear: ContractYear[];
+// ============================================================================
+// JSON Data Schema (what's in public/data/contracts-2025-26.json)
+// ============================================================================
+
+export interface ContractsData {
+  season: string; // e.g., "20252026"
+  capCeiling: number; // e.g., 95500000
+  lastUpdated: string; // e.g., "2026-03-02"
+  teams: Record<string, TeamContractData>;
 }
 
-export interface ContractYear {
-  season: string; // e.g., "2024-25"
-  year: number;
-  age: number;
-  baseSalary: number;
-  signingBonus?: number;
-  performanceBonus?: number;
-  totalSalary: number;
-  capHit: number;
-  clause?: string;
-}
-
-export interface TeamCapSpace {
-  teamId: number;
+export interface TeamContractData {
   teamName: string;
-  teamAbbrev: string;
-  season: string;
-  capCeiling: number;
-  currentCapHit: number;
-  projectedCapHit: number;
+  totalCapHit: number;
   capSpace: number;
-  deadCapSpace: number;
-  ltirSpace: number;
-  rosterSize: number;
-  activeRoster: number;
-  reserveRoster: number;
-  injuredReserve: number;
+  ltirRelief: number;
+  players: PlayerContractEntry[];
 }
 
-export interface CapComparison {
-  playerId: number;
+export interface PlayerContractEntry {
+  playerId?: number; // NHL player ID (may be missing for minor leaguers)
+  name: string;
+  position: string; // C, LW, RW, D, G
+  capHit: number; // AAV
+  contractType: string; // Standard, ELC, Two-Way, 35+
+  clause: string | null; // NMC, M-NMC, NTC, M-NTC, or null
+  status: string; // active, ir, minors, buyout
+  expiryStatus: string; // e.g., "UFA 2028", "RFA 2026"
+  years: ContractYearEntry[];
+}
+
+export interface ContractYearEntry {
+  season: string; // e.g., "2025-26"
+  baseSalary: number;
+  signingBonus: number;
+  performanceBonus?: number;
+  capHit?: number;
+}
+
+// ============================================================================
+// Computed / Display Types
+// ============================================================================
+
+export interface PlayerSurplus {
+  playerId?: number;
   playerName: string;
   position: string;
   capHit: number;
-  percentileRank: number; // Where they rank among similar players
-  leagueRank: number;
-  positionRank: number;
-  pointsPerMillion: number;
-  goalsPerMillion: number;
+  estimatedValue: number; // What their production is worth
+  surplus: number; // estimatedValue - capHit (positive = bargain)
+  surplusPercentile: number; // 0-100, where they rank among all skaters
+  productionTier: string; // e.g., "0.60-0.80 P/GP"
 }
 
-export interface ContractComparable {
-  playerId: number;
-  playerName: string;
-  team: string;
-  position: string;
-  capHit: number;
-  age: number;
-  points: number;
-  years: number;
-  signedYear: number;
-  similarity: number; // 0-100 similarity score
+export interface TeamCapSummary {
+  teamAbbrev: string;
+  teamName: string;
+  capCeiling: number;
+  totalCapHit: number;
+  capSpace: number;
+  ltirRelief: number;
+  forwardCapHit: number;
+  defenseCapHit: number;
+  goalieCapHit: number;
+  playerCount: number;
+}
+
+// Year-by-year cap commitment for the stacked bar chart
+export interface SeasonCapCommitment {
+  season: string; // e.g., "2025-26"
+  totalCommitted: number;
+  byPosition: {
+    forwards: number;
+    defense: number;
+    goalies: number;
+  };
+  players: Array<{
+    name: string;
+    position: string;
+    capHit: number;
+  }>;
 }

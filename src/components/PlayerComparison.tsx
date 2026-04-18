@@ -1,23 +1,35 @@
 import type { PlayerLandingResponse } from '../types/api';
 import type { SeasonStats } from '../types/stats';
-import type { AdvancedPlayerAnalytics } from '../hooks/useAdvancedPlayerAnalytics';
-import StatChart from './StatChart';
+import {
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 import { formatNumber, formatPlusMinus, formatShootingPct } from '../utils/formatters';
-import { computeDerivedStat } from '../hooks/useComparison';
+import { computeDerivedStat, type LeagueContext } from '../hooks/useComparison';
 import './PlayerComparison.css';
 
 interface ComparisonEntryData {
   player: PlayerLandingResponse;
   season: number;
   stats: SeasonStats | undefined;
-  analytics?: Partial<AdvancedPlayerAnalytics>;
-  analyticsLoading?: boolean;
 }
 
 interface PlayerComparisonProps {
   entries: ComparisonEntryData[];
   selectedMetrics: string[];
   metricLabels?: Record<string, string>;
+  leagueContext?: LeagueContext;
 }
 
 function formatSeasonShort(season: number): string {
@@ -26,7 +38,7 @@ function formatSeasonShort(season: number): string {
   return `${startYear}-${String(endYear).slice(2)}`;
 }
 
-function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: PlayerComparisonProps) {
+function PlayerComparison({ entries, selectedMetrics, metricLabels = {}, leagueContext }: PlayerComparisonProps) {
   if (entries.length === 0) {
     return null;
   }
@@ -47,54 +59,96 @@ function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: Playe
     return name;
   };
 
-  // Resolve a stat value: raw field, computed derived stat, or analytics
-  const resolveValue = (stats: any, key: string, analytics?: Partial<AdvancedPlayerAnalytics>): number | string | undefined => {
-    // Analytics keys (xG etc.)
-    if (key.startsWith('@') && analytics) {
-      switch (key) {
-        case '@ixG': return analytics.individualXG?.ixG;
-        case '@gax': return analytics.individualXG?.goalsAboveExpected;
-        case '@ixGPerGame': return analytics.individualXG?.ixGPerGame;
-        case '@xGPct': return analytics.onIceXG?.xGPercent;
-        case '@xGDiff': return analytics.onIceXG?.xGDiff;
-        default: return undefined;
-      }
-    }
-    if (key.startsWith('@')) return undefined; // analytics not loaded yet
-
+  // Resolve a stat value: raw field or computed derived stat
+  const resolveValue = (stats: any, key: string): number | string | undefined => {
     if (!stats) return undefined;
-    if (key.startsWith('_')) return computeDerivedStat(stats, key);
+    if (key.startsWith('_')) return computeDerivedStat(stats, key, leagueContext);
     return stats[key];
   };
 
-  // Prepare radar chart data — use labels for display
-  const radarData = selectedMetrics.map((metric) => {
-    const dataPoint: any = { metric: getMetricLabel(metric) };
+  // Build normalized radar data (each axis independently scaled to 0-100)
+  // and a raw value lookup for the tooltip to display original values
+  const rawRadarLookup: Record<string, Record<string, number>> = {};
+  const normalizedRadarData = selectedMetrics.map((metric) => {
+    const label = getMetricLabel(metric);
+    const playerValues: { name: string; value: number }[] = [];
 
     entries.forEach((entry) => {
-      const value = resolveValue(entry.stats, metric, entry.analytics);
-      dataPoint[getLabel(entry)] = typeof value === 'number' ? value : 0;
+      const v = resolveValue(entry.stats, metric);
+      playerValues.push({
+        name: getLabel(entry),
+        value: typeof v === 'number' ? v : 0,
+      });
     });
 
-    return dataPoint;
+    // Store raw values for tooltip
+    rawRadarLookup[label] = {};
+    playerValues.forEach((pv) => { rawRadarLookup[label][pv.name] = pv.value; });
+
+    const nums = playerValues.map((pv) => pv.value);
+    const min = Math.min(...nums);
+    const max = Math.max(...nums);
+    const dp: any = { metric: label, _metricKey: metric };
+
+    if (max === min) {
+      // All same value — show at 65 (above midline)
+      playerValues.forEach((pv) => { dp[pv.name] = max > 0 ? 65 : 50; });
+    } else if (min >= 0) {
+      // All positive: scale so max player fills ~77% of axis (30% headroom)
+      const ceiling = max * 1.3;
+      playerValues.forEach((pv) => { dp[pv.name] = ceiling > 0 ? (pv.value / ceiling) * 100 : 0; });
+    } else {
+      // Has negative values: shift so 0 maps to a visible baseline
+      const range = max - min;
+      const ceiling = range * 1.3;
+      playerValues.forEach((pv) => {
+        dp[pv.name] = ((pv.value - min + range * 0.15) / ceiling) * 100;
+      });
+    }
+
+    return dp;
   });
 
-  // Prepare bar chart data
-  const barChartData = entries.map((entry) => {
-    const data: any = { name: getLabel(entry) };
+  // Build normalized bar chart data — one group per metric, one bar per player
+  // Reuses the same per-axis normalization as the radar (0-100 scale)
+  const normalizedBarData = selectedMetrics.map((metric) => {
+    const label = getMetricLabel(metric);
+    const dp: any = { metric: label, _metricKey: metric };
+    const playerValues: { name: string; value: number }[] = [];
 
-    selectedMetrics.forEach((metric) => {
-      const value = resolveValue(entry.stats, metric, entry.analytics);
-      data[metric] = typeof value === 'number' ? value : 0;
+    entries.forEach((entry) => {
+      const v = resolveValue(entry.stats, metric);
+      playerValues.push({
+        name: getLabel(entry),
+        value: typeof v === 'number' ? v : 0,
+      });
     });
 
-    return data;
+    const nums = playerValues.map((pv) => pv.value);
+    const min = Math.min(...nums);
+    const max = Math.max(...nums);
+
+    if (max === min) {
+      playerValues.forEach((pv) => { dp[pv.name] = max > 0 ? 65 : 50; });
+    } else if (min >= 0) {
+      const ceiling = max * 1.3;
+      playerValues.forEach((pv) => { dp[pv.name] = ceiling > 0 ? (pv.value / ceiling) * 100 : 0; });
+    } else {
+      const range = max - min;
+      const ceiling = range * 1.3;
+      playerValues.forEach((pv) => {
+        dp[pv.name] = ((pv.value - min + range * 0.15) / ceiling) * 100;
+      });
+    }
+
+    return dp;
   });
+
+  // Raw bar value lookup for tooltip (reuses rawRadarLookup built above)
 
   // Format a stat value for display
-  const getStatValue = (stats: any | undefined, key: string, analytics?: Partial<AdvancedPlayerAnalytics>, loading?: boolean) => {
-    if (key.startsWith('@') && loading) return '...';
-    const value = resolveValue(stats, key, analytics);
+  const getStatValue = (stats: any | undefined, key: string) => {
+    const value = resolveValue(stats, key);
     if (value === undefined || value === null) return '-';
 
     if (key === 'plusMinus') return formatPlusMinus(value as number);
@@ -103,10 +157,8 @@ function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: Playe
     if (key.includes('Pctg') || key === '_goalsPctTeam' || key === '_ptsPctTeam') {
       return `${(value as number).toFixed(1)}%`;
     }
-    if ((key.startsWith('_') || key.startsWith('@')) && typeof value === 'number') {
-      if (key === '@xGPct') return `${value.toFixed(1)}%`;
-      if (key === '@gax') return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
-      if (key === '@xGDiff') return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
+    if (key.startsWith('_') && typeof value === 'number') {
+      if (key === '_gax' || key === '_gaxPerGame') return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
       return value.toFixed(2);
     }
     if (typeof value === 'number') return formatNumber(value, 0);
@@ -117,7 +169,7 @@ function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: Playe
   // Highlight best value per metric
   const getBestValue = (metric: string): number | null => {
     const values = entries
-      .map((e) => resolveValue(e.stats, metric, e.analytics))
+      .map((e) => resolveValue(e.stats, metric))
       .filter((v): v is number => typeof v === 'number');
     if (values.length === 0) return null;
     if (metric === 'pim') return Math.min(...values); // lower PIM is better
@@ -175,7 +227,7 @@ function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: Playe
                           className="stat-value"
                           style={isBest ? { fontWeight: 700, color: '#059669' } : undefined}
                         >
-                          {getStatValue(entry.stats, metric, entry.analytics, entry.analyticsLoading)}
+                          {getStatValue(entry.stats, metric)}
                         </td>
                       );
                     })}
@@ -187,37 +239,104 @@ function PlayerComparison({ entries, selectedMetrics, metricLabels = {} }: Playe
         </div>
       </div>
 
-      {/* Radar Chart */}
+      {/* Radar Chart — axes normalized independently so all metrics are visually comparable */}
       {selectedMetrics.length >= 3 && (
         <div className="comparison-section">
           <h3 className="comparison-title">Performance Radar</h3>
-          <StatChart
-            data={radarData}
-            type="radar"
-            dataKeys={entries.map((entry, index) => ({
-              key: getLabel(entry),
-              name: getLabel(entry),
-              color: colors[index % colors.length],
-            }))}
-            xAxisKey="metric"
-            height={450}
-          />
+          <p style={{ fontSize: '0.7rem', color: '#9ca3af', textAlign: 'center', margin: '-0.25rem 0 0.5rem' }}>
+            Each axis scaled independently — hover for actual values
+          </p>
+          <ResponsiveContainer width="100%" height={450}>
+            <RadarChart data={normalizedRadarData}>
+              <PolarGrid stroke="#e5e7eb" />
+              <PolarAngleAxis dataKey="metric" stroke="#6b7280" style={{ fontSize: '0.875rem' }} />
+              <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: 'white',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '0.875rem',
+                }}
+                formatter={(value: any, name: any, props: any) => {
+                  const metricLabel = props?.payload?.metric;
+                  const metricKey = props?.payload?._metricKey;
+                  const raw = rawRadarLookup[metricLabel]?.[name as string];
+                  if (raw !== undefined) {
+                    if (metricKey === '_gax' || metricKey === '_gaxPerGame' || metricKey === 'plusMinus') {
+                      return `${raw >= 0 ? '+' : ''}${raw.toFixed(2)}`;
+                    }
+                    if (Math.abs(raw) >= 100) return formatNumber(raw, 0);
+                    return raw.toFixed(2);
+                  }
+                  return typeof value === 'number' ? value.toFixed(1) : String(value);
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: '0.875rem', paddingTop: '1rem' }} />
+              {entries.map((entry, index) => (
+                <Radar
+                  key={getLabel(entry)}
+                  dataKey={getLabel(entry)}
+                  name={getLabel(entry)}
+                  stroke={colors[index % colors.length]}
+                  fill={colors[index % colors.length]}
+                  fillOpacity={0.3}
+                  strokeWidth={2}
+                />
+              ))}
+            </RadarChart>
+          </ResponsiveContainer>
         </div>
       )}
 
-      {/* Bar Chart */}
+      {/* Bar Chart — normalized per-metric, grouped by metric with one bar per player */}
       <div className="comparison-section">
-        <h3 className="comparison-title">Side-by-Side (Bar Chart)</h3>
-        <StatChart
-          data={barChartData}
-          type="bar"
-          dataKeys={selectedMetrics.map((metric) => ({
-            key: metric,
-            name: getMetricLabel(metric),
-          }))}
-          xAxisKey="name"
-          height={400}
-        />
+        <h3 className="comparison-title">Side-by-Side Comparison</h3>
+        <p style={{ fontSize: '0.7rem', color: '#9ca3af', textAlign: 'center', margin: '-0.25rem 0 0.5rem' }}>
+          Each metric scaled independently — hover for actual values
+        </p>
+        <ResponsiveContainer width="100%" height={Math.max(400, selectedMetrics.length * 50)}>
+          <BarChart data={normalizedBarData} layout="vertical" margin={{ left: 10, right: 20 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis type="number" domain={[0, 100]} tick={false} axisLine={false} />
+            <YAxis
+              type="category"
+              dataKey="metric"
+              width={80}
+              tick={{ fontSize: 12, fill: '#6b7280' }}
+            />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: 'white',
+                border: '1px solid #e5e7eb',
+                borderRadius: '8px',
+                fontSize: '0.875rem',
+              }}
+              formatter={(value: any, name: any, props: any) => {
+                const metricLabel = props?.payload?.metric;
+                const metricKey = props?.payload?._metricKey;
+                const raw = rawRadarLookup[metricLabel]?.[name as string];
+                if (raw !== undefined) {
+                  if (metricKey === '_gax' || metricKey === '_gaxPerGame' || metricKey === 'plusMinus') {
+                    return `${raw >= 0 ? '+' : ''}${raw.toFixed(2)}`;
+                  }
+                  if (Math.abs(raw) >= 100) return formatNumber(raw, 0);
+                  return raw.toFixed(2);
+                }
+                return typeof value === 'number' ? value.toFixed(1) : String(value);
+              }}
+            />
+            <Legend wrapperStyle={{ fontSize: '0.875rem', paddingTop: '0.5rem' }} />
+            {entries.map((entry, index) => (
+              <Bar
+                key={getLabel(entry)}
+                dataKey={getLabel(entry)}
+                fill={colors[index % colors.length]}
+                radius={[0, 4, 4, 0]}
+              />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );

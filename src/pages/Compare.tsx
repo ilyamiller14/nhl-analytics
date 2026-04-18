@@ -1,25 +1,13 @@
 import { useComparison, type ComparisonEntry } from '../context/ComparisonContext';
-import { useComparisonMetrics, METRIC_GROUPS, DEFAULT_METRICS } from '../hooks/useComparison';
+import { useComparisonMetrics, METRIC_GROUPS, DEFAULT_METRICS, type LeagueContext } from '../hooks/useComparison';
 import PlayerSearch from '../components/PlayerSearch';
 import MetricSelector from '../components/MetricSelector';
 import PlayerComparison from '../components/PlayerComparison';
 import type { PlayerSearchResult } from '../types/player';
 import { usePlayerStats } from '../hooks/usePlayerStats';
-import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import type { AdvancedPlayerAnalytics } from '../hooks/useAdvancedPlayerAnalytics';
-import { fetchGamePlayByPlay, fetchPlayerSeasonGames } from '../services/playByPlayService';
-import { calculateXG } from '../services/xgModel';
+import { getLeagueAverages } from '../services/leagueAveragesService';
+import { useEffect, useState, useMemo } from 'react';
 import './Compare.css';
-
-// Inline distance/angle helpers (same as useAdvancedPlayerAnalytics)
-function shotDistance(x: number, y: number): number {
-  const goalX = x >= 0 ? 89 : -89;
-  return Math.sqrt((x - goalX) ** 2 + y ** 2);
-}
-function shotAngle(x: number, y: number): number {
-  const goalX = x >= 0 ? 89 : -89;
-  return Math.abs(Math.atan2(y, Math.abs(x - goalX)) * (180 / Math.PI));
-}
 
 function formatSeasonDisplay(season: number): string {
   const startYear = Math.floor(season / 10000);
@@ -53,90 +41,18 @@ function Compare() {
 
   const [duplicateMessage, setDuplicateMessage] = useState('');
 
-  // xG analytics per entry (keyed by entry.key)
-  const [analyticsMap, setAnalyticsMap] = useState<Record<string, Partial<AdvancedPlayerAnalytics>>>({});
-  const [analyticsLoading, setAnalyticsLoading] = useState<Record<string, boolean>>({});
-  const fetchedKeysRef = useRef<Set<string>>(new Set());
-
-  // Fetch xG analytics when xG metrics are selected and entries exist
-  const needsAnalytics = selectedMetrics.some((m) => m.startsWith('@'));
-
-  const fetchAnalyticsForEntry = useCallback(async (entry: ComparisonEntry) => {
-    const key = entry.key;
-    if (fetchedKeysRef.current.has(key)) return;
-    fetchedKeysRef.current.add(key);
-    setAnalyticsLoading((prev) => ({ ...prev, [key]: true }));
-
-    try {
-      const season = String(entry.season);
-      const playerId = entry.player.playerId;
-      const gameIds = await fetchPlayerSeasonGames(playerId, season);
-      if (gameIds.length === 0) return;
-
-      let xGF = 0, xGA = 0, ixG = 0, playerGoals = 0;
-      const teamId = (entry.player as any).currentTeamId;
-
-      for (const gameId of gameIds) {
-        try {
-          const pbp = await fetchGamePlayByPlay(gameId);
-          for (const shot of pbp.shots) {
-            const dist = shotDistance(shot.xCoord, shot.yCoord);
-            const angle = shotAngle(shot.xCoord, shot.yCoord);
-            const pred = calculateXG({ distance: dist, angle, shotType: 'wrist', strength: '5v5' });
-            const xg = pred.xGoal;
-
-            // Individual xG: player's own shots
-            if (shot.shootingPlayerId === playerId) {
-              ixG += xg;
-              if (shot.result === 'goal') playerGoals++;
-            }
-
-            // On-ice xG: team for/against when player on ice
-            const onIce = [...(shot.homePlayersOnIce || []), ...(shot.awayPlayersOnIce || [])];
-            if (onIce.includes(playerId)) {
-              if (shot.teamId === teamId) {
-                xGF += xg;
-              } else {
-                xGA += xg;
-              }
-            }
-          }
-        } catch {
-          // Skip failed games
-        }
-      }
-
-      const xGTotal = xGF + xGA;
-      const gp = gameIds.length;
-
-      setAnalyticsMap((prev) => ({
-        ...prev,
-        [key]: {
-          individualXG: {
-            ixG,
-            goalsAboveExpected: playerGoals - ixG,
-            ixGPerGame: gp > 0 ? ixG / gp : 0,
-            ixGPer60: 0,
-          },
-          onIceXG: {
-            xGF,
-            xGA,
-            xGDiff: xGF - xGA,
-            xGPercent: xGTotal > 0 ? (xGF / xGTotal) * 100 : 50,
-          },
-        } as Partial<AdvancedPlayerAnalytics>,
-      }));
-    } catch {
-      // Failed to load analytics
-    } finally {
-      setAnalyticsLoading((prev) => ({ ...prev, [key]: false }));
-    }
-  }, []);
-
+  // Fetch real league averages from NHL Stats API for xG computation
+  const [leagueContext, setLeagueContext] = useState<LeagueContext | null>(null);
   useEffect(() => {
-    if (!needsAnalytics) return;
-    entries.forEach((entry) => fetchAnalyticsForEntry(entry));
-  }, [needsAnalytics, entries, fetchAnalyticsForEntry]);
+    getLeagueAverages().then((avg) => {
+      if (avg) {
+        setLeagueContext({
+          leagueShootingPct: avg.shootingPct,
+          leagueGPG: avg.goalsPerGame,
+        });
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (searchedPlayer) {
@@ -183,14 +99,12 @@ function Compare() {
     setSearchPlayerId(player.playerId);
   };
 
-  // Build comparison data: entries with their resolved season stats + analytics
+  // Build comparison data: entries with their resolved season stats
   const comparisonEntries = useMemo(() => {
     return entries.map((entry) => ({
       player: entry.player,
       season: entry.season,
       stats: getEntryStats(entry),
-      analytics: analyticsMap[entry.key],
-      analyticsLoading: analyticsLoading[entry.key] || false,
     }));
   }, [entries, getEntryStats]);
 
@@ -346,6 +260,7 @@ function Compare() {
                   entries={comparisonEntries}
                   selectedMetrics={selectedMetrics}
                   metricLabels={metricLabels}
+                  leagueContext={leagueContext ?? undefined}
                 />
               </div>
             )}

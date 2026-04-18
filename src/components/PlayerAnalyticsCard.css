@@ -1,4 +1,4 @@
-/* Player Analytics Card - Shareable Design (Wide) */
+/* Player Analytics Card - Shareable Design (Wide Landscape) */
 
 .player-analytics-card {
   --gauge-elite: #10b981;
@@ -10,10 +10,10 @@
   --gauge-warning: #f59e0b;
   --gauge-cool: #3b82f6;
 
-  width: 560px;
+  width: 900px;
   background: linear-gradient(145deg, #0c0c1d 0%, #111827 40%, #0f172a 100%);
   border-radius: 16px;
-  padding: 1.75rem;
+  padding: 1.5rem 1.75rem;
   color: white;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
@@ -36,86 +36,108 @@
   position: absolute;
   top: 0;
   right: 0;
-  width: 200px;
-  height: 200px;
+  width: 250px;
+  height: 250px;
   background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.08) 0%, transparent 70%);
   pointer-events: none;
 }
 
-/* Header */
-.card-header {
+/* ============================================================
+   HEADER ROW: identity + contract LEFT | hero stats RIGHT
+   ============================================================ */
+.card-header-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 1.25rem;
+  align-items: center;
+  margin-bottom: 1rem;
   position: relative;
   z-index: 1;
+  gap: 1.5rem;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+
+.header-right {
+  flex: 1;
+  min-width: 0;
 }
 
 .player-identity {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
   align-items: center;
 }
 
 .player-headshot {
-  width: 80px;
-  height: 80px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   border: 3px solid rgba(59, 130, 246, 0.4);
   object-fit: cover;
   background: rgba(255, 255, 255, 0.05);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
 }
 
 .player-headshot-placeholder {
-  width: 80px;
-  height: 80px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   border: 3px solid rgba(59, 130, 246, 0.4);
   background: rgba(59, 130, 246, 0.1);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: rgba(255, 255, 255, 0.6);
+  flex-shrink: 0;
 }
 
 .player-info {
   flex: 1;
+  min-width: 0;
 }
 
 .player-name {
-  font-size: 1.6rem;
+  font-size: 1.4rem;
   font-weight: 800;
   margin: 0;
   line-height: 1.15;
   color: white;
   letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .player-meta {
   display: flex;
-  gap: 0.5rem;
-  margin-top: 0.35rem;
-  font-size: 0.875rem;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.6);
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .player-number {
   font-weight: 700;
   color: #60a5fa;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
 }
 
 .player-position {
   background: rgba(255, 255, 255, 0.08);
-  padding: 0.1rem 0.5rem;
+  padding: 0.1rem 0.4rem;
   border-radius: 4px;
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .player-team {
@@ -126,30 +148,73 @@
   display: inline-block;
   background: rgba(59, 130, 246, 0.15);
   border: 1px solid rgba(59, 130, 246, 0.25);
-  padding: 0.15rem 0.6rem;
+  padding: 0.1rem 0.5rem;
   border-radius: 20px;
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-weight: 500;
   color: #93c5fd;
-  margin-top: 0.4rem;
 }
 
 .team-logo-badge {
-  width: 64px;
-  height: 64px;
+  width: 52px;
+  height: 52px;
   object-fit: contain;
   opacity: 0.85;
+  flex-shrink: 0;
 }
 
-/* Hero Stats Row */
+/* Surplus Badge */
+.surplus-badge {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.surplus-cap {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+}
+
+.surplus-value {
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+
+.surplus-value.bargain {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.surplus-value.overpaid {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.surplus-pct {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* Hero Stats Row (now inside header-right) */
 .hero-stats-row {
   display: flex;
   justify-content: space-between;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 1rem 1.25rem;
+  padding: 0.75rem 1rem;
   border-radius: 12px;
-  margin-bottom: 1rem;
 }
 
 .hero-stat {
@@ -170,7 +235,7 @@
 
 .hero-stat-value {
   display: block;
-  font-size: 2rem;
+  font-size: 1.7rem;
   font-weight: 800;
   color: white;
   line-height: 1;
@@ -179,28 +244,36 @@
 
 .hero-stat-label {
   display: block;
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: rgba(255, 255, 255, 0.4);
-  margin-top: 0.3rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 0.25rem;
   font-weight: 600;
 }
 
 .hero-stat-sub {
   display: block;
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   color: #60a5fa;
-  margin-top: 0.15rem;
+  margin-top: 0.1rem;
   font-weight: 500;
 }
 
-/* EDGE Tracking Badges */
-.edge-badges-row {
+/* ============================================================
+   METRICS ROW: EDGE badges + xG% badge + rate stats w/ gauges
+   ============================================================ */
+.metrics-row {
   display: flex;
-  justify-content: center;
   gap: 0.75rem;
+  align-items: stretch;
   margin-bottom: 1rem;
+}
+
+.edge-badges-group {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .edge-badge {
@@ -208,16 +281,15 @@
   flex-direction: column;
   align-items: center;
   text-align: center;
-  flex: 1;
-  padding: 0.6rem 0.5rem;
+  padding: 0.5rem 0.6rem;
   background: rgba(14, 165, 233, 0.08);
   border: 1px solid rgba(14, 165, 233, 0.2);
   border-radius: 10px;
-  position: relative;
+  min-width: 75px;
 }
 
 .edge-badge-value {
-  font-size: 1.3rem;
+  font-size: 1.2rem;
   font-weight: 800;
   color: #7dd3fc;
   line-height: 1;
@@ -225,8 +297,8 @@
 }
 
 .edge-badge-unit {
-  font-size: 0.55rem;
-  color: rgba(255, 255, 255, 0.35);
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.45);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-weight: 600;
@@ -234,19 +306,19 @@
 }
 
 .edge-badge-label {
-  font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.55);
   text-transform: uppercase;
   letter-spacing: 0.8px;
   font-weight: 600;
-  margin-top: 0.3rem;
+  margin-top: 0.2rem;
 }
 
 .edge-badge-pct {
-  font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.3);
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.4);
   font-weight: 500;
-  margin-top: 0.15rem;
+  margin-top: 0.1rem;
 }
 
 .edge-badge-pct.good {
@@ -258,48 +330,58 @@
   font-weight: 700;
 }
 
-/* Full-width Shot Map */
-.shot-map-full {
-  margin-bottom: 1rem;
-}
-
-.shot-map-full .mini-shot-map {
-  width: 100%;
-}
-
-.shot-map-full .mini-rink-svg {
-  width: 100% !important;
-  height: auto !important;
-}
-
-/* Two-column body */
-.card-body-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.card-col-left {
+/* xG% Inline Badge */
+.xg-pct-badge {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.75rem;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 10px;
+  min-width: 65px;
+  flex-shrink: 0;
 }
 
-.card-col-right {
+.xg-pct-value {
+  font-size: 1.3rem;
+  font-weight: 800;
+  line-height: 1;
+  color: white;
+}
+
+.xg-pct-value.positive {
+  color: #10b981;
+}
+
+.xg-pct-value.negative {
+  color: #ef4444;
+}
+
+.xg-pct-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 600;
+  margin-top: 0.15rem;
+}
+
+/* Rate Stats Group */
+.rate-stats-group {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  align-items: center;
-  justify-content: center;
 }
 
-/* Rate Stats */
 .rate-stats {
   display: flex;
   justify-content: center;
   gap: 1.5rem;
-  padding: 0.75rem;
+  padding: 0.6rem 0.75rem;
   background: rgba(139, 92, 246, 0.08);
   border: 1px solid rgba(139, 92, 246, 0.15);
   border-radius: 10px;
@@ -311,7 +393,7 @@
 
 .rate-value {
   display: block;
-  font-size: 1.4rem;
+  font-size: 1.25rem;
   font-weight: 800;
   color: #c4b5fd;
   letter-spacing: -0.01em;
@@ -319,11 +401,46 @@
 
 .rate-label {
   display: block;
-  font-size: 0.6rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.8px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.5);
   font-weight: 600;
+}
+
+.rate-gauges {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.rate-gauges .metric-gauge {
+  flex: 1;
+}
+
+/* ============================================================
+   BOTTOM 2-COLUMN LAYOUT
+   Left  = rolling + individual xG + on-ice xG
+   Right = xG chart + shot map
+   ============================================================ */
+.bottom-columns {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.bottom-col-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.bottom-col-right {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 /* Rolling Section */
@@ -331,34 +448,34 @@
   background: rgba(16, 185, 129, 0.06);
   border: 1px solid rgba(16, 185, 129, 0.15);
   border-radius: 10px;
-  padding: 0.75rem;
+  padding: 0.6rem 0.75rem;
 }
 
 .rolling-section .section-title {
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 1.2px;
   color: #6ee7b7;
-  margin: 0 0 0.6rem 0;
+  margin: 0 0 0.5rem 0;
   font-weight: 700;
 }
 
 .rolling-metrics-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.5rem;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.4rem;
 }
 
 .rolling-metric {
   text-align: center;
   background: rgba(0, 0, 0, 0.2);
   border-radius: 6px;
-  padding: 0.4rem 0.25rem;
+  padding: 0.35rem 0.2rem;
 }
 
 .rolling-value {
   display: block;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   font-weight: 800;
   color: white;
 }
@@ -381,36 +498,58 @@
 
 .rolling-label {
   display: block;
-  font-size: 0.55rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.8px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.5);
   margin-top: 0.1rem;
   font-weight: 600;
 }
 
-/* Advanced Section */
-.advanced-section {
-  margin-top: 0;
+/* xG Sections */
+.xg-section {
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
 }
 
-.advanced-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
+.xg-section-header {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.individual-xg {
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.15);
+}
+
+.individual-xg .xg-section-header {
+  color: #c4b5fd;
+}
+
+.on-ice-xg {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.15);
+}
+
+.on-ice-xg .xg-section-header {
+  color: #93c5fd;
 }
 
 /* Gauges Grid */
 .gauges-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
 .metric-gauge {
   background: rgba(0, 0, 0, 0.25);
-  padding: 0.6rem;
+  padding: 0.5rem;
   border-radius: 6px;
 }
 
@@ -418,7 +557,7 @@
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.35rem;
 }
 
 .gauge-label {
@@ -428,7 +567,7 @@
 }
 
 .gauge-value {
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   font-weight: 800;
   color: white;
 }
@@ -458,53 +597,19 @@
 }
 
 .gauge-percentile {
-  font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.35);
-  margin-top: 0.2rem;
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 0.15rem;
   text-align: right;
   font-weight: 500;
 }
 
-/* xG Sections */
-.xg-section {
-  border-radius: 10px;
-  padding: 0.75rem;
-}
-
-.xg-section-header {
-  font-size: 0.65rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 0.5rem;
-  padding-bottom: 0.3rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.individual-xg {
-  background: rgba(139, 92, 246, 0.08);
-  border: 1px solid rgba(139, 92, 246, 0.15);
-}
-
-.individual-xg .xg-section-header {
-  color: #c4b5fd;
-}
-
-.on-ice-xg {
-  background: rgba(59, 130, 246, 0.08);
-  border: 1px solid rgba(59, 130, 246, 0.15);
-}
-
-.on-ice-xg .xg-section-header {
-  color: #93c5fd;
-}
-
-/* xG Summary */
+/* xG Summary (shared by individual + on-ice) */
 .xg-summary {
   display: flex;
   justify-content: center;
-  gap: 1.25rem;
-  margin-top: 0.6rem;
+  gap: 1rem;
+  margin-top: 0.4rem;
 }
 
 .individual-xg .xg-summary {
@@ -512,8 +617,8 @@
 }
 
 .on-ice-xg .xg-summary {
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -523,7 +628,7 @@
 
 .xg-value {
   display: block;
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 800;
   color: white;
 }
@@ -538,26 +643,82 @@
 
 .xg-label {
   display: block;
-  font-size: 0.6rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.5);
   margin-top: 0.1rem;
   font-weight: 600;
 }
 
 .xg-diff {
-  padding: 0.2rem 0.6rem;
+  padding: 0.15rem 0.5rem;
   background: rgba(0, 0, 0, 0.2);
   border-radius: 6px;
 }
 
-/* Extra stats row */
-.extra-stats-row {
+/* xG Chart Container */
+.xg-chart-container {
+  width: 100%;
   display: flex;
   justify-content: center;
-  gap: 1.75rem;
-  padding: 0.6rem;
+}
+
+/* Shot Map Container */
+.shot-map-container {
+  width: 100%;
+}
+
+.shot-map-container .mini-shot-map {
+  width: 100%;
+}
+
+.shot-map-container .mini-rink-svg {
+  width: 100% !important;
+  height: auto !important;
+}
+
+/* DNA Radar + Shot Map side by side */
+.dna-and-shots {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  width: 100%;
+}
+
+.dna-and-shots .shot-map-container {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Player DNA Radar */
+.player-dna-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.player-dna-container svg {
+  display: block;
+}
+
+.dna-archetype {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #60a5fa;
+  margin-top: -0.25rem;
+  text-align: center;
+}
+
+/* Extra Stats Inline (in left column) */
+.extra-stats-inline {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 0.5rem 0.75rem;
   background: rgba(0, 0, 0, 0.2);
   border-radius: 8px;
 }
@@ -575,31 +736,55 @@
 
 .mini-stat-label {
   display: block;
-  font-size: 0.5rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.45);
   margin-top: 0.1rem;
   font-weight: 600;
 }
 
-/* Visualizations */
-.visualizations-row {
+/* ============================================================
+   ATTACK DNA MINI-RADAR (league percentile, share card)
+   ============================================================ */
+.attack-dna-section {
   display: flex;
-  gap: 0.75rem;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* Footer */
+.attack-dna-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.attack-dna-sub {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+}
+
+.attack-dna-radar {
+  display: block;
+}
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
 .card-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 1rem;
-  padding-top: 0.6rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 0.6rem;
-  color: rgba(255, 255, 255, 0.3);
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .branding {
@@ -613,41 +798,14 @@
   font-style: italic;
 }
 
-/* Responsive */
-@media (max-width: 600px) {
-  .player-analytics-card {
-    width: calc(100vw - 2rem);
-    max-width: 560px;
-    padding: 1rem;
-    border-radius: 12px;
-    font-size: 0.85em;
-  }
+/* ============================================================
+   RESPONSIVE — Card always renders at 900px for PNG export.
+   On narrow screens, the CONTAINER scales it down via transform.
+   ============================================================ */
 
-  .card-body-columns {
-    grid-template-columns: 1fr;
-    gap: 0.5rem;
-  }
-
-  .advanced-columns {
-    grid-template-columns: 1fr;
-    gap: 0.5rem;
-  }
-
-  .hero-stat-value {
-    font-size: 1.4rem;
-  }
-
-  .rolling-metrics-grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 0.25rem;
-  }
-
-  .section-title {
-    font-size: 0.65rem;
-  }
-}
-
-/* Print/Export Styles */
+/* ============================================================
+   PRINT / EXPORT
+   ============================================================ */
 @media print {
   .player-analytics-card {
     box-shadow: none;

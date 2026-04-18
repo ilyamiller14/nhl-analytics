@@ -1,11 +1,12 @@
 /* xG% Time Series Chart Styles */
 
 .xg-timeseries-chart {
-  --xg-positive: #10b981;
-  --xg-negative: #ef4444;
-  --xg-neutral: #6b7280;
+  --xg-positive: #34d399;
+  --xg-negative: #f87171;
+  --xg-neutral: #94a3b8;
 
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   padding: 0.75rem;
 }
@@ -18,15 +19,15 @@
 }
 
 .chart-title {
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   font-weight: 600;
-  color: #94a3b8;
+  color: rgba(255, 255, 255, 0.7);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .chart-value {
-  font-size: 1rem;
+  font-size: 1.2rem;
   font-weight: 700;
 }
 
@@ -35,26 +36,26 @@
 }
 
 .reference-line {
-  stroke: #475569;
+  stroke: rgba(255, 255, 255, 0.4);
   stroke-width: 1;
   stroke-dasharray: 4, 4;
-  opacity: 0.6;
+  opacity: 1;
 }
 
 .area-fill {
-  fill: url(#areaGradient);
+  fill: currentColor;
   opacity: 0.2;
 }
 
 .main-line {
   fill: none;
-  stroke-width: 2;
+  stroke-width: 2.5;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .data-point {
-  stroke: #1e293b;
+  stroke: rgba(0, 0, 0, 0.4);
   stroke-width: 1.5;
   transition: r 0.2s ease;
 }
@@ -68,13 +69,13 @@
 }
 
 .axis-label {
-  font-size: 9px;
-  fill: #64748b;
+  font-size: 11px;
+  fill: rgba(255, 255, 255, 0.55);
   font-family: system-ui, -apple-system, sans-serif;
 }
 
 .axis-label.fifty {
-  fill: #94a3b8;
+  fill: rgba(255, 255, 255, 0.8);
   font-weight: 600;
 }
 
@@ -84,22 +85,23 @@
   align-items: center;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px solid #334155;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .stat-label {
-  font-size: 0.65rem;
-  color: #64748b;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .stat-range {
-  font-size: 0.65rem;
-  color: #94a3b8;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
   font-weight: 500;
 }
 
 .xg-timeseries-empty {
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   padding: 1.5rem;
   display: flex;
@@ -110,5 +112,5 @@
 
 .xg-timeseries-empty span {
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgba(255, 255, 255, 0.5);
 }

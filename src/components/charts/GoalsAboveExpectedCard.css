@@ -1,0 +1,44 @@
+.gax-card { color: #e5e7eb; display: flex; flex-direction: column; gap: 10px; }
+.gax-card-title { font-size: 1rem; font-weight: 600; margin: 0; color: #f3f4f6; }
+.gax-card-empty { padding: 18px; border: 1px dashed #374151; border-radius: 8px; text-align: center; color: #9ca3af; font-size: 0.85rem; }
+.gax-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 10px;
+}
+.gax-card-stat {
+  background: rgba(17, 24, 39, 0.55);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.gax-card-label {
+  color: #94a3b8;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.gax-card-value {
+  font-size: 1.3rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #f3f4f6;
+}
+.gax-hero {
+  border-left: 3px solid rgba(148, 163, 184, 0.4);
+  padding-left: 12px;
+}
+.gax-hero.pos .gax-card-value { color: #34d399; }
+.gax-hero.neg .gax-card-value { color: #f87171; }
+.gax-hero.flat .gax-card-value { color: #cbd5f5; }
+.gax-card-narrative {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: #cbd5f5;
+}

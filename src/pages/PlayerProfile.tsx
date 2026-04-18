@@ -13,6 +13,7 @@ import IceChartsPanel from '../components/IceChartsPanel';
 import RollingAnalyticsChart from '../components/charts/RollingAnalyticsChart';
 import XGFlowChart from '../components/charts/XGFlowChart';
 import PlayerAnalyticsCard from '../components/PlayerAnalyticsCard';
+import { useComparison } from '../context/ComparisonContext';
 import PlayerSearch from '../components/PlayerSearch';
 // EDGE charts
 import SpeedProfileChart from '../components/charts/SpeedProfileChart';
@@ -20,9 +21,19 @@ import ZoneTimeChart from '../components/charts/ZoneTimeChart';
 import TrackingRadarChart, { type PlayerTrackingData, type TrackingMetric } from '../components/charts/TrackingRadarChart';
 import ShotVelocityChart from '../components/charts/ShotVelocityChart';
 import DistanceFatigueChart from '../components/charts/DistanceFatigueChart';
+// Deep Analytics (April 2026)
+import GoalsAboveExpectedCard from '../components/charts/GoalsAboveExpectedCard';
+import ShotTimelineRibbon from '../components/charts/ShotTimelineRibbon';
+import HotColdZoneRadial from '../components/charts/HotColdZoneRadial';
+import RollingFinishingTrajectory from '../components/charts/RollingFinishingTrajectory';
+import WARBreakdown from '../components/charts/WARBreakdown';
+import { computeSkaterWAR } from '../services/warService';
+import { loadWARTables, type WARTables } from '../services/warTableService';
 import { edgeTrackingService } from '../services/edgeTrackingService';
 import { getSkaterAverages } from '../services/leagueAveragesService';
 import { EDGE_CACHE, ANALYTICS_CACHE } from '../utils/cacheUtils';
+import { computePlayerSurplus } from '../services/surplusValueService';
+import { getPlayerContract, getPlayerContractByName } from '../services/contractService';
 import { type RollingMetrics } from '../services/rollingAnalytics';
 import type { Shot } from '../components/charts/ShotChart';
 import type { Hit } from '../components/charts/HitChart';
@@ -62,9 +73,36 @@ function formatSeasonDisplay(season: number): string {
 function PlayerProfile() {
   const { playerId } = useParams<{ playerId: string }>();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'stats' | 'charts' | 'analytics' | 'advanced' | 'edge' | 'card'>('stats');
+  const { addPlayer } = useComparison();
+  const [activeTab, setActiveTab] = useState<'stats' | 'charts' | 'analytics' | 'advanced' | 'edge' | 'deep' | 'card'>('stats');
   const [isSharing, setIsSharing] = useState(false);
+  const [warTables, setWarTables] = useState<WARTables | null>(null);
+
+  // Load the WAR tables lazily when the Deep tab is first opened.
+  useEffect(() => {
+    if (activeTab === 'deep' && !warTables) {
+      loadWARTables().then(setWarTables);
+    }
+  }, [activeTab, warTables]);
   const cardRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [cardZoom, setCardZoom] = useState(1);
+
+  // Dynamically compute zoom so the 900px card always fits the container.
+  // Depends on activeTab because previewRef.current is null until the card tab renders.
+  useEffect(() => {
+    const el = previewRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const available = entry.contentRect.width;
+        setCardZoom(Math.min(1, available / 900));
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [activeTab]);
+
   const { data: player, isLoading, error } = usePlayerStats(
     playerId ? parseInt(playerId, 10) : null
   );
@@ -73,6 +111,7 @@ function PlayerProfile() {
   useEffect(() => {
     setActiveTab('stats');
   }, [playerId]);
+
 
   // Handle share functionality
   const handleShare = useCallback(async () => {
@@ -112,23 +151,51 @@ function PlayerProfile() {
     };
 
     try {
-      // First attempt: try with all images
+      // Clone the card into a hidden container at full 900px.
+      // We use a clone instead of manipulating the live DOM because
+      // React re-renders (from setIsSharing) race with async capture
+      // and can wipe out manual style overrides.
+      // The clone must be *visible* (not visibility:hidden) for html-to-image
+      // to capture it, but hidden from the user. We use a zero-size wrapper
+      // with overflow:hidden to clip it visually, while the clone itself is
+      // absolutely positioned at 0,0 inside it so mobile browsers still
+      // compute full layout (unlike left:-9999px which Safari can skip).
+      const original = cardRef.current;
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;overflow:hidden;pointer-events:none;z-index:-1;';
+      const clone = original.cloneNode(true) as HTMLElement;
+      clone.style.cssText = 'position:absolute;left:0;top:0;width:900px;min-width:900px;zoom:1;overflow:visible;';
+      wrapper.appendChild(clone);
+      document.body.appendChild(wrapper);
+
+      // Two frames: first for layout, second for image decode
+      await new Promise(r => requestAnimationFrame(r));
+      await new Promise(r => requestAnimationFrame(r));
+
+      // Measure full content height explicitly — on mobile (especially iOS Safari),
+      // html-to-image's internal clientHeight can be too short, cropping the PNG.
+      // scrollHeight returns the full content height regardless of viewport constraints.
+      const cloneHeight = clone.scrollHeight;
+
       let dataUrl: string;
       try {
-        dataUrl = await toPng(cardRef.current, {
+        dataUrl = await toPng(clone, {
           quality: 0.95,
-          backgroundColor: '#ffffff',
-          pixelRatio: 2, // Higher resolution
+          backgroundColor: '#0c0c1d',
+          pixelRatio: 2,
+          width: 900,
+          height: cloneHeight,
           cacheBust: true,
           includeQueryParams: true,
         });
       } catch {
-        // If that fails, try without external images
         console.log('Retrying without external images...');
-        dataUrl = await toPng(cardRef.current, {
+        dataUrl = await toPng(clone, {
           quality: 0.95,
-          backgroundColor: '#ffffff',
+          backgroundColor: '#0c0c1d',
           pixelRatio: 2,
+          width: 900,
+          height: cloneHeight,
           filter: (node: HTMLElement) => {
             if (node.tagName === 'IMG') {
               const src = (node as HTMLImageElement).src;
@@ -137,6 +204,8 @@ function PlayerProfile() {
             return true;
           },
         });
+      } finally {
+        document.body.removeChild(wrapper);
       }
 
       // Try to share, fall back to download
@@ -204,6 +273,44 @@ function PlayerProfile() {
   const { data: skaterAverages } = useQuery({
     queryKey: ['skater-averages'],
     queryFn: () => getSkaterAverages(),
+    staleTime: ANALYTICS_CACHE.LEAGUE_STATS,
+    retry: 1,
+  });
+
+  // Fetch contract data (cap hit for display)
+  const { data: contractData } = useQuery({
+    queryKey: ['player-contract', player?.playerId],
+    queryFn: async () => {
+      if (!player) return null;
+      const result = player.playerId
+        ? await getPlayerContract(player.playerId)
+        : null;
+      if (result) return result;
+      return getPlayerContractByName(
+        `${player.firstName.default} ${player.lastName.default}`
+      );
+    },
+    enabled: !!player,
+    staleTime: ANALYTICS_CACHE.LEAGUE_STATS,
+    retry: 1,
+  });
+
+  // Fetch surplus value data for the card (skaters only, 5+ GP)
+  const { data: surplusData } = useQuery({
+    queryKey: ['player-surplus', player?.playerId, player?.featuredStats?.regularSeason?.subSeason?.points, player?.featuredStats?.regularSeason?.subSeason?.gamesPlayed],
+    queryFn: async () => {
+      if (!player) return null;
+      const stats = player.featuredStats?.regularSeason?.subSeason;
+      if (!stats || stats.gamesPlayed < 5) return null;
+      return computePlayerSurplus(
+        player.playerId,
+        `${player.firstName.default} ${player.lastName.default}`,
+        stats.points ?? 0,
+        stats.gamesPlayed,
+        player.position
+      );
+    },
+    enabled: !!player && player.position !== 'G',
     staleTime: ANALYTICS_CACHE.LEAGUE_STATS,
     retry: 1,
   });
@@ -508,6 +615,14 @@ function PlayerProfile() {
             </button>
             <button
               role="tab"
+              aria-selected={activeTab === 'deep'}
+              className={`profile-tab ${activeTab === 'deep' ? 'active' : ''}`}
+              onClick={() => setActiveTab('deep')}
+            >
+              Deep Analytics
+            </button>
+            <button
+              role="tab"
               aria-selected={activeTab === 'card'}
               className={`profile-tab ${activeTab === 'card' ? 'active' : ''}`}
               onClick={() => setActiveTab('card')}
@@ -531,7 +646,7 @@ function PlayerProfile() {
               {currentSeasonStats && (
                 <section className="stats-section">
                   <h2 className="section-title">
-                    Current Season ({formatSeasonId(player.featuredStats!.season)})
+                    Current Season ({formatSeasonId(player.featuredStats?.season || 0)})
                   </h2>
                   <div className="stats-grid">
                     <div className="stat-card">
@@ -873,6 +988,11 @@ function PlayerProfile() {
               </div>
             </section>
           )}
+          {activeTab === 'analytics' && !isGoalie && !currentSeasonStats && (
+            <section className="stats-section" style={{ textAlign: 'center', padding: '3rem 1rem' }}>
+              <p style={{ color: '#6b7280' }}>No current season stats available for analytics.</p>
+            </section>
+          )}
           {activeTab === 'analytics' && !isGoalie && currentSeasonStats && (
             <section className="stats-section">
               <AdvancedAnalyticsTable
@@ -881,7 +1001,7 @@ function PlayerProfile() {
                 points={currentSeasonStats.points}
                 shots={currentSeasonStats.shots || 0}
                 plusMinus={currentSeasonStats.plusMinus || 0}
-                toiMinutes={(avgToi
+                toiMinutes={(typeof avgToi === 'string' && avgToi.includes(':')
                   ? parseFloat(avgToi.split(':')[0]) + parseFloat(avgToi.split(':')[1]) / 60
                   : 0) * currentSeasonStats.gamesPlayed}
                 gamesPlayed={currentSeasonStats.gamesPlayed}
@@ -1082,7 +1202,90 @@ function PlayerProfile() {
             </section>
           )}
 
+          {/* Deep Analytics Tab — signature visuals built from this season's real play-by-play */}
+          {activeTab === 'deep' && (
+            <section className="stats-section deep-analytics">
+              <h2 className="section-title">Deep Analytics</h2>
+              <p className="section-description">
+                Four views of finishing that surface streak shape, directional strengths, and trajectory — not available on MoneyPuck, NHL EDGE, or HockeyViz.
+              </p>
+
+              {advancedAnalytics && advancedAnalytics.playerShots.length > 0 ? (
+                <>
+                  {!isGoalie && (() => {
+                    if (!warTables) {
+                      return (
+                        <div className="deep-panel">
+                          <div className="loading" style={{ padding: '1rem 0' }}>
+                            <div className="loading-spinner"></div>
+                            <p>Loading season-wide WAR tables from worker…</p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    const row = warTables.skaters[player.playerId];
+                    if (!row) {
+                      return (
+                        <div className="deep-panel">
+                          <div className="empty-state">
+                            <p>No WAR data for this player yet — likely hasn&apos;t played the 5-game minimum for league inclusion.</p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="deep-panel">
+                        <WARBreakdown
+                          title="Wins Above Replacement"
+                          playerName={`${player.firstName.default} ${player.lastName.default}`}
+                          result={computeSkaterWAR(row, warTables.context)}
+                        />
+                      </div>
+                    );
+                  })()}
+
+                  <div className="deep-panel">
+                    <GoalsAboveExpectedCard
+                      title="Finishing summary"
+                      shots={advancedAnalytics.playerShots}
+                    />
+                  </div>
+
+                  <div className="deep-panel">
+                    <ShotTimelineRibbon
+                      title="Shot Timeline — season"
+                      shots={advancedAnalytics.playerShots}
+                    />
+                  </div>
+
+                  <div className="deep-panel">
+                    <RollingFinishingTrajectory
+                      title="Cumulative finishing trajectory"
+                      shots={advancedAnalytics.playerShots}
+                    />
+                  </div>
+
+                  <div className="deep-panel">
+                    <HotColdZoneRadial
+                      title="Hot/Cold Zones — directional shooting talent"
+                      shots={advancedAnalytics.playerShots}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="empty-state">
+                  <p>Play-by-play shot data is still loading or unavailable.</p>
+                </div>
+              )}
+            </section>
+          )}
+
           {/* Share Card Tab */}
+          {activeTab === 'card' && !currentSeasonStats && (
+            <section className="stats-section" style={{ textAlign: 'center', padding: '3rem 1rem' }}>
+              <p style={{ color: '#6b7280' }}>No current season stats available for the share card.</p>
+            </section>
+          )}
           {activeTab === 'card' && currentSeasonStats && (
             <section className="stats-section">
               <div className="card-section">
@@ -1103,8 +1306,10 @@ function PlayerProfile() {
                   />
                 </div>
 
-                <div className="card-preview" ref={cardRef}>
+                <div className="card-preview" ref={previewRef}>
+                  <div ref={cardRef} style={{ zoom: cardZoom }}>
                   <PlayerAnalyticsCard
+                    playerId={player.playerId}
                     playerName={`${player.firstName.default} ${player.lastName.default}`}
                     playerNumber={player.sweaterNumber}
                     position={formatPosition(player.position)}
@@ -1112,7 +1317,7 @@ function PlayerProfile() {
                     teamAbbrev={player.currentTeamAbbrev || ''}
                     teamLogo={player.teamLogo}
                     headshot={player.headshot}
-                    season={formatSeasonId(player.featuredStats!.season)}
+                    season={formatSeasonId(player.featuredStats?.season || 0)}
                     gamesPlayed={currentSeasonStats.gamesPlayed}
                     goals={currentSeasonStats.goals}
                     assists={currentSeasonStats.assists}
@@ -1139,7 +1344,11 @@ function PlayerProfile() {
                       distancePer60: edgeData.distance.distancePerGame,
                       percentile: (edgeData.distance as any).percentiles?.distancePer60 || 0,
                     } : null}
+                    capHit={contractData?.contract.capHit ?? surplusData?.capHit}
+                    surplus={surplusData?.surplus}
+                    surplusPercentile={surplusData?.surplusPercentile}
                   />
+                  </div>
                 </div>
                 <div className="card-actions">
                   <button
@@ -1158,9 +1367,15 @@ function PlayerProfile() {
           )}
 
           <div className="profile-actions">
-            <Link to="/compare" className="btn btn-primary">
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                addPlayer(player);
+                navigate('/compare');
+              }}
+            >
               Add to Comparison
-            </Link>
+            </button>
             <Link to="/search" className="btn btn-secondary">
               Search Another Player
             </Link>

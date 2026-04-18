@@ -314,7 +314,6 @@ export function aggregateFlowFieldToHalfRink(flowField: FlowField): FlowField {
         successRate: existing.successRate * weightExisting + cell.successRate * weightNew,
         eventCount: totalEvents,
         shotCount: existing.shotCount + cell.shotCount,
-        passCount: existing.passCount + cell.passCount,
         turnoverCount: existing.turnoverCount + cell.turnoverCount,
       });
     } else {
@@ -335,7 +334,6 @@ export function aggregateFlowFieldToHalfRink(flowField: FlowField): FlowField {
         successRate: cell.successRate,
         eventCount: cell.eventCount,
         shotCount: cell.shotCount,
-        passCount: cell.passCount,
         turnoverCount: cell.turnoverCount,
       });
     }

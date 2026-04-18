@@ -1,0 +1,9 @@
+.rft { color: #e5e7eb; display: flex; flex-direction: column; gap: 10px; }
+.rft-title { font-size: 1rem; font-weight: 600; margin: 0; color: #f3f4f6; }
+.rft-empty { padding: 18px; border: 1px dashed #374151; border-radius: 8px; text-align: center; color: #9ca3af; font-size: 0.85rem; }
+.rft-summary { display: flex; gap: 10px; font-size: 0.82rem; color: #cbd5f5; font-variant-numeric: tabular-nums; align-items: center; flex-wrap: wrap; }
+.rft-sep { color: #475569; }
+.rft-pos { color: #34d399; font-weight: 600; }
+.rft-neg { color: #f87171; font-weight: 600; }
+.rft-svg { background: rgba(15, 23, 42, 0.4); border-radius: 8px; max-width: 100%; height: auto; display: block; }
+.rft-caption { font-size: 0.72rem; color: #94a3b8; margin: 0; }

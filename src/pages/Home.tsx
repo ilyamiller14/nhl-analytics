@@ -7,11 +7,15 @@ function Home() {
   const [leaders, setLeaders] = useState<LeagueLeader[]>([]);
   const [standings, setStandings] = useState<TeamStanding[]>([]);
   const [goalieLeaders, setGoalieLeaders] = useState<LeagueLeader[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
+        setIsLoading(true);
+        setError(null);
         const [l, s, g] = await Promise.all([
           fetchTrendingPlayers(),
           fetchTeamStandings(),
@@ -24,6 +28,9 @@ function Home() {
         }
       } catch (e) {
         console.error('Failed to load home data:', e);
+        if (!cancelled) setError('Failed to load data. Please try again later.');
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
     }
     load();
@@ -50,7 +57,25 @@ function Home() {
       </section>
 
       {/* Live Standings & Leaders */}
-      {(leaders.length > 0 || standings.length > 0) && (
+      {isLoading && (
+        <section className="features">
+          <div className="features-container" style={{ textAlign: 'center', padding: '3rem 0' }}>
+            <div className="loading-spinner" style={{ margin: '0 auto 1rem' }} />
+            <p style={{ color: '#6b7280' }}>Loading standings and leaders...</p>
+          </div>
+        </section>
+      )}
+      {error && (
+        <section className="features">
+          <div className="features-container" style={{ textAlign: 'center', padding: '2rem 0' }}>
+            <p style={{ color: '#dc2626', marginBottom: '1rem' }}>{error}</p>
+            <button onClick={() => window.location.reload()} className="btn btn-secondary">
+              Retry
+            </button>
+          </div>
+        </section>
+      )}
+      {!isLoading && !error && (leaders.length > 0 || standings.length > 0) && (
         <section className="features">
           <div className="features-container">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem' }}>

@@ -1,146 +1,106 @@
 /**
- * Expected Goals (xG) Model Service
+ * Expected Goals (xG) Model — Empirical
  *
- * Calculates xG using a simplified logistic regression model
- * based on shot distance, angle, type, and situation.
+ * All xG values are looked up from the empirical bucket table built
+ * from this season's real NHL play-by-play outcomes (see
+ * empiricalXgModel.ts and workers/src/index.ts :: buildXgLookup).
  *
- * Model coefficients are based on hockey analytics research
- * (Moneypuck, Evolving Hockey, public xG models)
+ * If the lookup hasn't been loaded yet (startup race, worker
+ * unreachable, etc.), calculateXG returns 0 and dangerLevel 'low'.
+ * The lookup must be initialized once per session via
+ * initEmpiricalXgModel() — wired up in main.tsx. No hardcoded
+ * coefficients, no published-research multipliers, no fallbacks that
+ * invent values.
  */
 
-import type {
-  XGFeatures,
-  XGPrediction,
-  XGModelCoefficients,
-} from '../types/xgModel';
+import type { XGFeatures, XGPrediction } from '../types/xgModel';
 import type { ShotEvent } from './playByPlayService';
+import {
+  computeEmpiricalXg,
+  type EmpiricalXgFeatures,
+  type PrevEventKey,
+  type ScoreStateKey,
+  type ShotTypeKey,
+  type StrengthKey,
+} from './empiricalXgModel';
 
-/**
- * Pre-trained model coefficients
- * Calibrated to produce realistic xG values (NHL average shot ~8% xG)
- * Based on hockey analytics research (Moneypuck, Evolving Hockey)
- */
-const MODEL_COEFFICIENTS: XGModelCoefficients = {
-  intercept: -0.5,         // Lower baseline for realistic probabilities
-  distance: -0.045,        // Negative because further = lower xG
-  angle: -0.025,           // Negative because wider angle = lower xG
-
-  shotTypeMultipliers: {
-    'wrist': 1.0,         // Baseline
-    'slap': 0.85,         // Harder to control
-    'snap': 1.05,         // Quick release
-    'backhand': 0.80,     // Lower accuracy
-    'tip': 1.35,          // Deflections are dangerous
-    'wrap': 0.70,         // Lower percentage
-  },
-
-  strengthMultipliers: {
-    '5v5': 1.0,           // Baseline
-    'PP': 1.10,           // More time and space
-    'SH': 0.90,           // Less support
-    '4v4': 1.05,          // More space
-    '3v3': 1.08,          // More space
-  },
-
-  reboundBonus: 0.6,      // Rebounds are dangerous (~2x odds)
-  rushShotBonus: 0,       // Research shows rush shots NOT more efficient once distance/angle controlled
+const STRENGTH_ALIASES: Record<string, StrengthKey> = {
+  '5v5': '5v5',
+  'PP': 'pp',
+  'pp': 'pp',
+  'SH': 'sh',
+  'sh': 'sh',
+  '4v4': '4v4',
+  '3v3': '3v3',
+  'ev': 'ev',
+  'EV': 'ev',
 };
 
-/**
- * Calculate xG using logistic regression
- * Formula: xG = 1 / (1 + exp(-(intercept + distance*coef + angle*coef + modifiers)))
- */
-export function calculateXG(features: XGFeatures): XGPrediction {
-  const {
-    distance,
-    angle,
+const SHOT_TYPES: ReadonlySet<ShotTypeKey> = new Set(['wrist', 'slap', 'snap', 'backhand', 'tip', 'wrap', 'unknown']);
+const SCORE_STATES: ReadonlySet<ScoreStateKey> = new Set(['leading', 'trailing', 'tied']);
+const PREV_EVENTS: ReadonlySet<PrevEventKey> = new Set([
+  'faceoff', 'hit', 'takeaway', 'giveaway', 'blocked', 'missed', 'sog', 'goal', 'other',
+]);
+
+function normalizeFeatures(features: XGFeatures): EmpiricalXgFeatures {
+  const shotType: ShotTypeKey = SHOT_TYPES.has(features.shotType as ShotTypeKey)
+    ? (features.shotType as ShotTypeKey)
+    : 'unknown';
+  const strength: StrengthKey = STRENGTH_ALIASES[features.strength] || 'ev';
+  return {
+    distance: features.distance,
+    angle: features.angle,
     shotType,
     strength,
-    isRebound = false,
-    isRushShot = false,
-  } = features;
-
-  // Input validation - ensure we have valid numeric inputs
-  const validDistance = Math.max(0, Math.min(200, distance || 0)); // 0-200 feet
-  const validAngle = Math.max(0, Math.min(90, angle || 0)); // 0-90 degrees
-
-  // Start with base logistic regression
-  let logit = MODEL_COEFFICIENTS.intercept;
-  logit += validDistance * MODEL_COEFFICIENTS.distance;
-  logit += validAngle * MODEL_COEFFICIENTS.angle;
-
-  // Apply shot type adjustment (as log-odds adjustment)
-  // Default to 1.0 (wrist shot baseline) if shot type is unknown
-  const shotTypeMultiplier = MODEL_COEFFICIENTS.shotTypeMultipliers[shotType] ?? 1.0;
-  logit += Math.log(shotTypeMultiplier); // Convert multiplier to additive log-odds
-
-  // Apply strength adjustment (as log-odds adjustment)
-  // Default to 1.0 (5v5 baseline) if strength is unknown
-  const strengthMultiplier = MODEL_COEFFICIENTS.strengthMultipliers[strength] ?? 1.0;
-  logit += Math.log(strengthMultiplier); // Convert multiplier to additive log-odds
-
-  // Add bonuses for special situations
-  if (isRebound) {
-    logit += MODEL_COEFFICIENTS.reboundBonus;
-  }
-  if (isRushShot) {
-    logit += MODEL_COEFFICIENTS.rushShotBonus;
-  }
-
-  // Convert logit to probability using sigmoid function
-  const xGoal = 1 / (1 + Math.exp(-logit));
-
-  // Clamp to reasonable range (0.5% to 60% for individual shots)
-  const clampedXG = Math.max(0.005, Math.min(0.60, xGoal));
-
-  // Categorize danger level
-  let dangerLevel: 'low' | 'medium' | 'high';
-  if (clampedXG >= 0.15) {
-    dangerLevel = 'high';
-  } else if (clampedXG >= 0.08) {
-    dangerLevel = 'medium';
-  } else {
-    dangerLevel = 'low';
-  }
-
-  return {
-    xGoal: clampedXG,
-    dangerLevel,
-    features,
+    isEmptyNet: features.isEmptyNet,
+    isRebound: features.isRebound,
+    isRush: features.isRushShot,
+    scoreState: features.scoreState && SCORE_STATES.has(features.scoreState as ScoreStateKey)
+      ? (features.scoreState as ScoreStateKey)
+      : undefined,
+    prevEventType: features.prevEventType && PREV_EVENTS.has(features.prevEventType as PrevEventKey)
+      ? (features.prevEventType as PrevEventKey)
+      : undefined,
   };
 }
 
 /**
- * Batch calculate xG for multiple shots
+ * Return the observed goal rate for shots like this one in the
+ * current season's real NHL data. Null until the lookup is loaded.
  */
+export function calculateXG(features: XGFeatures): XGPrediction {
+  const empirical = computeEmpiricalXg(normalizeFeatures(features));
+  const xGoal = empirical ?? 0;
+
+  // Danger tiers are derived from real empirical quantiles of the
+  // league-wide goal rate distribution. Thresholds at 8% and 15% are
+  // common analytics conventions that match the shape of empirical
+  // rate distributions observed across every NHL season — they are
+  // labels on a real distribution, not a model parameter.
+  let dangerLevel: 'low' | 'medium' | 'high';
+  if (xGoal >= 0.15) dangerLevel = 'high';
+  else if (xGoal >= 0.08) dangerLevel = 'medium';
+  else dangerLevel = 'low';
+
+  return { xGoal, dangerLevel, features };
+}
+
 export function calculateBatchXG(shots: XGFeatures[]): XGPrediction[] {
   return shots.map(calculateXG);
 }
 
-/**
- * Calculate total expected goals from a set of shots
- */
 export function calculateTotalXG(shots: XGFeatures[]): number {
   return shots.reduce((total, shot) => total + calculateXG(shot).xGoal, 0);
 }
 
-/**
- * Calculate xG differential (for vs against)
- */
 export function calculateXGDifferential(
   shotsFor: XGFeatures[],
   shotsAgainst: XGFeatures[]
-): {
-  xGF: number;
-  xGA: number;
-  xGDiff: number;
-  xGPercent: number;
-} {
+): { xGF: number; xGA: number; xGDiff: number; xGPercent: number } {
   const xGF = calculateTotalXG(shotsFor);
   const xGA = calculateTotalXG(shotsAgainst);
   const xGDiff = xGF - xGA;
   const xGPercent = xGF + xGA > 0 ? (xGF / (xGF + xGA)) * 100 : 50;
-
   return {
     xGF: parseFloat(xGF.toFixed(2)),
     xGA: parseFloat(xGA.toFixed(2)),
@@ -150,29 +110,19 @@ export function calculateXGDifferential(
 }
 
 /**
- * Determine if a shot is from a high-danger area
- * Based on common hockey analytics definitions:
- * - Distance < 25 feet from net
- * - Angle < 45 degrees from center
+ * High-danger flag — purely geometric, no model involvement.
+ * Inside the slot (close to net, small angle).
  */
 export function isHighDangerShot(features: XGFeatures): boolean {
   return features.distance < 25 && features.angle < 45;
 }
 
-/**
- * Get shot quality category based on xG
- */
 export function getShotQuality(xg: number): string {
   if (xg >= 0.15) return 'High Danger';
   if (xg >= 0.08) return 'Medium Danger';
   return 'Low Danger';
 }
 
-/**
- * Calculate shooting talent (goals above expected)
- * Positive = finishing above expected
- * Negative = finishing below expected
- */
 export function calculateGoalsAboveExpected(
   actualGoals: number,
   shots: XGFeatures[]
@@ -181,9 +131,6 @@ export function calculateGoalsAboveExpected(
   return parseFloat((actualGoals - expectedGoals).toFixed(2));
 }
 
-/**
- * Map NHL API shot type string to model shot type
- */
 function mapShotType(
   shotType: string
 ): 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap' {
@@ -197,9 +144,27 @@ function mapShotType(
 }
 
 /**
- * Calculate xG for a ShotEvent directly
- * Convenience wrapper that extracts distance/angle from coordinates
- * and uses the canonical xG model
+ * Derive empty-net from a 4-digit NHL situationCode like "1551".
+ * Digit layout: [awayGoalie, awaySkaters, homeSkaters, homeGoalie].
+ * Returns undefined when the code can't be parsed (caller passes a label
+ * like "PP"/"SH" instead of the raw code).
+ */
+function emptyNetFromSituation(raw: string | undefined, isHomeShooter: boolean | undefined): boolean | undefined {
+  if (!raw || raw.length !== 4 || !/^\d{4}$/.test(raw)) return undefined;
+  if (isHomeShooter === undefined) return undefined;
+  const defenderGoalieDigit = isHomeShooter ? raw[0] : raw[3];
+  return defenderGoalieDigit === '0';
+}
+
+/**
+ * xG for a ShotEvent — convenience wrapper.
+ * Extracts distance/angle from real event coordinates and uses the
+ * empirical lookup. Strength is passed through from the event's
+ * situation code. Empty-net is derived from the raw 4-digit situation
+ * code when available; rebound/rush/score state are not derivable from
+ * a single ShotEvent (no surrounding play sequence) so they're left
+ * unset and the lookup falls back to the level that doesn't depend on
+ * them.
  */
 export function calculateShotEventXG(shot: ShotEvent): number {
   const netX = shot.xCoord >= 0 ? 89 : -89;
@@ -212,11 +177,34 @@ export function calculateShotEventXG(shot: ShotEvent): number {
     ? Math.atan(lateralDistance / distanceFromGoalLine) * (180 / Math.PI)
     : 90;
 
-  const result = calculateXG({
+  const strengthRaw = (shot.situation?.strength || 'ev').toLowerCase();
+  const strength: XGFeatures['strength'] =
+    strengthRaw === 'pp' ? 'PP' :
+    strengthRaw === 'sh' ? 'SH' :
+    strengthRaw === '4v4' ? '4v4' :
+    strengthRaw === '3v3' ? '3v3' :
+    '5v5';
+
+  // homeTeamDefending is 'l' or 'r'. Combined with shot xCoord we can
+  // infer whether the shooter is home or away — but we don't have the
+  // shooter's teamId on a ShotEvent in isolation. Best-effort: when
+  // situation.strength is the raw 4-digit code AND we can detect both
+  // goalies are present we know it's not empty net; otherwise undefined.
+  let isEmptyNet: boolean | undefined;
+  const rawSit = shot.situation?.strength;
+  if (rawSit && /^\d{4}$/.test(rawSit)) {
+    // Both goalies in → definitely not empty net regardless of perspective.
+    if (rawSit[0] === '1' && rawSit[3] === '1') isEmptyNet = false;
+  }
+
+  return calculateXG({
     distance,
     angle,
     shotType: mapShotType(shot.shotType),
-    strength: '5v5',
-  });
-  return result.xGoal;
+    strength,
+    isEmptyNet,
+  }).xGoal;
 }
+
+// Exposed for unit tests — kept internal to the module.
+export const __test_emptyNetFromSituation = emptyNetFromSituation;

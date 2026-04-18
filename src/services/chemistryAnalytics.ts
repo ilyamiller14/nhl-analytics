@@ -38,20 +38,22 @@ export interface PlayerPairChemistry {
 
   // Shot metrics when apart (only one player on ice)
   apart: {
-    player1Only: {
-      shots: number;
-      goals: number;
-    };
-    player2Only: {
-      shots: number;
-      goals: number;
-    };
+    player1Only: { shots: number; goals: number };
+    player2Only: { shots: number; goals: number };
   };
 
-  // Chemistry metrics
-  chemistryIndex: number; // 0-100, higher = better chemistry
-  shotSupportRate: number; // % of shots generated when together vs expected
-  defensiveChemistry: number; // 0-100, based on shots against
+  // Rate metrics — all derived directly from real counts / real TOI.
+  // No hardcoded weights or composite indices.
+  shotsPer60Together: number;
+  shotsAgainstPer60Together: number;
+  goalsPer60Together: number;
+  goalsAgainstPer60Together: number;
+  shotDiffPer60Together: number;   // shotsFor − shotsAgainst per 60
+  highDangerPer60Together: number; // high-danger shots for, per 60
+
+  // Share of the pair's combined shot production that happens when
+  // they're on the ice together. Pure % — no scaling.
+  shotSupportRate: number;
 }
 
 export interface ChemistryMatrix {
@@ -59,22 +61,6 @@ export interface ChemistryMatrix {
   gamesAnalyzed: number;
   players: Array<{ id: number; name: string }>;
   matrix: Map<string, PlayerPairChemistry>; // key: "playerId1-playerId2" (sorted)
-}
-
-export interface LineCombinationChemistry {
-  lineType: 'forward' | 'defense' | 'mixed';
-  playerIds: number[];
-  playerNames: string[];
-
-  // Aggregate chemistry
-  avgPairChemistry: number;
-  toiTogether: number;
-  shotsFor: number;
-  shotsAgainst: number;
-  shotDifferential: number;
-
-  // Line-level assessment
-  rating: 'excellent' | 'good' | 'average' | 'below_average' | 'poor';
 }
 
 // ============================================================================
@@ -85,13 +71,6 @@ const HIGH_DANGER_DISTANCE = 25;
 const HIGH_DANGER_Y_THRESHOLD = 20;
 const GOAL_X = 89;
 const SHIFT_OVERLAP_THRESHOLD = 5; // Minimum seconds to count as overlapping
-
-// Chemistry index weights
-const CHEMISTRY_WEIGHTS = {
-  offensiveProduction: 0.4,
-  shotSupport: 0.3,
-  defensiveImpact: 0.3,
-};
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -274,20 +253,14 @@ export function calculatePairChemistry(
     ? (totalShotsTogether / totalShots) * 100
     : 50;
 
-  // Offensive component (shots/60 together vs apart normalized)
-  const shotsPerMinuteTogether = toiTogether > 0 ? (together.shots / (toiTogether / 60)) : 0;
-  const offensiveScore = Math.min(100, shotsPerMinuteTogether * 10); // Normalize to 0-100
-
-  // Defensive component (fewer shots against = better)
-  const shotsAgainstPerMinute = toiTogether > 0 ? (together.shotsAgainst / (toiTogether / 60)) : 0;
-  const defensiveScore = Math.max(0, 100 - shotsAgainstPerMinute * 15);
-
-  // Combined chemistry index
-  const chemistryIndex = Math.round(
-    offensiveScore * CHEMISTRY_WEIGHTS.offensiveProduction +
-    Math.min(100, shotSupportRate) * CHEMISTRY_WEIGHTS.shotSupport +
-    defensiveScore * CHEMISTRY_WEIGHTS.defensiveImpact
-  );
+  // Real per-60 rates from the pair's actual shared TOI. No scaling.
+  const hoursTogether = toiTogether / 3600;
+  const shotsPer60Together = hoursTogether > 0 ? together.shots / hoursTogether : 0;
+  const shotsAgainstPer60Together = hoursTogether > 0 ? together.shotsAgainst / hoursTogether : 0;
+  const goalsPer60Together = hoursTogether > 0 ? together.goals / hoursTogether : 0;
+  const goalsAgainstPer60Together = hoursTogether > 0 ? together.goalsAgainst / hoursTogether : 0;
+  const highDangerPer60Together = hoursTogether > 0 ? together.highDangerShots / hoursTogether : 0;
+  const shotDiffPer60Together = shotsPer60Together - shotsAgainstPer60Together;
 
   return {
     player1Id: sortedP1,
@@ -296,18 +269,30 @@ export function calculatePairChemistry(
     estimatedToiTogether: toiTogether,
     shiftsOverlapping,
     together,
-    apart: {
-      player1Only,
-      player2Only,
-    },
-    chemistryIndex: Math.min(100, Math.max(0, chemistryIndex)),
+    apart: { player1Only, player2Only },
+    shotsPer60Together: parseFloat(shotsPer60Together.toFixed(2)),
+    shotsAgainstPer60Together: parseFloat(shotsAgainstPer60Together.toFixed(2)),
+    goalsPer60Together: parseFloat(goalsPer60Together.toFixed(2)),
+    goalsAgainstPer60Together: parseFloat(goalsAgainstPer60Together.toFixed(2)),
+    shotDiffPer60Together: parseFloat(shotDiffPer60Together.toFixed(2)),
+    highDangerPer60Together: parseFloat(highDangerPer60Together.toFixed(2)),
     shotSupportRate: Math.round(shotSupportRate),
-    defensiveChemistry: Math.round(defensiveScore),
   };
 }
 
 /**
+ * Position group for chemistry pair filtering.
+ * Goalies are excluded from chemistry analysis entirely.
+ */
+export type ChemistryPositionGroup = 'F' | 'D';
+
+/**
  * Build a full chemistry matrix for a roster.
+ *
+ * Only builds pairs where both players share a position group — forward-
+ * forward or defense-defense. Mixed F-D pairs and any pair involving a
+ * goalie are excluded (by convention: linemate chemistry is only
+ * meaningful within a positional unit).
  *
  * Optimized: iterates over games/shots/shifts ONCE and aggregates per-pair,
  * instead of iterating all data per-pair (which was O(pairs × games × shifts)).
@@ -317,9 +302,23 @@ export async function buildChemistryMatrix(
   gamesPlayByPlay: GamePlayByPlay[],
   teamId: number,
   playerIds: number[],
-  playerNames: Map<number, string>
+  playerNames: Map<number, string>,
+  playerPositions: Map<number, ChemistryPositionGroup>
 ): Promise<ChemistryMatrix> {
-  const playerIdSet = new Set(playerIds);
+  // Only include skaters who have a position group (F or D); goalies are
+  // filtered out entirely by not being in the position map.
+  const eligibleIds = playerIds.filter((id) => playerPositions.has(id));
+  const playerIdSet = new Set(eligibleIds);
+
+  /**
+   * A pair is valid only if both players share the same position group
+   * (F-F or D-D). Mixed F-D and anything-G returns false.
+   */
+  const isValidPair = (a: number, b: number): boolean => {
+    const pa = playerPositions.get(a);
+    const pb = playerPositions.get(b);
+    return !!pa && !!pb && pa === pb;
+  };
 
   // Accumulators per pair
   interface PairAccumulator {
@@ -371,6 +370,7 @@ export async function buildChemistryMatrix(
     for (let i = 0; i < activePlayers.length; i++) {
       const p1Shifts = playerShifts.get(activePlayers[i])!;
       for (let j = i + 1; j < activePlayers.length; j++) {
+        if (!isValidPair(activePlayers[i], activePlayers[j])) continue;
         const p2Shifts = playerShifts.get(activePlayers[j])!;
         const key = getPairKey(activePlayers[i], activePlayers[j]);
         const pair = getOrCreatePair(key);
@@ -425,6 +425,7 @@ export async function buildChemistryMatrix(
       // For each pair of on-ice players, update their "together" stats
       for (let i = 0; i < ourOnIce.length; i++) {
         for (let j = i + 1; j < ourOnIce.length; j++) {
+          if (!isValidPair(ourOnIce[i], ourOnIce[j])) continue;
           const key = getPairKey(ourOnIce[i], ourOnIce[j]);
           const pair = getOrCreatePair(key);
 
@@ -446,6 +447,7 @@ export async function buildChemistryMatrix(
           if (onIceSet.has(pid)) continue;
           // This player was NOT on ice but the shot happened
           for (const onIcePid of ourOnIce) {
+            if (!isValidPair(pid, onIcePid)) continue;
             const key = getPairKey(pid, onIcePid);
             const pair = getOrCreatePair(key);
             // The on-ice player had a shot without the off-ice player
@@ -479,17 +481,13 @@ export async function buildChemistryMatrix(
       ? (totalShotsTogether / totalShots) * 100
       : 50;
 
-    const shotsPerMinuteTogether = data.toiTogether > 0 ? (data.together.shots / (data.toiTogether / 60)) : 0;
-    const offensiveScore = Math.min(100, shotsPerMinuteTogether * 10);
-
-    const shotsAgainstPerMinute = data.toiTogether > 0 ? (data.together.shotsAgainst / (data.toiTogether / 60)) : 0;
-    const defensiveScore = Math.max(0, 100 - shotsAgainstPerMinute * 15);
-
-    const chemistryIndex = Math.round(
-      offensiveScore * CHEMISTRY_WEIGHTS.offensiveProduction +
-      Math.min(100, shotSupportRate) * CHEMISTRY_WEIGHTS.shotSupport +
-      defensiveScore * CHEMISTRY_WEIGHTS.defensiveImpact
-    );
+    const hoursTogether = data.toiTogether / 3600;
+    const shotsPer60Together = hoursTogether > 0 ? data.together.shots / hoursTogether : 0;
+    const shotsAgainstPer60Together = hoursTogether > 0 ? data.together.shotsAgainst / hoursTogether : 0;
+    const goalsPer60Together = hoursTogether > 0 ? data.together.goals / hoursTogether : 0;
+    const goalsAgainstPer60Together = hoursTogether > 0 ? data.together.goalsAgainst / hoursTogether : 0;
+    const highDangerPer60Together = hoursTogether > 0 ? data.together.highDangerShots / hoursTogether : 0;
+    const shotDiffPer60Together = shotsPer60Together - shotsAgainstPer60Together;
 
     matrix.set(key, {
       player1Id: p1,
@@ -501,74 +499,29 @@ export async function buildChemistryMatrix(
       shiftsOverlapping: data.shiftsOverlapping,
       together: data.together,
       apart: { player1Only: data.player1Only, player2Only: data.player2Only },
-      chemistryIndex: Math.min(100, Math.max(0, chemistryIndex)),
+      shotsPer60Together: parseFloat(shotsPer60Together.toFixed(2)),
+      shotsAgainstPer60Together: parseFloat(shotsAgainstPer60Together.toFixed(2)),
+      goalsPer60Together: parseFloat(goalsPer60Together.toFixed(2)),
+      goalsAgainstPer60Together: parseFloat(goalsAgainstPer60Together.toFixed(2)),
+      shotDiffPer60Together: parseFloat(shotDiffPer60Together.toFixed(2)),
+      highDangerPer60Together: parseFloat(highDangerPer60Together.toFixed(2)),
       shotSupportRate: Math.round(shotSupportRate),
-      defensiveChemistry: Math.round(defensiveScore),
     });
   }
 
   return {
     teamId,
     gamesAnalyzed: gamesPlayByPlay.length,
-    players: playerIds.map((id) => ({ id, name: playerNames.get(id) || `Player ${id}` })),
+    // Only include skaters we actually analyzed (goalies excluded)
+    players: eligibleIds.map((id) => ({ id, name: playerNames.get(id) || `Player ${id}` })),
     matrix,
   };
 }
 
 /**
- * Evaluate a specific line combination's chemistry
- */
-export function evaluateLineCombination(
-  matrix: ChemistryMatrix,
-  playerIds: number[],
-  playerNames: Map<number, string>,
-  lineType: 'forward' | 'defense' | 'mixed' = 'forward'
-): LineCombinationChemistry {
-  const pairChemistries: PlayerPairChemistry[] = [];
-
-  // Get all pair chemistries for this line
-  for (let i = 0; i < playerIds.length; i++) {
-    for (let j = i + 1; j < playerIds.length; j++) {
-      const pairKey = getPairKey(playerIds[i], playerIds[j]);
-      const chemistry = matrix.matrix.get(pairKey);
-      if (chemistry) {
-        pairChemistries.push(chemistry);
-      }
-    }
-  }
-
-  // Calculate aggregates
-  const avgPairChemistry = pairChemistries.length > 0
-    ? pairChemistries.reduce((sum, p) => sum + p.chemistryIndex, 0) / pairChemistries.length
-    : 50;
-
-  const totalToi = pairChemistries.reduce((sum, p) => sum + p.estimatedToiTogether, 0);
-  const shotsFor = pairChemistries.reduce((sum, p) => sum + p.together.shots, 0);
-  const shotsAgainst = pairChemistries.reduce((sum, p) => sum + p.together.shotsAgainst, 0);
-
-  // Determine rating
-  let rating: LineCombinationChemistry['rating'];
-  if (avgPairChemistry >= 75) rating = 'excellent';
-  else if (avgPairChemistry >= 60) rating = 'good';
-  else if (avgPairChemistry >= 45) rating = 'average';
-  else if (avgPairChemistry >= 30) rating = 'below_average';
-  else rating = 'poor';
-
-  return {
-    lineType,
-    playerIds,
-    playerNames: playerIds.map((id) => playerNames.get(id) || `Player ${id}`),
-    avgPairChemistry: Math.round(avgPairChemistry),
-    toiTogether: totalToi,
-    shotsFor,
-    shotsAgainst,
-    shotDifferential: shotsFor - shotsAgainst,
-    rating,
-  };
-}
-
-/**
- * Find best and worst chemistry pairs
+ * Find best and worst pairs by shot differential per 60 together.
+ * Ranking is purely a real rate metric — positive = pair outshoots
+ * opponents when on the ice together.
  */
 export function findChemistryExtremes(
   matrix: ChemistryMatrix,
@@ -578,114 +531,12 @@ export function findChemistryExtremes(
   worstPairs: PlayerPairChemistry[];
 } {
   const pairs = Array.from(matrix.matrix.values())
-    .filter((p) => p.shiftsOverlapping >= 10); // Minimum sample
+    .filter((p) => p.shiftsOverlapping >= 10); // minimum sample
 
-  const sorted = [...pairs].sort((a, b) => b.chemistryIndex - a.chemistryIndex);
+  const sorted = [...pairs].sort((a, b) => b.shotDiffPer60Together - a.shotDiffPer60Together);
 
   return {
     bestPairs: sorted.slice(0, topN),
     worstPairs: sorted.slice(-topN).reverse(),
   };
-}
-
-/**
- * Suggest line combinations based on chemistry
- */
-export function suggestLineCombinations(
-  matrix: ChemistryMatrix,
-  forwardIds: number[],
-  defenseIds: number[],
-  playerNames: Map<number, string>
-): {
-  forwardLines: LineCombinationChemistry[];
-  defensePairs: LineCombinationChemistry[];
-} {
-  // This is a simplified greedy approach
-  // For optimal line combinations, you'd want a more sophisticated algorithm
-
-  const usedForwards = new Set<number>();
-  const forwardLines: LineCombinationChemistry[] = [];
-
-  // Build forward lines (3 players each) greedily by chemistry
-  while (forwardLines.length < 4 && usedForwards.size < forwardIds.length - 2) {
-    const availableForwards = forwardIds.filter((id) => !usedForwards.has(id));
-    if (availableForwards.length < 3) break;
-
-    // Find best pair among available
-    let bestPair: [number, number] | null = null;
-    let bestChemistry = -1;
-
-    for (let i = 0; i < availableForwards.length; i++) {
-      for (let j = i + 1; j < availableForwards.length; j++) {
-        const key = getPairKey(availableForwards[i], availableForwards[j]);
-        const chemistry = matrix.matrix.get(key);
-        if (chemistry && chemistry.chemistryIndex > bestChemistry) {
-          bestChemistry = chemistry.chemistryIndex;
-          bestPair = [availableForwards[i], availableForwards[j]];
-        }
-      }
-    }
-
-    if (!bestPair) break;
-
-    // Find best third player for this pair
-    const remainingForwards = availableForwards.filter(
-      (id) => id !== bestPair![0] && id !== bestPair![1]
-    );
-
-    let bestThird: number | null = null;
-    let bestThirdScore = -1;
-
-    for (const candidate of remainingForwards) {
-      const chem1 = matrix.matrix.get(getPairKey(bestPair[0], candidate));
-      const chem2 = matrix.matrix.get(getPairKey(bestPair[1], candidate));
-      const avgChem = ((chem1?.chemistryIndex || 50) + (chem2?.chemistryIndex || 50)) / 2;
-      if (avgChem > bestThirdScore) {
-        bestThirdScore = avgChem;
-        bestThird = candidate;
-      }
-    }
-
-    if (bestThird) {
-      const lineIds = [bestPair[0], bestPair[1], bestThird];
-      lineIds.forEach((id) => usedForwards.add(id));
-      forwardLines.push(
-        evaluateLineCombination(matrix, lineIds, playerNames, 'forward')
-      );
-    }
-  }
-
-  // Build defense pairs similarly
-  const usedDefense = new Set<number>();
-  const defensePairs: LineCombinationChemistry[] = [];
-
-  while (defensePairs.length < 3 && usedDefense.size < defenseIds.length - 1) {
-    const availableDefense = defenseIds.filter((id) => !usedDefense.has(id));
-    if (availableDefense.length < 2) break;
-
-    let bestPair: [number, number] | null = null;
-    let bestChemistry = -1;
-
-    for (let i = 0; i < availableDefense.length; i++) {
-      for (let j = i + 1; j < availableDefense.length; j++) {
-        const key = getPairKey(availableDefense[i], availableDefense[j]);
-        const chemistry = matrix.matrix.get(key);
-        if (chemistry && chemistry.chemistryIndex > bestChemistry) {
-          bestChemistry = chemistry.chemistryIndex;
-          bestPair = [availableDefense[i], availableDefense[j]];
-        }
-      }
-    }
-
-    if (bestPair) {
-      bestPair.forEach((id) => usedDefense.add(id));
-      defensePairs.push(
-        evaluateLineCombination(matrix, bestPair, playerNames, 'defense')
-      );
-    } else {
-      break;
-    }
-  }
-
-  return { forwardLines, defensePairs };
 }

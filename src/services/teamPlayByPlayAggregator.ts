@@ -6,6 +6,8 @@
  */
 
 import { fetchGamePlayByPlay, convertToShotAttempt, type ShotEvent, type ShotAttempt } from './playByPlayService';
+import { buildAttackSequences } from './playStyleAnalytics';
+import type { AttackSequence } from '../types/playStyle';
 import { CacheManager, ANALYTICS_CACHE } from '../utils/cacheUtils';
 
 export interface TeamShotAggregate {
@@ -204,6 +206,9 @@ export interface TeamShotLocations {
   shotsFor: ShotAttempt[];
   shotsAgainst: ShotAttempt[];
   gamesAnalyzed: number;
+  // Attack sequences for the team — used by Archetype Efficiency Matrix
+  // and other sequence-aware visuals. Concatenated across games.
+  sequences: AttackSequence[];
 }
 
 /**
@@ -228,6 +233,7 @@ export async function fetchTeamShotLocations(
 
   const shotsFor: ShotAttempt[] = [];
   const shotsAgainst: ShotAttempt[] = [];
+  const sequences: AttackSequence[] = [];
   let gamesAnalyzed = 0;
 
   // Process games in batches
@@ -248,14 +254,60 @@ export async function fetchTeamShotLocations(
       const playByPlay = result.value;
       gamesAnalyzed++;
 
-      // Collect shot locations
+      // Build a monotonic timeline of (period*1e6 + secs) → home/away
+      // scores by walking all events in order. Each shot looks up its
+      // own timestamp and tags itself with score state from the team's
+      // perspective.
+      const scoreline: Array<{ t: number; h: number; a: number }> = [{ t: -1, h: 0, a: 0 }];
+      let home = 0, away = 0;
+      const parseTime = (p: number, t: string) => {
+        const [mm, ss] = (t || '00:00').split(':').map(v => parseInt(v, 10) || 0);
+        return (p || 1) * 1_000_000 + mm * 60 + ss;
+      };
+      for (const ev of (playByPlay.allEvents || [])) {
+        if (ev.typeDescKey === 'goal') {
+          const ts = parseTime(ev.periodDescriptor?.number || 1, ev.timeInPeriod);
+          if (ev.details?.eventOwnerTeamId === playByPlay.homeTeamId) home += 1;
+          else away += 1;
+          scoreline.push({ t: ts, h: home, a: away });
+        }
+      }
+      const stateAt = (t: number, isHome: boolean) => {
+        let h = 0, a = 0;
+        for (const s of scoreline) {
+          if (s.t < t) { h = s.h; a = s.a; } else break;
+        }
+        const my = isHome ? h : a;
+        const opp = isHome ? a : h;
+        if (my > opp) return 'leading' as const;
+        if (my < opp) return 'trailing' as const;
+        return 'tied' as const;
+      };
+
+      // Collect shot locations with score state, period, time, game id,
+      // game date tagged for downstream visuals.
       for (const shot of playByPlay.shots) {
         const shotAttempt = convertToShotAttempt(shot);
+        const ts = parseTime(shot.period, shot.timeInPeriod);
+        const isHome = shot.teamId === playByPlay.homeTeamId;
+        shotAttempt.scoreState = stateAt(ts, isHome);
+        shotAttempt.period = shot.period;
+        shotAttempt.timeInPeriod = shot.timeInPeriod;
+        shotAttempt.gameId = playByPlay.gameId;
+        shotAttempt.gameDate = playByPlay.gameDate;
         if (shot.teamId === teamId) {
           shotsFor.push(shotAttempt);
         } else {
           shotsAgainst.push(shotAttempt);
         }
+      }
+
+      // Build attack sequences for THIS team from this game's PBP.
+      try {
+        const gameSequences = buildAttackSequences(playByPlay, teamId);
+        sequences.push(...gameSequences);
+      } catch (err) {
+        console.warn(`Sequence build failed for game ${playByPlay.gameId}:`, err);
       }
     }
   }
@@ -268,6 +320,7 @@ export async function fetchTeamShotLocations(
     shotsFor,
     shotsAgainst,
     gamesAnalyzed,
+    sequences,
   };
 
   // Cache for 2 hours

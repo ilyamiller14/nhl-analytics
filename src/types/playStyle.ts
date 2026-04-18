@@ -132,7 +132,6 @@ export interface FlowFieldCell {
   // Event counts
   eventCount: number;
   shotCount: number;
-  passCount: number;
   turnoverCount: number;
 }
 
@@ -423,7 +422,7 @@ export interface AttackProfile {
   shootingDepth: number;        // Inverted shot distance (closer = higher)
 
   // Classification
-  primaryStyle: 'Speed' | 'Cycle' | 'Perimeter' | 'Slot-Focused' | 'Balanced';
+  primaryStyle: 'Speed' | 'Slot-Focused' | 'Sniper' | 'Depth' | 'Balanced' | 'Point Shot' | 'Activation' | 'Accurate';
   styleStrength: number;        // 0-100 how distinct
 }
 
@@ -512,6 +511,11 @@ export interface AttackDNAv2 {
   totalShots: number;
   totalGoals: number;
   gamesAnalyzed: number;
+
+  // Sequences exposed for downstream vizes (Archetype Efficiency
+  // Matrix). Kept optional so older callers that don't need them
+  // aren't required to build them.
+  sequences?: AttackSequence[];
 
   // Trends (optional - loaded separately)
   seasonTrend?: SeasonTrend;

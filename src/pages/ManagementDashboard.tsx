@@ -12,24 +12,23 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { fetchTeamData, type TeamData } from '../services/teamStatsService';
 import { fetchGamePlayByPlay, fetchGameShifts, enrichShotsWithOnIcePlayers, type GamePlayByPlay } from '../services/playByPlayService';
 import { fetchCachedTeamPBP, convertCachedToGamePBP } from '../services/cachedDataService';
 import {
-  computeTeamEvolutionWithCustomWindows,
-  getPlayersWithMajorChanges,
-  type TeamEvolutionComparison,
-  type BehaviorChange,
-} from '../services/behavioralEvolutionAnalytics';
-import {
   buildChemistryMatrix,
   findChemistryExtremes,
   type ChemistryMatrix,
+  type ChemistryPositionGroup,
   type PlayerPairChemistry,
 } from '../services/chemistryAnalytics';
 import LineCombinationChart from '../components/charts/LineCombinationChart';
+import LinemateWithWithout from '../components/charts/LinemateWithWithout';
 import RosterBalanceChart from '../components/charts/RosterBalanceChart';
+import CapSummaryBar from '../components/CapSummaryBar';
+import TeamCapChart from '../components/charts/TeamCapChart';
+import TeamContractsTable from '../components/TeamContractsTable';
 import {
   analyzeLineCombinations,
   type LineComboAnalysis,
@@ -38,40 +37,55 @@ import {
   analyzeRosterBalance,
   type RosterBalanceData,
 } from '../services/rosterBalanceAnalytics';
+import {
+  getTeamContracts,
+  getTeamCapSummary,
+  getTeamCapCommitments,
+} from '../services/contractService';
+import { computePlayerSurplus } from '../services/surplusValueService';
+import type {
+  PlayerSurplus,
+  TeamContractData,
+  TeamCapSummary,
+  SeasonCapCommitment,
+} from '../types/contract';
 import { API_CONFIG } from '../config/api';
 import { getCurrentSeason } from '../utils/seasonUtils';
 import './ManagementDashboard.css';
 
-// Period options for the dropdown
-const PERIOD_OPTIONS = [
-  { value: 5, label: 'Last 5 Games' },
-  { value: 10, label: 'Last 10 Games' },
-  { value: 15, label: 'Last 15 Games' },
-  { value: 20, label: 'Last 20 Games' },
-];
-
 import { NHL_TEAMS } from '../constants/teams';
 
-type ViewMode = 'team' | 'chemistry' | 'lines' | 'roster';
+type ViewMode = 'chemistry' | 'lines' | 'roster' | 'contracts';
 
 export default function ManagementDashboard() {
   const { teamAbbrev } = useParams<{ teamAbbrev: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isContractsRoute = location.pathname.startsWith('/contracts');
 
-  const [viewMode, setViewMode] = useState<ViewMode>('team');
+  const [viewMode, setViewMode] = useState<ViewMode>(isContractsRoute ? 'contracts' : 'chemistry');
   const [teamData, setTeamData] = useState<TeamData | null>(null);
   const [playByPlayData, setPlayByPlayData] = useState<GamePlayByPlay[]>([]);
-  const [playerInfo, setPlayerInfo] = useState<{ ids: number[]; names: Map<number, string> } | null>(null);
-  const [teamEvolution, setTeamEvolution] = useState<TeamEvolutionComparison | null>(null);
+  const [playerInfo, setPlayerInfo] = useState<{
+    ids: number[];
+    names: Map<number, string>;
+    positions: Map<number, ChemistryPositionGroup>;
+  } | null>(null);
   const [chemistryMatrix, setChemistryMatrix] = useState<ChemistryMatrix | null>(null);
+  const [wowyPlayerId, setWowyPlayerId] = useState<number | null>(null);
   const [shiftsLoaded, setShiftsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingChemistry, setIsLoadingChemistry] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadingProgress, setLoadingProgress] = useState<string>('');
-  const [selectedPeriod, setSelectedPeriod] = useState<number>(10); // Default to last 10 games
   const [lineComboData, setLineComboData] = useState<LineComboAnalysis | null>(null);
   const [rosterBalanceData, setRosterBalanceData] = useState<RosterBalanceData | null>(null);
+  const [contractData, setContractData] = useState<TeamContractData | null>(null);
+  const [capSummary, setCapSummary] = useState<TeamCapSummary | null>(null);
+  const [capCommitments, setCapCommitments] = useState<SeasonCapCommitment[]>([]);
+  const [isLoadingContracts, setIsLoadingContracts] = useState(false);
+  const [contractsError, setContractsError] = useState<string | null>(null);
+  const [surplusMap, setSurplusMap] = useState<Map<string, PlayerSurplus>>(new Map());
   const chemistryLoadingRef = useRef(false);
 
   // Load team data when team changes (only fetches data, doesn't compute)
@@ -132,22 +146,35 @@ export default function ManagementDashboard() {
         }
         setPlayByPlayData(pbpData);
 
-        // Get player IDs from roster
-        const allPlayers = [
+        // Get player IDs from roster.
+        // Goalies are excluded from chemistry/line analysis; we only pass
+        // forwards and defensemen with their position group so chemistry
+        // pairs are constrained to F-F or D-D.
+        const allSkaters = [
           ...data.roster.forwards,
           ...data.roster.defensemen,
-          ...data.roster.goalies,
         ];
-        const playerIds = allPlayers.map((p) => p.playerId);
+        const playerIds = allSkaters.map((p) => p.playerId);
         const playerNames = new Map<number, string>();
-        allPlayers.forEach((p) => {
+        const playerPositions = new Map<number, ChemistryPositionGroup>();
+        data.roster.forwards.forEach((p) => {
           playerNames.set(p.playerId, `${p.firstName} ${p.lastName}`);
+          playerPositions.set(p.playerId, 'F');
         });
-        setPlayerInfo({ ids: playerIds, names: playerNames });
+        data.roster.defensemen.forEach((p) => {
+          playerNames.set(p.playerId, `${p.firstName} ${p.lastName}`);
+          playerPositions.set(p.playerId, 'D');
+        });
+        setPlayerInfo({ ids: playerIds, names: playerNames, positions: playerPositions });
         setShiftsLoaded(false); // Reset - shifts need to be fetched for chemistry
         setChemistryMatrix(null);
         setLineComboData(null);
         setRosterBalanceData(null);
+        setContractData(null);
+        setCapSummary(null);
+        setCapCommitments([]);
+        setContractsError(null);
+        setSurplusMap(new Map());
         chemistryLoadingRef.current = false;
         setLoadingProgress('');
       } catch (err) {
@@ -160,23 +187,6 @@ export default function ManagementDashboard() {
 
     loadData();
   }, [teamAbbrev]);
-
-  // Recompute evolution when period changes or data loads
-  useEffect(() => {
-    if (!playByPlayData.length || !teamData || !playerInfo) return;
-
-    // Compute team evolution with custom windows:
-    // Current window = last N games (selectedPeriod)
-    // Previous window = rest of season (all games before current window)
-    const evolution = computeTeamEvolutionWithCustomWindows(
-      playByPlayData,
-      teamData.info.teamId,
-      playerInfo.ids,
-      playerInfo.names,
-      selectedPeriod
-    );
-    setTeamEvolution(evolution);
-  }, [playByPlayData, teamData, playerInfo, selectedPeriod]);
 
   // Load chemistry data on-demand when Chemistry tab is selected
   // Tries pre-computed data from edge cache first, falls back to on-demand computation
@@ -231,7 +241,8 @@ export default function ManagementDashboard() {
           pbpWithShifts,
           teamData!.info.teamId,
           playerInfo!.ids,
-          playerInfo!.names
+          playerInfo!.names,
+          playerInfo!.positions
         );
         setChemistryMatrix(matrix);
         setShiftsLoaded(true);
@@ -371,6 +382,81 @@ export default function ManagementDashboard() {
     loadRosterBalance();
   }, [viewMode, teamData, rosterBalanceData]);
 
+  // Load contract data on-demand when Contracts tab is selected
+  useEffect(() => {
+    if (viewMode !== 'contracts') return;
+    if (!teamAbbrev) return;
+    if (contractData) return; // Already loaded
+
+    async function loadContracts() {
+      setIsLoadingContracts(true);
+      setContractsError(null);
+
+      try {
+        const [contracts, summary, commitments] = await Promise.all([
+          getTeamContracts(teamAbbrev!),
+          getTeamCapSummary(teamAbbrev!),
+          getTeamCapCommitments(teamAbbrev!),
+        ]);
+
+        if (!contracts || !summary) {
+          setContractsError('Contract data not available for this team.');
+          return;
+        }
+
+        setContractData(contracts);
+        setCapSummary(summary);
+        setCapCommitments(commitments);
+
+        // Compute surplus values for all skaters on the team
+        const skaters = contracts.players.filter(
+          p => p.position !== 'G' && p.status === 'active'
+        );
+        try {
+          const season = getCurrentSeason();
+          const statsUrl = `${API_CONFIG.NHL_STATS}/skater/summary?limit=-1&cayenneExp=seasonId=${season} and gameTypeId=2`;
+          const statsResp = await fetch(statsUrl);
+          if (statsResp.ok) {
+            const statsData = await statsResp.json();
+            const statsLookup = new Map<string, { points: number; gp: number }>();
+            for (const s of (statsData.data || [])) {
+              if (s.gamesPlayed >= 5 && s.positionCode !== 'G') {
+                statsLookup.set(
+                  String(s.skaterFullName).toLowerCase().replace(/\s+/g, ''),
+                  { points: s.points, gp: s.gamesPlayed }
+                );
+              }
+            }
+
+            const results = new Map<string, PlayerSurplus>();
+            await Promise.allSettled(
+              skaters.map(async (p) => {
+                const stats = statsLookup.get(p.name.toLowerCase().replace(/\s+/g, ''));
+                if (!stats) return;
+                const numId = typeof p.playerId === 'string'
+                  ? parseInt(p.playerId as string, 10) : p.playerId;
+                const surplus = await computePlayerSurplus(
+                  numId, p.name, stats.points, stats.gp, p.position
+                );
+                if (surplus) results.set(p.name, surplus);
+              })
+            );
+            setSurplusMap(results);
+          }
+        } catch {
+          // Surplus is non-critical
+        }
+      } catch (err) {
+        console.error('Error loading contract data:', err);
+        setContractsError('Failed to load contract data.');
+      } finally {
+        setIsLoadingContracts(false);
+      }
+    }
+
+    loadContracts();
+  }, [viewMode, teamAbbrev, contractData]);
+
   // Team selector view
   if (!teamAbbrev) {
     return (
@@ -384,7 +470,7 @@ export default function ManagementDashboard() {
             <button
               key={team.abbrev}
               className="team-selector-card"
-              onClick={() => navigate(`/management/${team.abbrev}`)}
+              onClick={() => navigate(`${isContractsRoute ? '/contracts' : '/management'}/${team.abbrev}`)}
             >
               <span className="team-abbrev">{team.abbrev}</span>
               <span className="team-name">{team.name}</span>
@@ -419,7 +505,7 @@ export default function ManagementDashboard() {
         </div>
         <div className="error-container">
           <p className="error-text">{error}</p>
-          <button onClick={() => navigate('/management')} className="back-button">
+          <button onClick={() => navigate(isContractsRoute ? '/contracts' : '/management')} className="back-button">
             Select Different Team
           </button>
         </div>
@@ -428,7 +514,6 @@ export default function ManagementDashboard() {
   }
 
   const teamName = teamData?.info?.teamName || teamAbbrev;
-  const majorChanges = teamEvolution ? getPlayersWithMajorChanges(teamEvolution) : [];
   const chemistryExtremes = chemistryMatrix ? findChemistryExtremes(chemistryMatrix, 5) : null;
 
   return (
@@ -451,12 +536,6 @@ export default function ManagementDashboard() {
           </div>
           <div className="view-toggle">
             <button
-              className={`toggle-btn ${viewMode === 'team' ? 'active' : ''}`}
-              onClick={() => setViewMode('team')}
-            >
-              Evolution
-            </button>
-            <button
               className={`toggle-btn ${viewMode === 'chemistry' ? 'active' : ''}`}
               onClick={() => setViewMode('chemistry')}
             >
@@ -474,12 +553,15 @@ export default function ManagementDashboard() {
             >
               Roster Balance
             </button>
+            <button
+              className={`toggle-btn ${viewMode === 'contracts' ? 'active' : ''}`}
+              onClick={() => setViewMode('contracts')}
+            >
+              Contracts
+            </button>
           </div>
         </div>
         <div className="dashboard-links">
-          <Link to={`/coaching/${teamAbbrev}`} className="dashboard-link">
-            View Coaching Dashboard
-          </Link>
           <Link to={`/attack-dna/team/${teamAbbrev}`} className="dashboard-link">
             View Attack DNA
           </Link>
@@ -491,143 +573,6 @@ export default function ManagementDashboard() {
 
       {/* Main Content */}
       <div className="dashboard-content">
-        {viewMode === 'team' && teamEvolution && (
-          <>
-            {/* Period Selector & Window Info */}
-            <section className="dashboard-section">
-              <div className="period-selector-row">
-                <h2 className="section-title">Analysis Period</h2>
-                <select
-                  className="period-select"
-                  value={selectedPeriod}
-                  onChange={(e) => setSelectedPeriod(Number(e.target.value))}
-                >
-                  {PERIOD_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <p className="section-subtitle">
-                Comparing selected period vs rest of season
-              </p>
-              <div className="window-info">
-                <div className="window-card current">
-                  <span className="window-label">Selected Period</span>
-                  <span className="window-games">{teamEvolution.currentWindow.games} games</span>
-                </div>
-                <div className="window-arrow">vs</div>
-                <div className="window-card previous">
-                  <span className="window-label">Rest of Season</span>
-                  <span className="window-games">{teamEvolution.previousWindow.games} games</span>
-                </div>
-              </div>
-            </section>
-
-            {/* Team-Level Structural Changes */}
-            <section className="dashboard-section">
-              <h2 className="section-title">Team Structural Changes</h2>
-              <p className="section-subtitle">
-                Significant changes in team play patterns
-              </p>
-
-              {teamEvolution.structuralChanges.length === 0 ? (
-                <div className="no-changes">
-                  No significant structural changes detected between windows.
-                </div>
-              ) : (
-                <div className="changes-grid">
-                  {teamEvolution.structuralChanges.map((change, idx) => (
-                    <ChangeCard key={idx} change={change} />
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {/* Players with Major Changes */}
-            <section className="dashboard-section">
-              <h2 className="section-title">Players Requiring Attention</h2>
-              <p className="section-subtitle">
-                Players showing major behavioral changes
-              </p>
-
-              {majorChanges.length === 0 ? (
-                <div className="no-changes">
-                  No players with major behavioral changes detected.
-                </div>
-              ) : (
-                <div className="player-alerts-list">
-                  {majorChanges.map((player) => (
-                    <div key={player.playerId} className="player-alert-card">
-                      <div className="player-alert-header">
-                        <Link
-                          to={`/player/${player.playerId}`}
-                          className="player-name-link"
-                        >
-                          {player.playerName}
-                        </Link>
-                        <span className="alert-count">
-                          {player.changes.length} major change(s)
-                        </span>
-                      </div>
-                      <div className="player-changes">
-                        {player.changes.map((change, idx) => (
-                          <div key={idx} className="mini-change">
-                            <span className="mc-metric">{change.metricLabel}</span>
-                            <span className={`mc-direction ${change.isPositive ? 'positive' : 'negative'}`}>
-                              {change.changeDirection === 'up' ? '↑' : '↓'}
-                              {change.formattedChange} ({change.formattedPrevious} → {change.formattedCurrent})
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {/* All Player Trends */}
-            <section className="dashboard-section">
-              <h2 className="section-title">All Player Trends</h2>
-              <p className="section-subtitle">
-                Overview of all roster player trends
-              </p>
-
-              <div className="player-trends-table">
-                <div className="trends-header">
-                  <span className="th-name">Player</span>
-                  <span className="th-trend">Trend</span>
-                  <span className="th-changes">Changes</span>
-                </div>
-                {teamEvolution.playerChanges
-                  .filter((p) => p.changes.length > 0)
-                  .slice(0, 15)
-                  .map((player) => (
-                    <div key={player.playerId} className="trends-row">
-                      <Link
-                        to={`/player/${player.playerId}`}
-                        className="tr-name"
-                      >
-                        {player.playerName}
-                      </Link>
-                      <span className={`tr-trend ${player.trend}`}>
-                        {player.trend === 'improving' && '↑ Improving'}
-                        {player.trend === 'declining' && '↓ Declining'}
-                        {player.trend === 'stable' && '– Stable'}
-                        {player.trend === 'mixed' && '↔ Mixed'}
-                      </span>
-                      <span className="tr-changes">
-                        {player.changes.filter((c) => c.significance !== 'minor').length} significant
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            </section>
-          </>
-        )}
-
         {viewMode === 'chemistry' && isLoadingChemistry && (
           <div className="loading-container">
             <div className="loading-spinner"></div>
@@ -683,6 +628,48 @@ export default function ManagementDashboard() {
                 </div>
               </div>
             </section>
+
+            {/* Per-Player WOWY — shows selected player's shot rate with/without each linemate */}
+            <section className="dashboard-section">
+              <h2 className="section-title">Linemate With/Without</h2>
+              <p className="section-subtitle">
+                For one player, see shot-rate when paired with each top linemate vs alone. Identifies who elevates vs depends.
+              </p>
+              <div style={{ margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <label style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Focus player:</label>
+                <select
+                  value={wowyPlayerId ?? ''}
+                  onChange={(e) => setWowyPlayerId(e.target.value ? parseInt(e.target.value, 10) : null)}
+                  style={{
+                    background: 'rgba(17, 24, 39, 0.8)',
+                    color: '#e5e7eb',
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    borderRadius: 6,
+                    padding: '6px 10px',
+                    fontSize: '0.9rem',
+                    minWidth: 220,
+                  }}
+                >
+                  <option value="">— select a player —</option>
+                  {chemistryMatrix.players.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="chart-card full-width">
+                {wowyPlayerId ? (
+                  <LinemateWithWithout
+                    focusPlayerId={wowyPlayerId}
+                    focusPlayerName={chemistryMatrix.players.find(p => p.id === wowyPlayerId)?.name}
+                    pairs={Array.from(chemistryMatrix.matrix.values())}
+                  />
+                ) : (
+                  <p style={{ color: '#94a3b8', fontSize: '0.85rem', padding: '18px' }}>
+                    Select a player above to see their linemate WOWY breakdown.
+                  </p>
+                )}
+              </div>
+            </section>
           </>
         )}
 
@@ -699,7 +686,8 @@ export default function ManagementDashboard() {
             <h2 className="section-title">Line Combination Performance</h2>
             <p className="section-subtitle">
               Forward lines and defense pairs ranked by 5v5 shot differential.
-              Based on on-ice player combinations across {lineComboData.gamesAnalyzed} games.
+              Scanned {lineComboData.gamesAnalyzed} team games — each combination's own "GP" is
+              the subset of those games the trio/pair were actually on the ice together.
             </p>
             <div className="chart-card full-width">
               <LineCombinationChart data={lineComboData} />
@@ -726,37 +714,56 @@ export default function ManagementDashboard() {
             </div>
           </section>
         )}
+
+        {/* Contracts Tab */}
+        {viewMode === 'contracts' && isLoadingContracts && (
+          <div className="loading-container">
+            <div className="loading-spinner"></div>
+            <p className="loading-text">Loading contract data...</p>
+          </div>
+        )}
+
+        {viewMode === 'contracts' && !isLoadingContracts && contractsError && (
+          <section className="dashboard-section" style={{ textAlign: 'center', padding: '3rem 1rem' }}>
+            <p style={{ color: '#94a3b8', fontSize: '1.1rem' }}>
+              {contractsError}
+            </p>
+          </section>
+        )}
+
+        {viewMode === 'contracts' && !isLoadingContracts && !contractsError && capSummary && contractData && (
+          <>
+            <section className="dashboard-section">
+              <h2 className="section-title">Cap Utilization</h2>
+              <p className="section-subtitle">
+                Salary cap overview and position breakdown
+              </p>
+              <CapSummaryBar summary={capSummary} />
+            </section>
+
+            <section className="dashboard-section">
+              <h2 className="section-title">Cap Commitments by Season</h2>
+              <p className="section-subtitle">
+                Year-by-year salary cap commitments by position group
+              </p>
+              <TeamCapChart commitments={capCommitments} capCeiling={capSummary.capCeiling} />
+            </section>
+
+            <section className="dashboard-section">
+              <h2 className="section-title">Player Contracts</h2>
+              <p className="section-subtitle">
+                {contractData.players.length} contracts &mdash; click column headers to sort
+              </p>
+              <TeamContractsTable players={contractData.players} surplusData={surplusMap} />
+            </section>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 // Helper Components
-
-function ChangeCard({ change }: { change: BehaviorChange }) {
-  const arrow = change.changeDirection === 'up' ? '↑' : '↓';
-  const sentimentClass = change.isPositive ? 'positive' : 'negative';
-
-  return (
-    <div className={`change-card ${change.significance}`}>
-      <div className="change-card-header">
-        <span className="cc-metric">{change.metricLabel}</span>
-        <span className={`cc-significance ${change.significance}`}>
-          {change.significance}
-        </span>
-      </div>
-      <div className="change-card-body">
-        <span className={`cc-direction ${sentimentClass}`}>
-          {arrow}{change.formattedChange}
-        </span>
-        <span className="cc-values">
-          {change.formattedPrevious} → {change.formattedCurrent}
-        </span>
-      </div>
-      <p className="cc-interpretation">{change.interpretation}</p>
-    </div>
-  );
-}
 
 function ChemistryCard({
   pair,
@@ -780,21 +787,34 @@ function ChemistryCard({
         </Link>
       </div>
       <div className="chem-index">
-        <span className="ci-value">{pair.chemistryIndex}</span>
-        <span className="ci-label">Chemistry Index</span>
+        <span
+          className="ci-value"
+          style={{ color: pair.shotDiffPer60Together >= 0 ? '#10b981' : '#ef4444' }}
+        >
+          {pair.shotDiffPer60Together >= 0 ? '+' : ''}{pair.shotDiffPer60Together.toFixed(2)}
+        </span>
+        <span className="ci-label">Shot Diff / 60</span>
       </div>
       <div className="chem-stats">
         <div className="chem-stat">
-          <span className="cst-label">Together</span>
-          <span className="cst-value">{pair.together.shots} shots, {pair.together.goals} goals</span>
+          <span className="cst-label">SF/60 · SA/60</span>
+          <span className="cst-value">
+            {pair.shotsPer60Together.toFixed(1)} · {pair.shotsAgainstPer60Together.toFixed(1)}
+          </span>
+        </div>
+        <div className="chem-stat">
+          <span className="cst-label">GF · GA</span>
+          <span className="cst-value">{pair.together.goals} · {pair.together.goalsAgainst}</span>
+        </div>
+        <div className="chem-stat">
+          <span className="cst-label">TOI together</span>
+          <span className="cst-value">
+            {Math.round(pair.estimatedToiTogether / 60)} min
+          </span>
         </div>
         <div className="chem-stat">
           <span className="cst-label">Shot Support</span>
           <span className="cst-value">{pair.shotSupportRate}%</span>
-        </div>
-        <div className="chem-stat">
-          <span className="cst-label">Shifts Together</span>
-          <span className="cst-value">{pair.shiftsOverlapping}</span>
         </div>
       </div>
     </div>

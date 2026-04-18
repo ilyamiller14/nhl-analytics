@@ -14,13 +14,22 @@ import { getCurrentSeason } from '../utils/seasonUtils';
 export const NHL_API_BASE_URL = API_CONFIG.NHL_WEB;
 export const NHL_SEARCH_BASE_URL = API_CONFIG.NHL_SEARCH;
 
+// NHL team ID → abbreviation mapping (current 32 teams + legacy IDs the API may return)
+const TEAM_ID_MAP: Record<number, string> = {
+  1: 'NJD', 2: 'NYI', 3: 'NYR', 4: 'PHI', 5: 'PIT', 6: 'BOS', 7: 'BUF',
+  8: 'MTL', 9: 'OTT', 10: 'TOR', 12: 'CAR', 13: 'FLA', 14: 'TBL', 15: 'WSH',
+  16: 'CHI', 17: 'DET', 18: 'NSH', 19: 'STL', 20: 'CGY', 21: 'COL', 22: 'EDM',
+  23: 'VAN', 24: 'ANA', 25: 'DAL', 26: 'LAK', 28: 'SJS', 29: 'CBJ', 30: 'MIN',
+  52: 'WPG', 53: 'ARI', 54: 'VGK', 55: 'SEA', 59: 'UTA', 68: 'UTA',
+};
+
 class NHLApiService {
   private baseUrl: string;
-  private searchUrl: string;
+  private statsUrl: string;
 
-  constructor(baseUrl: string = NHL_API_BASE_URL, searchUrl: string = NHL_SEARCH_BASE_URL) {
+  constructor(baseUrl: string = NHL_API_BASE_URL) {
     this.baseUrl = baseUrl;
-    this.searchUrl = searchUrl;
+    this.statsUrl = API_CONFIG.NHL_STATS;
   }
 
   /**
@@ -45,10 +54,9 @@ class NHLApiService {
   }
 
   /**
-   * Search for players by name
-   * Uses the NHL search API on a different domain
-   * @param query - Player name to search for
-   * @returns Array of matching players
+   * Search for players by name.
+   * Uses the NHL Stats API (/players endpoint with cayenneExp filter).
+   * The old search.d3.nhle.com endpoint is defunct.
    */
   async searchPlayers(query: string): Promise<PlayerSearchResult[]> {
     if (!query || query.trim().length < 2) {
@@ -56,22 +64,40 @@ class NHLApiService {
     }
 
     try {
+      const season = getCurrentSeason();
+      const filter = `fullName likeIgnoreCase '%${query}%'`;
+      // Sort by currentTeamId DESC so active players (non-null team) come first.
+      // The API hard-caps results at 5, so sorting is critical for short queries.
       const response = await fetch(
-        `${this.searchUrl}/search/player?culture=en-us&limit=20&q=${encodeURIComponent(query)}&active=true`
+        `${this.statsUrl}/players?cayenneExp=${encodeURIComponent(filter)}&sort=currentTeamId&dir=DESC&limit=20`
       );
 
       if (!response.ok) {
-        throw new Error(`Search API error: ${response.status}`);
+        throw new Error(`Stats API search error: ${response.status}`);
       }
 
-      const data = await response.json();
+      const json = await response.json() as { data: Array<{
+        id: number;
+        fullName: string;
+        positionCode: string;
+        currentTeamId: number | null;
+        sweaterNumber: number | null;
+      }> };
 
-      // Filter to only show active players (those with a current team)
-      const activePlayers = (data || []).filter((player: PlayerSearchResult) =>
-        player.teamAbbrev !== null && player.teamAbbrev !== undefined
-      );
-
-      return activePlayers;
+      return (json.data || [])
+        .filter(p => p.currentTeamId != null)
+        .sort((a, b) => (b.sweaterNumber != null ? 1 : 0) - (a.sweaterNumber != null ? 1 : 0))
+        .map(p => {
+          const abbrev = TEAM_ID_MAP[p.currentTeamId!] || '';
+          return {
+            playerId: p.id,
+            name: p.fullName,
+            positionCode: p.positionCode,
+            teamAbbrev: abbrev,
+            teamLogo: abbrev ? `https://assets.nhle.com/logos/nhl/svg/${abbrev}_light.svg?season=${season}` : undefined,
+            headshot: `https://assets.nhle.com/mugs/nhl/${season}/${abbrev}/${p.id}.png`,
+          };
+        });
     } catch (error) {
       console.error('Error searching players:', error);
       return [];

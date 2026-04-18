@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 import {
   calculateAdvancedMetrics,
-  calculateWAR,
   type AdvancedStats,
 } from '../utils/advancedMetrics';
 import type { ShotAttempt } from '../services/playByPlayService';
@@ -27,10 +26,8 @@ function AdvancedAnalyticsTable({
   assists,
   points,
   shots,
-  plusMinus,
   toiMinutes,
   gamesPlayed,
-  position,
   realShotsFor = [],
   realShotsAgainst = [],
   gamesAnalyzed = 0,
@@ -90,19 +87,6 @@ function AdvancedAnalyticsTable({
       hasOnIceData: false,
     };
   }, [hasRealData, realShotsFor, realShotsAgainst, goals, toiMinutes, gamesPlayed, shots, points]);
-
-  const war = useMemo(() =>
-    calculateWAR(goals, assists, plusMinus, toiMinutes, position,
-      advancedStats.hasOnIceData ? {
-        xGFor: advancedStats.expectedGoals,
-        xGAgainst: advancedStats.expectedGoalsAgainst,
-        goalsAboveExpected: advancedStats.goalsAboveExpected,
-        shotsFor: advancedStats.corsiFor,
-        shotsAgainst: advancedStats.corsiAgainst,
-      } : undefined
-    ),
-    [goals, assists, plusMinus, toiMinutes, position, advancedStats]
-  );
 
   const assists60 = toiMinutes > 0 ? (assists / toiMinutes) * 60 : 0;
 
@@ -177,13 +161,6 @@ function AdvancedAnalyticsTable({
             </tr>
           </thead>
           <tbody>
-            <tr className="highlight-row">
-              <td className="metric-name">Offensive WAR</td>
-              <td className="metric-value">{war.toFixed(2)}</td>
-              <td className="metric-desc">
-                Wins above replacement (offense + defense, weighted by position) - {war > 5 ? 'Elite' : war > 3 ? 'All-Star' : war > 1 ? 'Above Average' : war > 0 ? 'Average' : 'Below Replacement'}
-              </td>
-            </tr>
             <tr>
               <td className="metric-name">{advancedStats.hasOnIceData ? 'On-Ice xGF' : 'On-Ice xGF'}</td>
               <td className="metric-value">

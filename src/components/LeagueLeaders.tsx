@@ -93,25 +93,33 @@ function LeagueLeaders() {
             </tr>
           </thead>
           <tbody>
-            {displayedLeaders.map((leader: LeagueLeader, index: number) => (
-              <tr key={leader.playerId} className="leader-row">
-                <td className="rank-col">
-                  <span className={`rank-badge rank-${index + 1}`}>{index + 1}</span>
-                </td>
-                <td className="player-col">
-                  <Link to={`/player/${leader.playerId}`} className="player-link">
-                    {leader.name}
-                  </Link>
-                </td>
-                <td className="team-col">{leader.team}</td>
-                <td className="pos-col">
-                  <span className="position-tag">{leader.position}</span>
-                </td>
-                <td className="stat-col">
-                  <span className="stat-value">{leader.value}</span>
+            {displayedLeaders.length === 0 ? (
+              <tr>
+                <td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
+                  No leaders data available
                 </td>
               </tr>
-            ))}
+            ) : (
+              displayedLeaders.map((leader: LeagueLeader, index: number) => (
+                <tr key={leader.playerId} className="leader-row">
+                  <td className="rank-col">
+                    <span className={`rank-badge rank-${index + 1}`}>{index + 1}</span>
+                  </td>
+                  <td className="player-col">
+                    <Link to={`/player/${leader.playerId}`} className="player-link">
+                      {leader.name}
+                    </Link>
+                  </td>
+                  <td className="team-col">{leader.team}</td>
+                  <td className="pos-col">
+                    <span className="position-tag">{leader.position}</span>
+                  </td>
+                  <td className="stat-col">
+                    <span className="stat-value">{leader.value}</span>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

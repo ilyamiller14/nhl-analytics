@@ -86,7 +86,7 @@ function TeamStandings() {
                 <td className="pts-col">
                   <span className="points-value">{team.points}</span>
                 </td>
-                <td>{team.pointsPercentage.toFixed(1)}%</td>
+                <td>{(team.pointsPercentage ?? 0).toFixed(1)}%</td>
                 <td>{team.goalsFor}</td>
                 <td>{team.goalsAgainst}</td>
                 <td className="diff-col">

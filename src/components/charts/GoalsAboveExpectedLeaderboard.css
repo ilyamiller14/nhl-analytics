@@ -1,0 +1,90 @@
+.gax-leader { color: #e5e7eb; display: flex; flex-direction: column; gap: 8px; }
+.gax-title { font-size: 1rem; font-weight: 600; margin: 0; color: #f3f4f6; }
+.gax-empty { padding: 20px; border: 1px dashed #374151; border-radius: 8px; text-align: center; color: #9ca3af; font-size: 0.85rem; }
+.gax-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.gax-table thead {
+  background: rgba(30, 41, 59, 0.6);
+}
+.gax-table th, .gax-table td {
+  padding: 8px 10px;
+  text-align: right;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+.gax-th-rank, .gax-th-name, .gax-rank, .gax-name {
+  text-align: left;
+}
+.gax-th-rank { width: 32px; color: #94a3b8; }
+.gax-rank { color: #94a3b8; }
+.gax-th-name { width: 40%; }
+.gax-th {
+  color: #cbd5f5;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+.gax-th:hover { color: #f3f4f6; }
+.gax-th.active { color: #60a5fa; }
+.gax-table tbody tr:hover { background: rgba(30, 41, 59, 0.4); }
+.gax-table tbody tr.focus {
+  background: rgba(59, 130, 246, 0.14);
+  font-weight: 600;
+}
+.gax-name { color: #e5e7eb; }
+.gax-table .pos { color: #34d399; font-weight: 600; }
+.gax-table .neg { color: #f87171; font-weight: 600; }
+.gax-caption {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  padding-top: 6px;
+}
+
+/* Inline GAX bar cell */
+.gax-th-bar {
+  color: #cbd5f5;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  width: 220px;
+}
+.gax-bar-cell {
+  display: grid;
+  grid-template-columns: 1fr 52px;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px !important;
+}
+.gax-bar-track {
+  position: relative;
+  height: 14px;
+  background: rgba(55, 65, 81, 0.4);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.gax-bar-axis {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background: rgba(148, 163, 184, 0.6);
+}
+.gax-bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  opacity: 0.85;
+}
+.gax-bar-fill.pos { background: linear-gradient(to right, #34d399, #10b981); }
+.gax-bar-fill.neg { background: linear-gradient(to left, #f87171, #ef4444); }
+.gax-bar-value { text-align: left !important; font-weight: 600; }

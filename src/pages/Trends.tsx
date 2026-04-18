@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react';
 import LeagueLeaders from '../components/LeagueLeaders';
 import TeamStandings from '../components/TeamStandings';
 import LeagueAdvancedAnalytics from '../components/LeagueAdvancedAnalytics';
+import GoalieAnalyticsTable from '../components/GoalieAnalyticsTable';
 import { fetchCategoryLeaders, fetchGoalieLeaders, type LeagueLeader } from '../services/statsService';
 import { Link } from 'react-router-dom';
 import './Trends.css';
 
 function Trends() {
-  const [activeTab, setActiveTab] = useState<'leaders' | 'standings' | 'analytics' | 'trends'>('leaders');
+  const [activeTab, setActiveTab] = useState<'leaders' | 'standings' | 'analytics' | 'goalies' | 'trends'>('leaders');
 
   const [pointsLeaders, setPointsLeaders] = useState<LeagueLeader[]>([]);
   const [goalsLeaders, setGoalsLeaders] = useState<LeagueLeader[]>([]);
@@ -132,6 +133,15 @@ function Trends() {
           </button>
           <button
             role="tab"
+            aria-selected={activeTab === 'goalies'}
+            aria-controls="panel-goalies"
+            className={`tab-button ${activeTab === 'goalies' ? 'active' : ''}`}
+            onClick={() => setActiveTab('goalies')}
+          >
+            Goalies
+          </button>
+          <button
+            role="tab"
             aria-selected={activeTab === 'trends'}
             aria-controls="panel-trends"
             className={`tab-button ${activeTab === 'trends' ? 'active' : ''}`}
@@ -148,6 +158,8 @@ function Trends() {
           {activeTab === 'standings' && <TeamStandings />}
 
           {activeTab === 'analytics' && <LeagueAdvancedAnalytics />}
+
+          {activeTab === 'goalies' && <GoalieAnalyticsTable />}
 
           {activeTab === 'trends' && (
             <div className="trending-section">
@@ -241,9 +253,9 @@ function Trends() {
                     <div className="insight-content">
                       <h4>Physical Leaders</h4>
                       <p>Top players in hits and blocked shots</p>
-                      <Link to="/search" className="insight-link">
+                      <button onClick={() => setActiveTab('leaders')} className="insight-link">
                         View Leaders →
-                      </Link>
+                      </button>
                     </div>
                   </div>
 
@@ -251,9 +263,9 @@ function Trends() {
                     <div className="insight-content">
                       <h4>Power Play</h4>
                       <p>Top power play goal scorers</p>
-                      <Link to="/search" className="insight-link">
+                      <button onClick={() => setActiveTab('leaders')} className="insight-link">
                         View Stats →
-                      </Link>
+                      </button>
                     </div>
                   </div>
 
@@ -261,9 +273,9 @@ function Trends() {
                     <div className="insight-content">
                       <h4>Shooting %</h4>
                       <p>Most efficient shooters in the league</p>
-                      <Link to="/search" className="insight-link">
+                      <button onClick={() => setActiveTab('analytics')} className="insight-link">
                         View Leaders →
-                      </Link>
+                      </button>
                     </div>
                   </div>
 
@@ -271,9 +283,9 @@ function Trends() {
                     <div className="insight-content">
                       <h4>Defensive Stars</h4>
                       <p>Top plus/minus and blocked shots</p>
-                      <Link to="/search" className="insight-link">
+                      <button onClick={() => setActiveTab('leaders')} className="insight-link">
                         View Leaders →
-                      </Link>
+                      </button>
                     </div>
                   </div>
                 </div>

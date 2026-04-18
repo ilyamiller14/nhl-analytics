@@ -169,12 +169,6 @@ export const BREAKOUT = {
   },
 } as const;
 
-// Royal Road Pass
-export const ROYAL_ROAD = {
-  MIN_HORIZONTAL_DISTANCE: 20,  // Cross-ice distance in feet
-  MIN_X_FOR_SLOT: 69,           // Must end in slot area
-} as const;
-
 // Visualization Colors
 export const COLORS = {
   DANGER: {

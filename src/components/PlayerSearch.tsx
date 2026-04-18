@@ -51,9 +51,9 @@ function PlayerSearch({ onPlayerSelect, placeholder, autoFocus }: PlayerSearchPr
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Show results when data is available
+  // Show results dropdown when query is long enough and not loading
   useEffect(() => {
-    if (results.length > 0 && query.length >= 2) {
+    if (query.length >= 2) {
       setShowResults(true);
     } else {
       setShowResults(false);

@@ -33,6 +33,12 @@ interface AttackDNAv2Props {
   showZoneDistribution?: boolean;
   showProfile?: boolean;
   showMetrics?: boolean;
+  /**
+   * Label for the speed axis. When `'Skating Speed'` the value is
+   * NHL EDGE–derived burstsOver22 rank. When `'Tempo'` it's the
+   * possession-to-shot time percentile (fallback only).
+   */
+  speedAxisLabel?: 'Skating Speed' | 'Tempo';
 }
 
 // ============================================================================
@@ -69,6 +75,7 @@ export default function AttackDNAv2({
   showZoneDistribution = true,
   showProfile = true,
   showMetrics = true,
+  speedAxisLabel = 'Tempo',
 }: AttackDNAv2Props) {
   const [hoveredZone, setHoveredZone] = useState<ShotZone | null>(null);
   const [selectedResult, setSelectedResult] = useState<ShotLocation['result'] | 'all'>('all');
@@ -173,7 +180,7 @@ export default function AttackDNAv2({
     const radius = size * 0.38;
 
     const axes = [
-      { key: 'attackSpeed', label: 'Speed', angle: -90 },
+      { key: 'attackSpeed', label: speedAxisLabel, angle: -90 },
       { key: 'dangerZoneFocus', label: 'Danger', angle: 0 },
       { key: 'shootingDepth', label: 'Depth', angle: 90 },
       { key: 'shootingAccuracy', label: 'Shooting', angle: 180 },

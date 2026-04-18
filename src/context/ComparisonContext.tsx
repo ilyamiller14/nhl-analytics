@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import type { PlayerLandingResponse } from '../types/api';
 import type { SeasonStats } from '../types/stats';
 
@@ -33,8 +33,34 @@ function getCurrentSeasonId(): number {
   return startYear * 10000 + (startYear + 1);
 }
 
+function loadEntriesFromStorage(): ComparisonEntry[] {
+  try {
+    const stored = sessionStorage.getItem('comparison-entries');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return [];
+}
+
+function saveEntriesToStorage(entries: ComparisonEntry[]) {
+  try {
+    sessionStorage.setItem('comparison-entries', JSON.stringify(entries));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export function ComparisonProvider({ children }: { children: ReactNode }) {
-  const [entries, setEntries] = useState<ComparisonEntry[]>([]);
+  const [entries, setEntries] = useState<ComparisonEntry[]>(loadEntriesFromStorage);
+
+  // Persist entries to sessionStorage
+  useEffect(() => {
+    saveEntriesToStorage(entries);
+  }, [entries]);
 
   const addPlayer = useCallback((player: PlayerLandingResponse, season?: number) => {
     setEntries((prev) => {

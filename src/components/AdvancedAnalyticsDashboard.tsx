@@ -3,13 +3,11 @@
  *
  * Comprehensive display of all advanced analytics:
  * - xG metrics
- * - Royal road passes
  * - Defensive coverage
  */
 
 import { useMemo } from 'react';
 import type { AdvancedPlayerAnalytics } from '../hooks/useAdvancedPlayerAnalytics';
-import RoyalRoadInsights from './RoyalRoadInsights';
 import './AdvancedAnalyticsDashboard.css';
 
 interface AdvancedAnalyticsDashboardProps {
@@ -24,7 +22,6 @@ export default function AdvancedAnalyticsDashboard({
   const {
     xGMetrics,
     individualXG,
-    royalRoadPasses,
     defensiveAnalytics,
     totalGames,
     totalShots,
@@ -106,16 +103,6 @@ export default function AdvancedAnalyticsDashboard({
           </div>
         </div>
       </section>
-
-      {/* Royal Road Passes Section */}
-      {royalRoadPasses.totalRoyalRoadPasses > 0 && (
-        <section className="analytics-section">
-          <RoyalRoadInsights
-            royalRoadPasses={royalRoadPasses.royalRoadPasses}
-            playerName={playerName}
-          />
-        </section>
-      )}
 
       {/* Defensive Coverage Section */}
       <section className="analytics-section">

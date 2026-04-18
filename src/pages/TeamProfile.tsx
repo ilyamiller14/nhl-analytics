@@ -19,11 +19,8 @@ import {
 } from '../services/teamStatsService';
 import {
   calculateTeamAnalytics,
-  getRatingTier,
-  getRatingColor,
   type TeamAdvancedAnalytics,
 } from '../services/teamAnalytics';
-import { getLeagueAverages, type LeagueAverages } from '../services/leagueAveragesService';
 import {
   fetchTeamRealAnalytics,
   fetchTeamShotLocations,
@@ -42,6 +39,10 @@ import type {
 } from '../types/edge';
 import ShotChart, { type Shot } from '../components/charts/ShotChart';
 import ZoneTimeChart from '../components/charts/ZoneTimeChart';
+// Deep Analytics (April 2026)
+import GoalsAboveExpectedLeaderboard from '../components/charts/GoalsAboveExpectedLeaderboard';
+import SeasonShotQualityPulse from '../components/charts/SeasonShotQualityPulse';
+import ArchetypeEfficiencyMatrix from '../components/charts/ArchetypeEfficiencyMatrix';
 import './TeamProfile.css';
 
 function TeamProfile() {
@@ -54,7 +55,7 @@ function TeamProfile() {
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'schedule' | 'analytics' | 'edge'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'schedule' | 'analytics' | 'edge' | 'deep'>('overview');
   const [realAnalytics, setRealAnalytics] = useState<TeamShotAggregate | null>(null);
   const [shotLocations, setShotLocations] = useState<TeamShotLocations | null>(null);
   const [isLoadingRealAnalytics, setIsLoadingRealAnalytics] = useState(false);
@@ -151,17 +152,11 @@ function TeamProfile() {
     loadEdgeData();
   }, [teamData?.info?.teamId]);
 
-  // Fetch real league averages for comparison
-  const [leagueAvg, setLeagueAvg] = useState<LeagueAverages | null>(null);
-  useEffect(() => {
-    getLeagueAverages().then(setLeagueAvg);
-  }, []);
-
   // Calculate advanced analytics - must be called before early returns (hooks rule)
   const analytics: TeamAdvancedAnalytics | null = useMemo(() => {
     if (!teamData?.stats) return null;
-    return calculateTeamAnalytics(teamData.stats, leagueAvg);
-  }, [teamData?.stats, leagueAvg]);
+    return calculateTeamAnalytics(teamData.stats);
+  }, [teamData?.stats]);
 
   if (isLoading) {
     return (
@@ -189,6 +184,10 @@ function TeamProfile() {
   }
 
   const { info, stats, roster, schedule } = teamData;
+  const rosterNameLookup = new Map<number, string>();
+  for (const p of [...roster.forwards, ...roster.defensemen, ...roster.goalies]) {
+    rosterNameLookup.set(p.playerId, p.fullName);
+  }
   const recentGames = schedule.filter((g) => g.gameState === 'OFF' || g.gameState === 'FINAL').slice(-10);
   const upcomingGames = schedule.filter((g) => g.gameState === 'FUT').slice(0, 5);
 
@@ -234,7 +233,7 @@ function TeamProfile() {
               <span className="quick-stat-label">Points</span>
             </div>
             <div className="quick-stat">
-              <span className="quick-stat-value">{stats.pointsPercentage.toFixed(1)}%</span>
+              <span className="quick-stat-value">{(stats.pointsPercentage ?? 0).toFixed(1)}%</span>
               <span className="quick-stat-label">Points %</span>
             </div>
             <div className="quick-stat">
@@ -289,6 +288,12 @@ function TeamProfile() {
             >
               EDGE {isLoadingEdge && <span className="loading-indicator" />}
             </button>
+            <button
+              className={`team-tab ${activeTab === 'deep' ? 'active' : ''}`}
+              onClick={() => setActiveTab('deep')}
+            >
+              Deep Analytics
+            </button>
             <Link
               to={`/attack-dna/team/${teamAbbrev}`}
               className="team-tab attack-dna-link"
@@ -306,23 +311,23 @@ function TeamProfile() {
                 <h2 className="section-title">Team Statistics</h2>
                 <div className="team-stats-grid">
                   <div className="team-stat-card">
-                    <span className="stat-value">{stats.goalsForPerGame.toFixed(2)}</span>
+                    <span className="stat-value">{(stats.goalsForPerGame ?? 0).toFixed(2)}</span>
                     <span className="stat-label">Goals For / GP</span>
                   </div>
                   <div className="team-stat-card">
-                    <span className="stat-value">{stats.goalsAgainstPerGame.toFixed(2)}</span>
+                    <span className="stat-value">{(stats.goalsAgainstPerGame ?? 0).toFixed(2)}</span>
                     <span className="stat-label">Goals Against / GP</span>
                   </div>
                   <div className="team-stat-card">
-                    <span className="stat-value">{stats.powerPlayPercentage.toFixed(1)}%</span>
+                    <span className="stat-value">{(stats.powerPlayPercentage ?? 0).toFixed(1)}%</span>
                     <span className="stat-label">Power Play %</span>
                   </div>
                   <div className="team-stat-card">
-                    <span className="stat-value">{stats.penaltyKillPercentage.toFixed(1)}%</span>
+                    <span className="stat-value">{(stats.penaltyKillPercentage ?? 0).toFixed(1)}%</span>
                     <span className="stat-label">Penalty Kill %</span>
                   </div>
                   <div className="team-stat-card">
-                    <span className="stat-value">{stats.faceoffWinPercentage.toFixed(1)}%</span>
+                    <span className="stat-value">{(stats.faceoffWinPercentage ?? 0).toFixed(1)}%</span>
                     <span className="stat-label">Faceoff Win %</span>
                   </div>
                   <div className="team-stat-card">
@@ -575,52 +580,9 @@ function TeamProfile() {
           {/* Analytics Tab */}
           {activeTab === 'analytics' && analytics && (
             <div className="tab-content">
-              {/* Team Ratings */}
+              {/* Scoring - real goal counts from team stats */}
               <section className="team-section">
-                <h2 className="section-title">Team Ratings</h2>
-                <div className="ratings-grid">
-                  <div className="rating-card">
-                    <div className="rating-circle" style={{ borderColor: getRatingColor(analytics.overallRating) }}>
-                      <span className="rating-value">{analytics.overallRating}</span>
-                    </div>
-                    <span className="rating-label">Overall</span>
-                    <span className="rating-tier" style={{ color: getRatingColor(analytics.overallRating) }}>
-                      {getRatingTier(analytics.overallRating)}
-                    </span>
-                  </div>
-                  <div className="rating-card">
-                    <div className="rating-circle" style={{ borderColor: getRatingColor(analytics.offenseRating) }}>
-                      <span className="rating-value">{analytics.offenseRating}</span>
-                    </div>
-                    <span className="rating-label">Offense</span>
-                    <span className="rating-tier" style={{ color: getRatingColor(analytics.offenseRating) }}>
-                      {getRatingTier(analytics.offenseRating)}
-                    </span>
-                  </div>
-                  <div className="rating-card">
-                    <div className="rating-circle" style={{ borderColor: getRatingColor(analytics.defenseRating) }}>
-                      <span className="rating-value">{analytics.defenseRating}</span>
-                    </div>
-                    <span className="rating-label">Defense</span>
-                    <span className="rating-tier" style={{ color: getRatingColor(analytics.defenseRating) }}>
-                      {getRatingTier(analytics.defenseRating)}
-                    </span>
-                  </div>
-                  <div className="rating-card">
-                    <div className="rating-circle" style={{ borderColor: getRatingColor(analytics.specialTeamsRating) }}>
-                      <span className="rating-value">{analytics.specialTeamsRating}</span>
-                    </div>
-                    <span className="rating-label">Special Teams</span>
-                    <span className="rating-tier" style={{ color: getRatingColor(analytics.specialTeamsRating) }}>
-                      {getRatingTier(analytics.specialTeamsRating)}
-                    </span>
-                  </div>
-                </div>
-              </section>
-
-              {/* Expected Goals - requires play-by-play data */}
-              <section className="team-section">
-                <h2 className="section-title">Expected Goals</h2>
+                <h2 className="section-title">Scoring</h2>
                 {isLoadingRealAnalytics ? (
                   <div className="analytics-loading">
                     <div className="loading-spinner small"></div>
@@ -748,25 +710,13 @@ function TeamProfile() {
                 </div>
               </section>
 
-              {/* Projections */}
+              {/* Points Pace - simple linear projection of current points/game over 82 games */}
               <section className="team-section">
-                <h2 className="section-title">Season Projections</h2>
+                <h2 className="section-title">Points Pace</h2>
                 {(() => {
                   const gp = stats.gamesPlayed || 1;
-                  const gamesRemaining = 82 - gp;
                   const pointsPace = analytics.pointsPace;
                   const ptsPerGame = stats.points / gp;
-                  // Historical playoff cutoff: ~96 pts (Eastern), ~95 pts (Western), use 96 as default
-                  const playoffCutoff = 96;
-                  // Points needed from remaining games
-                  const pointsNeeded = Math.max(0, playoffCutoff - stats.points);
-                  const ptsPerGameNeeded = gamesRemaining > 0 ? pointsNeeded / gamesRemaining : 0;
-                  // Playoff probability: compare pace to cutoff using logistic function
-                  // Centered at cutoff, steepness increases as season progresses
-                  const steepness = 0.1 + (gp / 82) * 0.2; // Gets steeper later in season
-                  const playoffProb = Math.min(99, Math.max(1,
-                    Math.round(100 / (1 + Math.exp(-steepness * (pointsPace - playoffCutoff))))
-                  ));
                   return (
                     <div className="projection-grid">
                       <div className="projection-card">
@@ -774,27 +724,6 @@ function TeamProfile() {
                         <div className="projection-label">82-Game Points Pace</div>
                         <div className="projection-detail" style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '4px' }}>
                           {stats.points} pts in {gp} GP • {ptsPerGame.toFixed(2)} pts/game
-                        </div>
-                      </div>
-                      <div className="projection-card">
-                        <div className="projection-value">{playoffProb}%</div>
-                        <div className="projection-label">Playoff Probability</div>
-                        <div className="projection-bar">
-                          <div
-                            className="projection-fill"
-                            style={{
-                              width: `${playoffProb}%`,
-                              backgroundColor: playoffProb >= 75 ? '#10b981' :
-                                               playoffProb >= 50 ? '#3b82f6' :
-                                               playoffProb >= 25 ? '#f59e0b' : '#ef4444'
-                            }}
-                          />
-                        </div>
-                        <div className="projection-detail" style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '4px' }}>
-                          {gamesRemaining > 0
-                            ? `Need ${pointsNeeded} pts in ${gamesRemaining} games (${ptsPerGameNeeded.toFixed(2)} pts/gm) to reach ~${playoffCutoff} pt cutoff`
-                            : `Season complete — ${stats.points >= playoffCutoff ? 'above' : 'below'} ~${playoffCutoff} pt historical cutoff`
-                          }
                         </div>
                       </div>
                     </div>
@@ -959,7 +888,7 @@ function TeamProfile() {
                             <span className="analytics-stat-detail">Rank: {allPos.avgShotSpeed.rank}/32</span>
                           </div>
                           <div className="analytics-stat-card">
-                            <span className="analytics-stat-value">{allPos.shotAttempts90To100.value + allPos.shotAttemptsOver100.value}</span>
+                            <span className="analytics-stat-value">{(allPos.shotAttempts90To100?.value ?? 0) + (allPos.shotAttemptsOver100?.value ?? 0)}</span>
                             <span className="analytics-stat-label">Shots 90+ mph</span>
                             <span className="analytics-stat-detail">Rank: {allPos.shotAttempts90To100.rank}/32</span>
                           </div>
@@ -1090,6 +1019,50 @@ function TeamProfile() {
                     Data from NHL EDGE player tracking system
                   </p>
                 </>
+              )}
+            </div>
+          )}
+
+          {/* Deep Analytics Tab — team-level residuals, finishing leaderboard, score-state table */}
+          {activeTab === 'deep' && (
+            <div className="team-tab-content deep-analytics">
+              <h2 className="section-title">Deep Analytics</h2>
+              <p className="section-description">
+                Analytics-desk views — finishing leaderboard, score-state shot quality, and xG residual maps for and against. All computed from recent game play-by-play.
+              </p>
+
+              {shotLocations && shotLocations.shotsFor.length > 0 && (
+                <div className="deep-panel">
+                  <SeasonShotQualityPulse
+                    title="Season Shot Quality Pulse"
+                    shots={shotLocations.shotsFor}
+                  />
+                </div>
+              )}
+
+              {shotLocations && shotLocations.sequences.length > 0 && (
+                <div className="deep-panel">
+                  <ArchetypeEfficiencyMatrix
+                    title="Play archetype mix & conversion"
+                    sequences={shotLocations.sequences}
+                  />
+                </div>
+              )}
+
+              {shotLocations && shotLocations.shotsFor.length > 0 && (
+                <div className="deep-panel">
+                  <GoalsAboveExpectedLeaderboard
+                    title={`Finishing leaderboard — last ${shotLocations.gamesAnalyzed} games`}
+                    shots={shotLocations.shotsFor}
+                    nameLookup={rosterNameLookup}
+                  />
+                </div>
+              )}
+
+              {!shotLocations && (
+                <div className="empty-state">
+                  <p>Deep analytics require shot data. Still loading or unavailable for this team.</p>
+                </div>
               )}
             </div>
           )}
