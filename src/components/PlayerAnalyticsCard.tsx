@@ -187,10 +187,10 @@ function getArchetype(axes: DNAAxis[], isDefenseman: boolean): string {
 }
 
 function PlayerDNARadar({ axes, archetype }: { axes: DNAAxis[]; archetype: string }) {
-  const size = 140;
+  const size = 160;
   const cx = size / 2;
-  const cy = 62; // offset up slightly to leave room for label
-  const r = 50;
+  const cy = 70; // offset up slightly to leave room for label
+  const r = 46;
   const refR = r * 0.5; // 50th percentile reference
 
   // 4 axis directions: top, right, bottom, left
@@ -218,7 +218,7 @@ function PlayerDNARadar({ axes, archetype }: { axes: DNAAxis[]; archetype: strin
   const refPolygon = refPoints.map(p => `${p.x},${p.y}`).join(' ');
 
   // Label positions (pushed outward from axis endpoints)
-  const labelOffset = 14;
+  const labelOffset = 10;
   const labels = axes.map((axis, i) => ({
     text: axis.label,
     x: cx + dirs[i].dx * (r + labelOffset),
@@ -230,7 +230,7 @@ function PlayerDNARadar({ axes, archetype }: { axes: DNAAxis[]; archetype: strin
 
   return (
     <div className="player-dna-container">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow: 'visible' }}>
         {/* Axis lines */}
         {dirs.map((d, i) => (
           <line
@@ -259,7 +259,7 @@ function PlayerDNARadar({ axes, archetype }: { axes: DNAAxis[]; archetype: strin
             key={i} x={l.x} y={l.y}
             textAnchor={l.anchor as any}
             dominantBaseline={l.baseline as any}
-            fill="rgba(255,255,255,0.7)" fontSize="7.5" fontWeight="600"
+            fill="rgba(255,255,255,0.85)" fontSize="10" fontWeight="600"
             fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
           >
             {l.text}
@@ -286,7 +286,7 @@ function AttackDnaMiniRadar({
 }) {
   const cx = size / 2;
   const cy = size / 2;
-  const r = size / 2 - 22; // leave room for axis labels
+  const r = size / 2 - 32; // leave room for axis labels + percentile value
   const refR = r * 0.5;    // league median ring
 
   // Axis order around the circle: Speed (top), Danger (right), Shooting
@@ -312,7 +312,7 @@ function AttackDnaMiniRadar({
   const refPolygon = refPoints.map(p => `${p.x},${p.y}`).join(' ');
   const outerPolygon = outerPoints.map(p => `${p.x},${p.y}`).join(' ');
 
-  const labelOffset = 12;
+  const labelOffset = 10;
   const labelEls = labels.map((text, i) => ({
     text,
     value: Math.round(values[i]),
@@ -323,7 +323,13 @@ function AttackDnaMiniRadar({
   }));
 
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="attack-dna-radar">
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      className="attack-dna-radar"
+      style={{ overflow: 'visible' }}
+    >
       {/* Axis lines */}
       {dirs.map((d, i) => (
         <line
@@ -350,16 +356,16 @@ function AttackDnaMiniRadar({
             x={l.x} y={l.y}
             textAnchor={l.anchor as any}
             dominantBaseline={l.baseline as any}
-            fill="rgba(255,255,255,0.75)" fontSize="8" fontWeight="600"
+            fill="rgba(255,255,255,0.85)" fontSize="10" fontWeight="600"
             fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
           >
             {l.text}
           </text>
           <text
-            x={l.x} y={l.y + (dirs[i].dy === 0 ? 9 : dirs[i].dy * 9)}
+            x={l.x} y={l.y + (dirs[i].dy === 0 ? 11 : dirs[i].dy * 11)}
             textAnchor={l.anchor as any}
             dominantBaseline={l.baseline as any}
-            fill="#3b82f6" fontSize="7.5" fontWeight="700"
+            fill="#60a5fa" fontSize="9.5" fontWeight="700"
             fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
           >
             {l.value}
