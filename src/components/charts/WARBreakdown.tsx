@@ -170,16 +170,24 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
     },
   ];
 
+  // Convert every component to wins (component_goals / marginal goals
+  // per win). The chart is titled "Wins Above Replacement"; the bars
+  // should add to the WAR shown in the headline, not to a separate
+  // GAR figure. Goal-units are still surfaced in tooltips and in the
+  // source footer so a reader can audit either way.
+  const gpw = Math.max(0.001, s.marginalGoalsPerWin);
+  const segValuesWin = segments.map(seg => seg.value / gpw);
+
   const maxAbs = Math.max(
-    0.5,
-    ...segments.map(seg => Math.abs(seg.value)),
-    Math.abs(c.totalGAR),
+    0.05,
+    ...segValuesWin.map(v => Math.abs(v)),
+    Math.abs(result.WAR),
   );
 
   const pad = { top: 24, right: 44, bottom: 34, left: 150 };
   const plotW = width - pad.left - pad.right;
   const zeroX = pad.left + plotW / 2;
-  const pxPerGoal = plotW / 2 / maxAbs;
+  const pxPerWin = plotW / 2 / maxAbs;
   const rowHeight = 28;
   const rowGap = 5;
   const height = pad.top + segments.length * (rowHeight + rowGap) + 54 + pad.bottom;
@@ -230,12 +238,13 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
         <text x={pad.left + plotW - 8} y={pad.top - 8} textAnchor="end" fontSize={10} fill="#34d399">earns wins →</text>
 
         {segments.map((seg, i) => {
+          const wins = segValuesWin[i];
           const y = pad.top + 14 + i * (rowHeight + rowGap);
-          const absV = Math.abs(seg.value);
-          const w = absV * pxPerGoal;
-          const barX = seg.value >= 0 ? zeroX : zeroX - w;
-          const dim = seg.pending || seg.value === 0;
-          const opacity = seg.pending ? 0.25 : (seg.value === 0 ? 0.35 : 0.85);
+          const absV = Math.abs(wins);
+          const w = absV * pxPerWin;
+          const barX = wins >= 0 ? zeroX : zeroX - w;
+          const dim = seg.pending || wins === 0;
+          const opacity = seg.pending ? 0.25 : (wins === 0 ? 0.35 : 0.85);
           return (
             <g key={seg.key}>
               <text x={pad.left - 10} y={y + rowHeight / 2 + 4}
@@ -246,7 +255,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
               <rect x={barX} y={y} width={Math.max(w, 1)} height={rowHeight}
                 fill={seg.color} opacity={opacity} rx={3}>
                 <title>
-                  {`${seg.label}: ${fmt(seg.value)} goals\n${seg.desc}\nsource: ${seg.sourceLabel}`}
+                  {`${seg.label}: ${fmt(wins)} wins (${fmt(seg.value)} goals ÷ ${gpw.toFixed(2)} goals/win)\n${seg.desc}\nsource: ${seg.sourceLabel}`}
                 </title>
               </rect>
               {seg.pending ? (
@@ -263,13 +272,13 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
                   </text>
                 </g>
               ) : (
-                <text x={seg.value >= 0 ? barX + w + 6 : barX - 6}
+                <text x={wins >= 0 ? barX + w + 6 : barX - 6}
                   y={y + rowHeight / 2 + 4}
-                  textAnchor={seg.value >= 0 ? 'start' : 'end'}
+                  textAnchor={wins >= 0 ? 'start' : 'end'}
                   fontSize={12}
-                  fill={seg.value > 0 ? '#34d399' : seg.value < 0 ? '#f87171' : '#64748b'}
+                  fill={wins > 0 ? '#34d399' : wins < 0 ? '#f87171' : '#64748b'}
                   fontWeight={600}>
-                  {fmt(seg.value)}
+                  {fmt(wins)}
                 </text>
               )}
             </g>
@@ -278,43 +287,49 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
 
         {(() => {
           const y = pad.top + 14 + segments.length * (rowHeight + rowGap) + 10;
-          const totalW = Math.abs(c.totalGAR) * pxPerGoal;
-          const totalX = c.totalGAR >= 0 ? zeroX : zeroX - totalW;
+          const totalW = Math.abs(result.WAR) * pxPerWin;
+          const totalX = result.WAR >= 0 ? zeroX : zeroX - totalW;
           return (
             <g>
               <line x1={pad.left - 20} x2={pad.left + plotW}
                 y1={y - 4} y2={y - 4}
                 stroke="rgba(148, 163, 184, 0.3)" />
               <text x={pad.left - 10} y={y + rowHeight / 2 + 4}
-                textAnchor="end" fontSize={13} fill="#f3f4f6" fontWeight={700}>Total GAR</text>
+                textAnchor="end" fontSize={13} fill="#f3f4f6" fontWeight={700}>Total WAR</text>
               <rect x={totalX} y={y} width={Math.max(totalW, 1)} height={rowHeight}
-                fill={c.totalGAR >= 0 ? '#10b981' : '#dc2626'} rx={3} />
-              <text x={c.totalGAR >= 0 ? totalX + totalW + 6 : totalX - 6}
+                fill={result.WAR >= 0 ? '#10b981' : '#dc2626'} rx={3}>
+                <title>
+                  {`Total WAR: ${fmt(result.WAR)} wins (${fmt(c.totalGAR)} GAR ÷ ${gpw.toFixed(2)} goals/win)`}
+                </title>
+              </rect>
+              <text x={result.WAR >= 0 ? totalX + totalW + 6 : totalX - 6}
                 y={y + rowHeight / 2 + 4}
-                textAnchor={c.totalGAR >= 0 ? 'start' : 'end'}
+                textAnchor={result.WAR >= 0 ? 'start' : 'end'}
                 fontSize={13}
-                fill={c.totalGAR >= 0 ? '#34d399' : '#f87171'}
+                fill={result.WAR >= 0 ? '#34d399' : '#f87171'}
                 fontWeight={700}>
-                {fmt(c.totalGAR)}
+                {fmt(result.WAR)}
               </text>
             </g>
           );
         })()}
 
         {[-maxAbs, -maxAbs / 2, 0, maxAbs / 2, maxAbs].map((t, i) => {
-          const x = zeroX + t * pxPerGoal;
+          const x = zeroX + t * pxPerWin;
           const yAxis = height - pad.bottom + 4;
           return (
             <g key={`tick-${i}`}>
               <line x1={x} x2={x} y1={yAxis - 6} y2={yAxis} stroke="rgba(148,163,184,0.4)" />
               <text x={x} y={yAxis + 12} textAnchor="middle" fontSize={10} fill="#94a3b8">
-                {t >= 0 ? '+' : ''}{t.toFixed(1)}
+                {t >= 0 ? '+' : ''}{t.toFixed(2)}
               </text>
             </g>
           );
         })}
         <text x={pad.left + plotW / 2} y={height - 4} textAnchor="middle"
-          fontSize={10} fill="#94a3b8">Goals above replacement (GAR)</text>
+          fontSize={10} fill="#94a3b8">
+          Wins above replacement (each bar = component goals ÷ {gpw.toFixed(2)} goals/win)
+        </text>
       </svg>
 
       {result.notes.length > 0 && (
