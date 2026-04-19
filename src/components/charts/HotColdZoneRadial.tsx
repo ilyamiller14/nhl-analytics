@@ -132,12 +132,11 @@ export default function HotColdZoneRadial({ shots, title, size = 420, minShotsPe
   // fits inside the viewBox; viewBox height is only what the semicircle
   // actually uses so the chart doesn't leave a tall empty band up top.
   const labelPad = 24;
-  const rightLadderPad = 48; // extra width for the "ft" distance ladder
   const cx = size / 2;
   const maxR = size / 2 - labelPad;
   const cy = maxR + labelPad;
   const vbHeight = cy + 28; // room for NET label below the goal line
-  const vbWidth = size + rightLadderPad;
+  const vbWidth = size;
   const innerR = 14; // crease/goal area
 
   // Map dist bin indices to radii. 5 bins across maxR-innerR.
@@ -284,31 +283,36 @@ Residual: ${c.residual >= 0 ? '+' : ''}${c.residual.toFixed(2)}`}
           fill="#f3f4f6" stroke="#475569" strokeWidth={0.5} />
         <text x={cx} y={cy + 16} textAnchor="middle" fontSize={10} fill="#94a3b8">NET</text>
 
-        {/* Distance scale ladder on the right edge — leader marks
-            from each ring boundary to a labeled tick well clear of the
-            cells, so the unit (feet) is unambiguous. */}
+        {/* Distance labels on the centerline (straight up from net).
+            Small pill backgrounds so the text reads cleanly against
+            whatever cell color is behind it. The viewer's eye follows
+            the vertical axis from net upward; labels at each ring
+            boundary make the radial scale unambiguous. */}
         {DIST_BINS.map((b, i) => {
           const r = rMid(i);
-          const tickX = cx + maxR + 4;
-          const labelX = cx + maxR + 8;
-          const y = cy - r + 3;
+          const y = cy - r + 4;
+          const text = `${b.label} ft`;
+          const w = text.length * 5.6 + 8;
           return (
             <g key={`dist-${b.label}`}>
-              <line
-                x1={cx + r * Math.cos(angleToRadian(80))}
-                y1={cy - r * Math.sin(angleToRadian(80))}
-                x2={tickX}
-                y2={y - 3}
-                stroke="rgba(148,163,184,0.35)"
-                strokeWidth={0.6}
+              <rect
+                x={cx - w / 2}
+                y={y - 9}
+                width={w}
+                height={12}
+                rx={6}
+                fill="rgba(15, 23, 42, 0.78)"
+                stroke="rgba(148, 163, 184, 0.25)"
+                strokeWidth={0.5}
               />
               <text
-                x={labelX}
+                x={cx}
                 y={y}
-                fontSize={10}
+                textAnchor="middle"
+                fontSize={9}
                 fontWeight={600}
-                fill="#cbd5f5"
-              >{b.label} ft</text>
+                fill="#e2e8f0"
+              >{text}</text>
             </g>
           );
         })}
