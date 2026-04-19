@@ -219,10 +219,19 @@ export function computeSkaterWAR(
   //   offIceXGF60 = (team_total_xGF − player_onIce_xGF)
   //               / ((team_total_onIceTOI − player_onIce_TOI)/3600)
   //   relative_xGF60 = player_onIce_xGF60 − offIceXGF60
-  //   evOffense_goals = relative_xGF60 × player_onIce_hours
+  //   evOffense_line_goals = relative_xGF60 × player_onIce_hours
+  //   evOffense_player_goals = evOffense_line_goals × SKATER_ON_ICE_SHARE
+  //
+  // CRITICAL: scale by 1/5. Five skaters share the ice; the on-ice xG
+  // differential is the LINE's contribution, not a single player's.
+  // Without a RAPM regression to isolate individual signal, equal-share
+  // attribution is the standard quick fix (Evolving-Hockey, Hockey
+  // Graphs documented). Without this, top-pair D and 1C grade out as
+  // 50+ GAR — physically impossible for a single skater.
   //
   // If team totals aren't present in the LeagueContext yet, we fall
   // back to the older league-median baseline and note it.
+  const SKATER_ON_ICE_SHARE = 0.2;
   const onIceHours =
     row.onIceTOIAllSec && row.onIceTOIAllSec > 0
       ? row.onIceTOIAllSec / 3600
@@ -243,12 +252,12 @@ export function computeSkaterWAR(
       const offIceHours = (teamTotal.onIceTOI - row.onIceTOIAllSec) / 3600;
       if (offIceHours > 0) {
         const offIceXGF60 = offIceXGF / offIceHours;
-        evOffense = (playerXGF60 - offIceXGF60) * onIceHours;
+        evOffense = (playerXGF60 - offIceXGF60) * onIceHours * SKATER_ON_ICE_SHARE;
         evOffenseBaselineSource = 'team-relative';
       }
     }
     if (evOffenseBaselineSource === 'none' && medianXGF60 != null) {
-      evOffense = (playerXGF60 - medianXGF60) * onIceHours;
+      evOffense = (playerXGF60 - medianXGF60) * onIceHours * SKATER_ON_ICE_SHARE;
       evOffenseBaselineSource = 'league-median';
       notes.push('EV offense falling back to league-median baseline — team totals not yet computed.');
     }
@@ -271,12 +280,12 @@ export function computeSkaterWAR(
       if (offIceHours > 0) {
         const offIceXGA60 = offIceXGA / offIceHours;
         // Positive when player suppresses xGA below team rate (good D).
-        evDefense = (offIceXGA60 - playerXGA60) * onIceHours;
+        evDefense = (offIceXGA60 - playerXGA60) * onIceHours * SKATER_ON_ICE_SHARE;
         evDefenseBaselineSource = 'team-relative';
       }
     }
     if (evDefenseBaselineSource === 'none' && medianXGA60 != null) {
-      evDefense = (medianXGA60 - playerXGA60) * onIceHours;
+      evDefense = (medianXGA60 - playerXGA60) * onIceHours * SKATER_ON_ICE_SHARE;
       evDefenseBaselineSource = 'league-median';
       notes.push('EV defense falling back to league-median baseline — team totals not yet computed.');
     }

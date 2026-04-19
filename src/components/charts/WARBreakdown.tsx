@@ -102,7 +102,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
       color: SEGMENT_COLORS.evOffense,
       desc: evOffPending
         ? 'Pending: median on-ice xGF/60 missing from league_context.'
-        : `on-ice xGF − (${s.medianOnIceXGF60!.toFixed(2)} league median xGF/60) × EV-hours`,
+        : `(player on-ice xGF/60 − team off-ice xGF/60) × EV-hours × 1/5 (skater share — line credit split among 5 skaters)`,
       pending: evOffPending,
       sourceLabel: 'league_context.medianOnIceXGF60',
     },
@@ -113,7 +113,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
       color: SEGMENT_COLORS.evDefense,
       desc: evDefPending
         ? 'Pending: median on-ice xGA/60 missing from league_context.'
-        : `(${s.medianOnIceXGA60!.toFixed(2)} league median xGA/60) × EV-hours − on-ice xGA`,
+        : `(team off-ice xGA/60 − player on-ice xGA/60) × EV-hours × 1/5 (skater share)`,
       pending: evDefPending,
       sourceLabel: 'league_context.medianOnIceXGA60',
     },

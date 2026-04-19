@@ -132,10 +132,12 @@ export default function HotColdZoneRadial({ shots, title, size = 420, minShotsPe
   // fits inside the viewBox; viewBox height is only what the semicircle
   // actually uses so the chart doesn't leave a tall empty band up top.
   const labelPad = 24;
+  const rightLadderPad = 48; // extra width for the "ft" distance ladder
   const cx = size / 2;
   const maxR = size / 2 - labelPad;
   const cy = maxR + labelPad;
   const vbHeight = cy + 28; // room for NET label below the goal line
+  const vbWidth = size + rightLadderPad;
   const innerR = 14; // crease/goal area
 
   // Map dist bin indices to radii. 5 bins across maxR-innerR.
@@ -178,9 +180,25 @@ export default function HotColdZoneRadial({ shots, title, size = 420, minShotsPe
   const totalXG = cells.reduce((s, c) => s + c.xG, 0);
   const totalGAX = totalGoals - totalXG;
 
+  // Find hottest + coldest cells (require ≥4 shots so single-shot lucky
+  // bounces don't headline the takeaway).
+  const minTakeawayShots = 4;
+  const ranked = cells.filter(c => c.shots >= minTakeawayShots);
+  const hottest = ranked.length > 0
+    ? ranked.reduce((a, b) => (a.residual > b.residual ? a : b))
+    : null;
+  const coldest = ranked.length > 0
+    ? ranked.reduce((a, b) => (a.residual < b.residual ? a : b))
+    : null;
+  const cellLabel = (c: CellData) =>
+    `${ANGLE_BINS[c.angleIdx].label} · ${DIST_BINS[c.distIdx].label} ft`;
+
   return (
     <div className="hcr">
       {title && <h3 className="hcr-title">{title}</h3>}
+      <div className="hcr-sub">
+        Each cell = a shot zone (angle from net + distance in feet). Red = converts above expected from there, blue = below.
+      </div>
       <div className="hcr-summary">
         <span>{totalShots} shots</span>
         <span className="hcr-sep">·</span>
@@ -193,8 +211,33 @@ export default function HotColdZoneRadial({ shots, title, size = 420, minShotsPe
         </span>
       </div>
 
+      {(hottest || coldest) && (
+        <div className="hcr-takeaways">
+          {hottest && hottest.residual > 0 && (
+            <div className="hcr-takeaway hot">
+              <span className="hcr-takeaway-label">Hottest zone</span>
+              <span className="hcr-takeaway-val">{cellLabel(hottest)}</span>
+              <span className="hcr-takeaway-meta">
+                {hottest.shots} shots · {hottest.goals} G · xG {hottest.xG.toFixed(1)} ·
+                <span className="hcr-pos"> +{hottest.residual.toFixed(2)} G−xG</span>
+              </span>
+            </div>
+          )}
+          {coldest && coldest.residual < 0 && (
+            <div className="hcr-takeaway cold">
+              <span className="hcr-takeaway-label">Coldest zone</span>
+              <span className="hcr-takeaway-val">{cellLabel(coldest)}</span>
+              <span className="hcr-takeaway-meta">
+                {coldest.shots} shots · {coldest.goals} G · xG {coldest.xG.toFixed(1)} ·
+                <span className="hcr-neg"> {coldest.residual.toFixed(2)} G−xG</span>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       <svg
-        viewBox={`0 0 ${size} ${vbHeight}`}
+        viewBox={`0 0 ${vbWidth} ${vbHeight}`}
         width="100%"
         height="auto"
         preserveAspectRatio="xMidYMid meet"
@@ -241,16 +284,34 @@ Residual: ${c.residual >= 0 ? '+' : ''}${c.residual.toFixed(2)}`}
           fill="#f3f4f6" stroke="#475569" strokeWidth={0.5} />
         <text x={cx} y={cy + 16} textAnchor="middle" fontSize={10} fill="#94a3b8">NET</text>
 
-        {/* Distance labels on one angular arm (straight up = 0°) */}
-        {DIST_BINS.map((b, i) => (
-          <text
-            key={`dist-${b.label}`}
-            x={cx + 4}
-            y={cy - rMid(i) + 3}
-            fontSize={9}
-            fill="#94a3b8"
-          >{b.label}</text>
-        ))}
+        {/* Distance scale ladder on the right edge — leader marks
+            from each ring boundary to a labeled tick well clear of the
+            cells, so the unit (feet) is unambiguous. */}
+        {DIST_BINS.map((b, i) => {
+          const r = rMid(i);
+          const tickX = cx + maxR + 4;
+          const labelX = cx + maxR + 8;
+          const y = cy - r + 3;
+          return (
+            <g key={`dist-${b.label}`}>
+              <line
+                x1={cx + r * Math.cos(angleToRadian(80))}
+                y1={cy - r * Math.sin(angleToRadian(80))}
+                x2={tickX}
+                y2={y - 3}
+                stroke="rgba(148,163,184,0.35)"
+                strokeWidth={0.6}
+              />
+              <text
+                x={labelX}
+                y={y}
+                fontSize={10}
+                fontWeight={600}
+                fill="#cbd5f5"
+              >{b.label} ft</text>
+            </g>
+          );
+        })}
 
         {/* Angle labels on the outer ring */}
         {ANGLE_BINS.map((b, i) => {

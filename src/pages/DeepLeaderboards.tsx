@@ -79,9 +79,14 @@ interface GoalieRow {
 
 interface TeamRow {
   team: string;
-  // Team-level real aggregates (NOT summed individual WARs, which would
-  // over-count replacement level). Everything here is a sum of real
-  // counts or the result of league_context.teamTotals for that team.
+  // Team-level real aggregates. With the v4 WAR formula (on-ice
+  // components team-relative + 1/5 skater-share), per-player WARs are
+  // additive without double-counting:
+  //   • finishing/playmaking/penalties — per-player, non-overlapping
+  //   • on-ice rel × 1/5 — sums to ~0 across a team (rel = vs team)
+  //   • replacement adjustment — per-player × games
+  // So skaterWARSum is meaningful, and totalWAR = skaterWARSum + goalieWARSum
+  // is the team's "WAR vs replacement-level roster" number.
   goals: number;         // sum of iG for the team (= actual goals scored at EV + PP)
   xG: number;            // team's total xGF (from team totals)
   xGA: number;           // team's total xGA
@@ -94,12 +99,17 @@ interface TeamRow {
   skaterCount: number;
   goalieGSAx: number;    // sum of goalie GSAx
   goalieWARSum: number;
+  skaterWARSum: number;  // sum of per-skater WAR (additivity safe under v4)
+  totalWAR: number;      // skaterWARSum + goalieWARSum
 }
 
 export default function DeepLeaderboards() {
   const [tables, setTables] = useState<WARTables | null>(null);
   const [loadingErr, setLoadingErr] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>('skaters');
+  // When switching tabs, reset sort to a sensible default for that tab
+  // (Skaters/Goalies → WAR, Teams → Total WAR via the same WAR key).
+  useEffect(() => { setSortKey('WAR'); setSortDir('desc'); }, [mode]);
   const [posFilter, setPosFilter] = useState<PosFilter>('ALL');
   const [minGP, setMinGP] = useState(10);
   const [sortKey, setSortKey] = useState<SortKey>('WAR');
@@ -154,9 +164,13 @@ export default function DeepLeaderboards() {
     fetch(getNhlStatsUrl(`/skater/summary${query}`))
       .then(r => r.ok ? r.json() : { data: [] })
       .then((j: any) => {
-        const m = new Map<number, string>();
-        for (const p of (j.data || [])) m.set(p.playerId, p.skaterFullName);
-        setPlayerNames(m);
+        // Merge into existing map so the goalie fetch (which may
+        // resolve first) doesn't get clobbered.
+        setPlayerNames(prev => {
+          const m = new Map(prev);
+          for (const p of (j.data || [])) m.set(p.playerId, p.skaterFullName);
+          return m;
+        });
       })
       .catch(() => {});
     fetch(getNhlStatsUrl(`/goalie/summary${query}`))
@@ -295,17 +309,20 @@ export default function DeepLeaderboards() {
       team, goals: 0, xG: 0, xGA: 0, gax: 0, goalDiff: 0, shots: 0,
       primaryAssists: 0, penaltyDiff: 0, onIceTOIHours: 0,
       skaterCount: 0, goalieGSAx: 0, goalieWARSum: 0,
+      skaterWARSum: 0, totalWAR: 0,
     });
     for (const r of skaterRows) {
       if (!r.team) continue;
       let t = agg.get(r.team);
       if (!t) { t = blankTeam(r.team); agg.set(r.team, t); }
-      // Only real counts — no summed WARs to avoid double-counting replacement.
       t.goals += r.iG;
       t.shots += r.sog;
       t.primaryAssists += r.primaryAssists;
       t.penaltyDiff += r.penaltyDiff;
       t.skaterCount += 1;
+      // Sum-safe under v4: on-ice rel × 1/5 cancels team-wide; finishing,
+      // playmaking, penalties, and replacement adjustment are per-player.
+      t.skaterWARSum += r.WAR;
     }
     // Team xG / xGA / TOI come directly from league_context.teamTotals.
     // If absent (older worker build), fall back to per-player onIceXGF/A
@@ -345,6 +362,7 @@ export default function DeepLeaderboards() {
       // final standings differential). Real goal differential requires
       // goals-against count which isn't in per-player data.
       t.goalDiff = t.xG - t.xGA;
+      t.totalWAR = t.skaterWARSum + t.goalieWARSum;
     }
     return Array.from(agg.values());
   }, [skaterRows, goalieRows, tables]);
@@ -396,10 +414,11 @@ export default function DeepLeaderboards() {
   const sortedTeams = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1;
     const keyMap: Record<string, keyof TeamRow> = {
-      WAR: 'goalDiff', GAR: 'goalDiff', gax: 'gax', ixG: 'xG',
+      WAR: 'totalWAR', WAR_per_82: 'totalWAR', GAR: 'goalDiff',
+      gax: 'gax', ixG: 'xG',
       goals: 'goals' as any, shots: 'shots' as any, gp: 'skaterCount',
     };
-    const k = (keyMap[sortKey] as keyof TeamRow) || 'goalDiff';
+    const k = (keyMap[sortKey] as keyof TeamRow) || 'totalWAR';
     return teamRows.slice().sort((a, b) => (((a[k] as number) || 0) - ((b[k] as number) || 0)) * dir);
   }, [teamRows, sortKey, sortDir]);
 
@@ -689,6 +708,9 @@ function TeamTable({ rows, sortKey, sortDir, onSort }: TeamTableProps) {
         <tr>
           <th className="deep-th-rank">#</th>
           <th className="deep-th-name">Team</th>
+          {headerCell('Total WAR', 'WAR', sortKey, sortDir, onSort)}
+          {headerCell('Skater WAR', 'WAR_per_82', sortKey, sortDir, onSort)}
+          <th>Goalie WAR</th>
           {headerCell('Goals', 'iG', sortKey, sortDir, onSort)}
           {headerCell('xGF', 'ixG', sortKey, sortDir, onSort)}
           {headerCell('xGA', 'onIceXGA', sortKey, sortDir, onSort)}
@@ -697,7 +719,6 @@ function TeamTable({ rows, sortKey, sortDir, onSort }: TeamTableProps) {
           {headerCell('Shots', 'sog', sortKey, sortDir, onSort)}
           {headerCell('Pen ±', 'penalty', sortKey, sortDir, onSort)}
           <th>Goalie GSAx</th>
-          <th>Goalie WAR</th>
           <th># Skaters</th>
         </tr>
       </thead>
@@ -708,15 +729,17 @@ function TeamTable({ rows, sortKey, sortDir, onSort }: TeamTableProps) {
             <td className="deep-name">
               <Link to={`/team/${r.team}`}>{r.team}</Link>
             </td>
+            <td className={`deep-num ${r.totalWAR >= 0 ? 'pos' : 'neg'} deep-primary`}>{r.totalWAR.toFixed(1)}</td>
+            <td className={`deep-num ${r.skaterWARSum >= 0 ? 'pos' : 'neg'}`}>{r.skaterWARSum.toFixed(1)}</td>
+            <td className={`deep-num ${r.goalieWARSum >= 0 ? 'pos' : 'neg'}`}>{r.goalieWARSum.toFixed(1)}</td>
             <td>{r.goals}</td>
             <td>{r.xG.toFixed(1)}</td>
             <td>{r.xGA.toFixed(1)}</td>
-            <td className={`deep-num ${r.goalDiff >= 0 ? 'pos' : 'neg'} deep-primary`}>{r.goalDiff >= 0 ? '+' : ''}{r.goalDiff.toFixed(1)}</td>
+            <td className={`deep-num ${r.goalDiff >= 0 ? 'pos' : 'neg'}`}>{r.goalDiff >= 0 ? '+' : ''}{r.goalDiff.toFixed(1)}</td>
             <td className={`deep-num ${r.gax >= 0 ? 'pos' : 'neg'}`}>{r.gax >= 0 ? '+' : ''}{r.gax.toFixed(1)}</td>
             <td>{r.shots}</td>
             <td className={`deep-num ${r.penaltyDiff >= 0 ? 'pos' : 'neg'}`}>{r.penaltyDiff >= 0 ? '+' : ''}{r.penaltyDiff}</td>
             <td className={`deep-num ${r.goalieGSAx >= 0 ? 'pos' : 'neg'}`}>{r.goalieGSAx >= 0 ? '+' : ''}{r.goalieGSAx.toFixed(1)}</td>
-            <td className={`deep-num ${r.goalieWARSum >= 0 ? 'pos' : 'neg'}`}>{r.goalieWARSum.toFixed(1)}</td>
             <td>{r.skaterCount}</td>
           </tr>
         ))}
