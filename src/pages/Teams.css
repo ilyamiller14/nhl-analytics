@@ -15,12 +15,12 @@
   font-size: 1.75rem;
   font-weight: 700;
   margin-bottom: 0.5rem;
-  color: #0f172a;
+  color: var(--panel-bg-elev);
   letter-spacing: -0.02em;
 }
 
 .teams-header p {
-  color: #64748b;
+  color: var(--gray-500);
   font-size: 0.95rem;
   font-weight: 400;
 }
@@ -37,7 +37,7 @@
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.04);
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
 }
 
 .conference-header {
@@ -45,15 +45,15 @@
   justify-content: space-between;
   align-items: center;
   padding: 1rem 1.25rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--gray-200);
 }
 
 .conference-header.eastern {
-  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+  background: linear-gradient(135deg, #1e40af 0%, var(--info) 100%);
 }
 
 .conference-header.western {
-  background: linear-gradient(135deg, #b91c1c 0%, #ef4444 100%);
+  background: linear-gradient(135deg, #b91c1c 0%, var(--error) 100%);
 }
 
 .conference-title {
@@ -87,7 +87,7 @@
   text-decoration: none;
   color: inherit;
   transition: all 0.15s ease;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--gray-100);
 }
 
 .team-row:last-child {
@@ -95,7 +95,7 @@
 }
 
 .team-row:hover {
-  background: #f8fafc;
+  background: var(--gray-50);
 }
 
 .team-row:hover .team-arrow {
@@ -106,7 +106,7 @@
 .team-abbrev {
   font-size: 0.9rem;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--panel-bg-elev);
   min-width: 40px;
   letter-spacing: -0.01em;
 }
@@ -114,15 +114,15 @@
 .team-name {
   flex: 1;
   font-size: 0.9rem;
-  color: #475569;
+  color: var(--gray-600);
   font-weight: 500;
 }
 
 .team-division {
   font-size: 0.7rem;
   font-weight: 500;
-  color: #94a3b8;
-  background: #f1f5f9;
+  color: var(--gray-400);
+  background: var(--gray-100);
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
   text-transform: uppercase;
@@ -131,7 +131,7 @@
 
 .team-arrow {
   font-size: 1rem;
-  color: #94a3b8;
+  color: var(--gray-400);
   opacity: 0;
   transition: all 0.15s ease;
 }

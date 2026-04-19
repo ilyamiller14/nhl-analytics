@@ -1,3 +1,7 @@
+/* App shell — layout primitives only. Cards, buttons, tabs,
+   badges, loading/error/empty states all live in styles/shared.css
+   so they stay consistent across pages. */
+
 .app {
   min-height: 100vh;
   display: flex;
@@ -11,173 +15,108 @@
 .page-container {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: var(--space-2xl);
 }
 
-/* Loading States */
+/* Legacy spinner class — some individual pages still reference this.
+   Keep it rendering consistently with the new LoadingFallback. */
 .loading {
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 4rem;
+  padding: var(--space-4xl);
 }
 
 .loading-spinner {
   width: min(50px, 10vw);
   height: min(50px, 10vw);
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #003087;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
+  border: 4px solid var(--gray-200);
+  border-top: 4px solid var(--primary-blue);
+  border-radius: var(--radius-full);
+  animation: app-spin 1s linear infinite;
 }
 
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
+@keyframes app-spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
-/* Error States */
+/* Legacy error callout — prefer .error-state from shared.css for
+   inline error messaging in new code. */
 .error {
-  background: #fee;
-  border: 1px solid #fcc;
-  border-radius: 8px;
-  padding: 1.5rem;
-  margin: 2rem 0;
-  color: #c00;
+  background: rgba(var(--error-rgb) / 0.08);
+  border: 1px solid rgba(var(--error-rgb) / 0.3);
+  border-radius: var(--radius-md);
+  padding: var(--space-xl);
+  margin: var(--space-2xl) 0;
+  color: var(--error);
 }
 
 .error-title {
-  font-weight: 600;
-  margin: 0 0 0.5rem 0;
+  font-weight: var(--fw-semibold);
+  margin: 0 0 var(--space-sm) 0;
 }
 
 .error-message {
   margin: 0;
-  color: #600;
+  color: var(--error);
+  opacity: 0.85;
 }
 
-/* Empty States */
-.empty-state {
+/* 404 page */
+.not-found {
   text-align: center;
-  padding: 4rem 2rem;
-  color: #666;
+  padding: var(--space-4xl) var(--space-2xl);
 }
 
-.empty-state-icon {
-  font-size: 4rem;
-  margin-bottom: 1rem;
-  opacity: 0.5;
+.not-found__code {
+  font-size: clamp(2.5rem, 8vw, 4rem);
+  margin-bottom: var(--space-lg);
+  color: var(--gray-900);
 }
 
-@media (max-width: 480px) {
-  .empty-state {
-    padding: 2rem 1rem;
-  }
-
-  .empty-state-icon {
-    font-size: 3rem;
-  }
+.not-found__title {
+  margin-bottom: var(--space-lg);
+  color: var(--gray-800);
 }
 
-.empty-state-title {
-  font-size: 1.5rem;
-  margin: 0 0 0.5rem 0;
-  color: #333;
-}
-
-.empty-state-message {
-  font-size: 1.1rem;
-  margin: 0;
-}
-
-/* Card Styles */
-.card {
-  background: white;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  transition: all 0.2s;
-}
-
-.card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+.not-found__message {
+  margin-bottom: var(--space-2xl);
+  color: var(--gray-500);
 }
 
 /* Utility Classes */
-.text-center {
-  text-align: center;
-}
+.text-center { text-align: center; }
+.text-muted  { color: var(--gray-500); }
 
-.text-muted {
-  color: #666;
-}
+.mt-1 { margin-top: var(--space-sm); }
+.mt-2 { margin-top: var(--space-lg); }
+.mt-3 { margin-top: var(--space-xl); }
+.mt-4 { margin-top: var(--space-2xl); }
 
-.mt-1 {
-  margin-top: 0.5rem;
-}
-.mt-2 {
-  margin-top: 1rem;
-}
-.mt-3 {
-  margin-top: 1.5rem;
-}
-.mt-4 {
-  margin-top: 2rem;
-}
+.mb-1 { margin-bottom: var(--space-sm); }
+.mb-2 { margin-bottom: var(--space-lg); }
+.mb-3 { margin-bottom: var(--space-xl); }
+.mb-4 { margin-bottom: var(--space-2xl); }
 
-.mb-1 {
-  margin-bottom: 0.5rem;
-}
-.mb-2 {
-  margin-bottom: 1rem;
-}
-.mb-3 {
-  margin-bottom: 1.5rem;
-}
-.mb-4 {
-  margin-bottom: 2rem;
-}
-
-.p-1 {
-  padding: 0.5rem;
-}
-.p-2 {
-  padding: 1rem;
-}
-.p-3 {
-  padding: 1.5rem;
-}
-.p-4 {
-  padding: 2rem;
-}
+.p-1 { padding: var(--space-sm); }
+.p-2 { padding: var(--space-lg); }
+.p-3 { padding: var(--space-xl); }
+.p-4 { padding: var(--space-2xl); }
 
 /* Responsive Grid */
 .grid {
   display: grid;
-  gap: 1.5rem;
+  gap: var(--space-xl);
 }
 
-.grid-cols-1 {
-  grid-template-columns: 1fr;
-}
-.grid-cols-2 {
-  grid-template-columns: repeat(2, 1fr);
-}
-.grid-cols-3 {
-  grid-template-columns: repeat(3, 1fr);
-}
-.grid-cols-4 {
-  grid-template-columns: repeat(4, 1fr);
-}
+.grid-cols-1 { grid-template-columns: 1fr; }
+.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
 
 @media (max-width: 1024px) {
-  .grid-cols-4 {
-    grid-template-columns: repeat(2, 1fr);
-  }
+  .grid-cols-4,
   .grid-cols-3 {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -185,7 +124,7 @@
 
 @media (max-width: 640px) {
   .page-container {
-    padding: 1rem;
+    padding: var(--space-lg);
   }
 
   .grid-cols-4,

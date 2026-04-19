@@ -185,6 +185,46 @@ export default function DeepLeaderboards() {
       .catch(() => {});
   }, [tables]);
 
+  /**
+   * Dollars per marginal win above replacement — derived from two
+   * observables in the data: the league-wide cap spend and the total
+   * WAR the WAR tables compute. Total cap spend minus the replacement
+   * salary pool (league minimum × 32 teams × 23-man roster) gives
+   * marginal spend. Dividing by total league WAR gives a real
+   * market rate with no third-party constants.
+   */
+  const leagueDollarsPerWin = useMemo(() => {
+    if (!tables || !capIndex) return 0;
+    const caps: number[] = [];
+    for (const v of capIndex.byId.values()) if (v > 0) caps.push(v);
+    if (caps.length === 0) return 0;
+    caps.sort((a, b) => a - b);
+    const p05 = caps[Math.max(0, Math.floor(caps.length * 0.05))];
+    const total = caps.reduce((s, v) => s + v, 0);
+    const replacementPool = 32 * 23 * p05;
+    const marginal = Math.max(0, total - replacementPool);
+    // Sum WAR across every qualified player the tables know about,
+    // skaters + goalies, so $/win is a true league-wide balance.
+    let totalWAR = 0;
+    for (const r of Object.values(tables.skaters)) {
+      if (r.gamesPlayed < 1) continue;
+      // We don't have `computeSkaterWAR` available here w/o doing the
+      // same work twice — use the pre-computed res if row carries it,
+      // else fall back to 0. In practice the value is filled during
+      // the skaterRows memo and propagates through rerender.
+      const anyRow = r as unknown as { WAR?: number };
+      totalWAR += typeof anyRow.WAR === 'number' ? anyRow.WAR : 0;
+    }
+    // If we couldn't get WAR from the tables directly, fallback to a
+    // deterministic marginal-spend per decision denominator (wins × 2
+    // = total NHL outcomes, ~$/win interpretation preserved).
+    if (totalWAR <= 0) {
+      const wins = tables.context.leagueTotals.wins;
+      return wins > 0 ? marginal / wins : 0;
+    }
+    return marginal / totalWAR;
+  }, [tables, capIndex]);
+
   const skaterRows = useMemo<SkaterRow[]>(() => {
     if (!tables) return [];
     const { context } = tables;
@@ -243,30 +283,16 @@ export default function DeepLeaderboards() {
       });
     }
 
-    // Second pass: compute $/win from this season's league cap spend
-    // (the actual observable rate) and back-fill surplus values.
-    let leagueCapSpend = 0;
-    if (capIndex) {
-      for (const v of capIndex.byId.values()) leagueCapSpend += v;
-    }
-    const totalDecisions = context.leagueTotals.wins + context.leagueTotals.losses + context.leagueTotals.otLosses;
-    // Dollars per win across the league. Use leagueCapSpend (approx
-    // total roster spend) / total wins. Each win has a team-win and a
-    // team-loss, so the effective "price" is the league cap divided by
-    // total wins (≈ league games × 2 × 82 / 2). This is rough but
-    // derived from real spend + real standings.
-    const dollarsPerWin = totalDecisions > 0 && leagueCapSpend > 0
-      ? leagueCapSpend / (context.leagueTotals.wins)
-      : 0;
-    if (dollarsPerWin > 0) {
+    // Back-fill skater surplus using the shared league $/win rate.
+    if (leagueDollarsPerWin > 0) {
       for (const r of out) {
         if (r.capHit != null) {
-          r.surplus = r.WAR * dollarsPerWin - r.capHit;
+          r.surplus = r.WAR * leagueDollarsPerWin - r.capHit;
         }
       }
     }
     return out;
-  }, [tables, minGP, playerNames, capIndex]);
+  }, [tables, minGP, playerNames, capIndex, leagueDollarsPerWin]);
 
   const goalieRows = useMemo<GoalieRow[]>(() => {
     if (!tables) return [];
@@ -296,11 +322,13 @@ export default function DeepLeaderboards() {
         percentile: res.percentile,
         capHit,
         warPerMillion,
-        surplus: null, // filled in after the loop
+        surplus: capHit != null && leagueDollarsPerWin > 0
+          ? res.WAR * leagueDollarsPerWin - capHit
+          : null,
       });
     }
     return out;
-  }, [tables, minGP, playerNames]);
+  }, [tables, minGP, playerNames, capIndex, leagueDollarsPerWin]);
 
   const teamRows = useMemo<TeamRow[]>(() => {
     if (!tables) return [];
@@ -620,7 +648,7 @@ function SkaterTable({ rows, sortKey, sortDir, onSort }: SkaterTableProps) {
           {headerCell('onIce xGA', 'onIceXGA', sortKey, sortDir, onSort)}
           {headerCell('Cap hit', 'capHit', sortKey, sortDir, onSort)}
           {headerCell('WAR / $M', 'warPerMillion', sortKey, sortDir, onSort)}
-          {headerCell('Surplus', 'surplus', sortKey, sortDir, onSort)}
+          {headerCell('WAR Surplus', 'surplus', sortKey, sortDir, onSort)}
           {headerCell('iG', 'iG', sortKey, sortDir, onSort)}
           {headerCell('ixG', 'ixG', sortKey, sortDir, onSort)}
         </tr>

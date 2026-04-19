@@ -4,10 +4,10 @@
 
 /* Header Section */
 .profile-header {
-  background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+  background: var(--gradient-primary);
   color: white;
-  padding: 3rem 2rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: var(--space-3xl) var(--space-2xl);
+  box-shadow: var(--shadow-lg);
 }
 
 .profile-header-content {
@@ -17,8 +17,9 @@
 
 .profile-hero {
   display: flex;
-  gap: 2.5rem;
+  gap: var(--space-2xl);
   align-items: start;
+  flex-wrap: wrap;
 }
 
 .profile-image-container {
@@ -26,41 +27,44 @@
   flex-shrink: 0;
 }
 
+/* Avatar scales from 180px on desktop down to 96px on a phone so it
+   never takes over the header. clamp() replaces a stack of media
+   queries and keeps the image fluid between viewport sizes. */
+.profile-image,
+.profile-image-placeholder {
+  width: clamp(96px, 18vw, 180px);
+  height: clamp(96px, 18vw, 180px);
+  aspect-ratio: 1;
+  border-radius: var(--radius-full);
+  border: 4px solid #fff;
+  box-shadow: var(--shadow-xl);
+}
+
 .profile-image {
-  width: 180px;
-  height: 180px;
-  border-radius: 50%;
   object-fit: cover;
-  border: 6px solid white;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
   background: rgba(255, 255, 255, 0.1);
 }
 
 .profile-image-placeholder {
-  width: 180px;
-  height: 180px;
-  border-radius: 50%;
   background: rgba(255, 255, 255, 0.2);
-  border: 6px solid white;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 4rem;
-  font-weight: 700;
+  font-size: clamp(1.75rem, 5vw, 4rem);
+  font-weight: var(--fw-bold);
   color: white;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 
 .profile-team-logo {
   position: absolute;
-  bottom: 10px;
-  right: 10px;
-  width: 60px;
-  height: 60px;
+  bottom: 4%;
+  right: 4%;
+  width: clamp(36px, 6vw, 60px);
+  height: clamp(36px, 6vw, 60px);
   background: white;
-  border-radius: 50%;
-  padding: 0.5rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  border-radius: var(--radius-full);
+  padding: var(--space-xs);
+  box-shadow: var(--shadow-lg);
 }
 
 .profile-info {
@@ -76,16 +80,16 @@
 }
 
 .profile-name {
-  font-size: 3rem;
-  font-weight: 800;
+  font-size: clamp(1.75rem, 5vw, 3rem);
+  font-weight: var(--fw-extrabold);
   margin: 0;
   color: white;
   line-height: 1.1;
 }
 
 .profile-number {
-  font-size: 2.5rem;
-  font-weight: 700;
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
+  font-weight: var(--fw-bold);
   opacity: 0.8;
 }
 
@@ -108,7 +112,55 @@
 
 .profile-team {
   font-size: 1.25rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
+}
+
+.profile-team--link {
+  color: white;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.4);
+  text-underline-offset: 3px;
+  transition: text-decoration-color var(--transition-normal);
+}
+
+.profile-team--link:hover {
+  color: white;
+  text-decoration-color: rgba(255, 255, 255, 1);
+}
+
+.profile-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+}
+
+.profile-quick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-lg);
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--transition-normal),
+              border-color var(--transition-normal),
+              transform var(--transition-fast);
+  min-height: 40px;
+}
+
+.profile-quick-btn:hover,
+.profile-quick-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-1px);
+  color: #fff;
+  outline: none;
 }
 
 .meta-divider {
@@ -163,23 +215,24 @@
 }
 
 .player-profile .stat-card {
-  background: white !important;
-  color: #1f2937 !important;
-  padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  background: #fff;
+  color: var(--gray-800);
+  padding: var(--space-xl);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
   text-align: center;
-  transition: all 0.2s;
+  transition: transform var(--transition-fast),
+              box-shadow var(--transition-normal);
 }
 
 .player-profile .stat-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-lg);
 }
 
 .player-profile .stat-card.highlight {
-  background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%) !important;
-  color: white !important;
+  background: var(--gradient-primary);
+  color: #fff;
 }
 
 .player-profile .stat-card-label {
@@ -245,24 +298,33 @@
 }
 
 .profile-tab {
-  padding: 0.75rem 1.25rem;
+  padding: var(--space-md) var(--space-lg);
   border: none;
   background: none;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   font-size: 0.95rem;
   color: var(--gray-600);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: color var(--transition-normal),
+              background var(--transition-normal),
+              border-color var(--transition-normal);
   border-bottom: 3px solid transparent;
   white-space: nowrap;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--space-xs);
+  min-height: 44px;
 }
 
 .profile-tab:hover {
   color: var(--primary-blue);
   background: var(--gray-50);
+}
+
+.profile-tab:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
 .profile-tab.active {
@@ -521,7 +583,7 @@
 
 .loading-message p {
   margin-top: 16px;
-  color: #657786;
+  color: var(--gray-500);
   font-size: 16px;
 }
 
@@ -599,10 +661,10 @@
     display: none;
   }
 
-  .share-btn {
+  .player-profile .share-btn {
     width: 100%;
-    padding: 1rem !important;
-    font-size: 1.1rem !important;
+    padding: var(--space-lg);
+    font-size: 1.1rem;
   }
 }
 
@@ -646,7 +708,7 @@
   gap: 0.5rem;
   padding: 1rem 1.5rem;
   text-decoration: none;
-  color: var(--text-secondary, #6b7280);
+  color: var(--text-secondary, var(--gray-500));
   font-size: 1rem;
   font-weight: 600;
   border-bottom: 3px solid transparent;
@@ -656,12 +718,12 @@
 }
 
 .attack-dna-link:hover {
-  color: var(--primary-blue, #3b82f6);
+  color: var(--primary-blue, var(--info));
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%);
 }
 
 .new-badge {
-  background: linear-gradient(135deg, #3b82f6 0%, #a855f7 100%);
+  background: linear-gradient(135deg, var(--info) 0%, #a855f7 100%);
   color: white;
   font-size: 0.65rem;
   font-weight: 700;

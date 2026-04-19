@@ -3,7 +3,7 @@
 .xg-timeseries-chart {
   --xg-positive: #34d399;
   --xg-negative: #f87171;
-  --xg-neutral: #94a3b8;
+  --xg-neutral: var(--gray-400);
 
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.12);

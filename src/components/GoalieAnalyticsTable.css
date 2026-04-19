@@ -23,7 +23,7 @@
 
 .goalie-analytics-header .subtitle {
   margin: 0;
-  color: var(--gray-600, #6b7280);
+  color: var(--gray-600, var(--gray-500));
   font-size: 0.95rem;
   max-width: 640px;
   line-height: 1.4;
@@ -43,14 +43,14 @@
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--gray-500, #9ca3af);
+  color: var(--gray-500, var(--gray-400));
   font-weight: 600;
 }
 
 .context-value {
   font-size: 1.25rem;
   font-weight: 700;
-  color: var(--gray-900, #111827);
+  color: var(--gray-900, var(--gray-900));
   font-variant-numeric: tabular-nums;
 }
 
@@ -65,27 +65,27 @@
 
 .min-gp-control .control-label {
   font-size: 0.9rem;
-  color: var(--gray-700, #374151);
+  color: var(--gray-700, var(--gray-700));
   margin-bottom: 0.5rem;
 }
 
 .min-gp-control input[type="range"] {
   width: 100%;
-  accent-color: var(--primary-blue, #003087);
+  accent-color: var(--primary-blue, var(--primary-blue));
 }
 
 .range-ticks {
   display: flex;
   justify-content: space-between;
   font-size: 0.7rem;
-  color: var(--gray-500, #9ca3af);
+  color: var(--gray-500, var(--gray-400));
   margin-top: 0.25rem;
   font-variant-numeric: tabular-nums;
 }
 
 .methodology {
-  background: var(--gray-50, #f9fafb);
-  border: 1px solid var(--gray-200, #e5e7eb);
+  background: var(--gray-50, var(--gray-50));
+  border: 1px solid var(--gray-200, var(--gray-200));
   border-radius: 8px;
   padding: 0.75rem 1rem;
   margin-bottom: 1.25rem;
@@ -95,13 +95,13 @@
 .methodology summary {
   cursor: pointer;
   font-weight: 600;
-  color: var(--gray-800, #1f2937);
+  color: var(--gray-800, var(--gray-800));
   user-select: none;
 }
 
 .methodology-body {
   margin-top: 0.75rem;
-  color: var(--gray-700, #374151);
+  color: var(--gray-700, var(--gray-700));
   line-height: 1.5;
 }
 
@@ -119,7 +119,7 @@
 }
 
 .methodology-body code {
-  background: var(--gray-100, #f3f4f6);
+  background: var(--gray-100, var(--gray-100));
   padding: 0.1rem 0.3rem;
   border-radius: 4px;
   font-size: 0.85em;
@@ -127,7 +127,7 @@
 
 .goalie-table-wrap {
   overflow-x: auto;
-  border: 1px solid var(--gray-200, #e5e7eb);
+  border: 1px solid var(--gray-200, var(--gray-200));
   border-radius: 8px;
 }
 
@@ -139,8 +139,8 @@
 }
 
 .goalie-analytics-table thead {
-  background: var(--gray-50, #f9fafb);
-  border-bottom: 2px solid var(--gray-200, #e5e7eb);
+  background: var(--gray-50, var(--gray-50));
+  border-bottom: 2px solid var(--gray-200, var(--gray-200));
 }
 
 .goalie-analytics-table th {
@@ -148,7 +148,7 @@
   text-align: right;
   font-weight: 600;
   font-size: 0.8rem;
-  color: var(--gray-700, #374151);
+  color: var(--gray-700, var(--gray-700));
   text-transform: uppercase;
   letter-spacing: 0.03em;
   white-space: nowrap;
@@ -160,7 +160,7 @@
 }
 
 .goalie-analytics-table th.sortable:hover {
-  background: var(--gray-100, #f3f4f6);
+  background: var(--gray-100, var(--gray-100));
 }
 
 .goalie-analytics-table th.rank-col,
@@ -169,33 +169,33 @@
 }
 
 .goalie-analytics-table th.analytical-col {
-  color: var(--primary-blue, #003087);
+  color: var(--primary-blue, var(--primary-blue));
 }
 
 .goalie-analytics-table th.gscore-col {
-  color: var(--primary-blue, #003087);
+  color: var(--primary-blue, var(--primary-blue));
   background: rgba(0, 48, 135, 0.04);
 }
 
 .goalie-analytics-table tbody tr {
-  border-bottom: 1px solid var(--gray-100, #f3f4f6);
+  border-bottom: 1px solid var(--gray-100, var(--gray-100));
   transition: background 0.15s;
 }
 
 .goalie-analytics-table tbody tr:hover {
-  background: var(--gray-50, #f9fafb);
+  background: var(--gray-50, var(--gray-50));
 }
 
 .goalie-analytics-table td {
   padding: 0.65rem 0.6rem;
   text-align: right;
-  color: var(--gray-900, #111827);
+  color: var(--gray-900, var(--gray-900));
 }
 
 .goalie-analytics-table td.rank-col {
   text-align: left;
   font-weight: 700;
-  color: var(--gray-500, #9ca3af);
+  color: var(--gray-500, var(--gray-400));
   width: 3rem;
 }
 
@@ -212,17 +212,17 @@
 }
 
 .goalie-link:hover .goalie-name {
-  color: var(--primary-blue, #003087);
+  color: var(--primary-blue, var(--primary-blue));
 }
 
 .goalie-name {
   font-weight: 600;
-  color: var(--gray-900, #111827);
+  color: var(--gray-900, var(--gray-900));
 }
 
 .goalie-team {
   font-size: 0.75rem;
-  color: var(--gray-500, #9ca3af);
+  color: var(--gray-500, var(--gray-400));
   font-weight: 500;
 }
 
@@ -247,7 +247,7 @@
 .empty-row {
   text-align: center !important;
   padding: 2rem !important;
-  color: var(--gray-500, #9ca3af);
+  color: var(--gray-500, var(--gray-400));
   font-style: italic;
 }
 
@@ -255,7 +255,7 @@
 .error-message {
   padding: 2rem;
   text-align: center;
-  color: var(--gray-600, #6b7280);
+  color: var(--gray-600, var(--gray-500));
 }
 
 .error-message {

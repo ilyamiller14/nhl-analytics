@@ -110,11 +110,34 @@ export function calculateXGDifferential(
 }
 
 /**
- * High-danger flag — purely geometric, no model involvement.
- * Inside the slot (close to net, small angle).
+ * High-danger polygon: inside the inner slot. A shot is high-danger if
+ *   distance ≤ 25 ft from the net AND lateral Y offset ≤ 20 ft.
+ *
+ * Equivalent to a ~25ft × 40ft rectangle in front of the crease, which
+ * matches MoneyPuck's inner slot and the "royal road" region used by
+ * most public xG models. Prefer this over the older `distance & angle`
+ * heuristic because `angle` gives weird answers near the goal line.
+ *
+ * This is the SINGLE SOURCE OF TRUTH for HD classification — both the
+ * xG leaderboard and playStyleAnalytics route through this function.
+ */
+export function isHighDangerByCoord(xCoord: number, yCoord: number): boolean {
+  const netX = xCoord >= 0 ? 89 : -89;
+  const distance = Math.sqrt(
+    (xCoord - netX) * (xCoord - netX) + yCoord * yCoord
+  );
+  return distance <= 25 && Math.abs(yCoord) <= 20;
+}
+
+/**
+ * Coordinate-free variant for callers that only have distance + angle.
+ * Approximates the same polygon: at distance 25, tan(angle) × 25 = |Y|,
+ * so |Y| ≤ 20 → angle ≤ atan(20/25) ≈ 38.66°. We keep a small buffer
+ * (40°) to avoid edge-jitter. Use `isHighDangerByCoord` when coords
+ * are available — it's the canonical check.
  */
 export function isHighDangerShot(features: XGFeatures): boolean {
-  return features.distance < 25 && features.angle < 45;
+  return features.distance <= 25 && features.angle <= 40;
 }
 
 export function getShotQuality(xg: number): string {
@@ -157,16 +180,137 @@ function emptyNetFromSituation(raw: string | undefined, isHomeShooter: boolean |
 }
 
 /**
- * xG for a ShotEvent — convenience wrapper.
- * Extracts distance/angle from real event coordinates and uses the
- * empirical lookup. Strength is passed through from the event's
- * situation code. Empty-net is derived from the raw 4-digit situation
- * code when available; rebound/rush/score state are not derivable from
- * a single ShotEvent (no surrounding play sequence) so they're left
- * unset and the lookup falls back to the level that doesn't depend on
- * them.
+ * Rebound window: any same-team shot within this many seconds of another
+ * same-team shot counts as a rebound. 3s matches Evolving-Hockey / MoneyPuck
+ * public convention.
  */
-export function calculateShotEventXG(shot: ShotEvent): number {
+const REBOUND_WINDOW_SEC = 3;
+
+/**
+ * Rush window: if the prior event was same-team possession change
+ * (takeaway, faceoff win, zone entry proxy) in the neutral or defensive
+ * zone within this many seconds, treat as a rush shot.
+ */
+const RUSH_WINDOW_SEC = 4;
+
+function parseTimeSec(t: string | undefined): number | null {
+  if (!t) return null;
+  const parts = t.split(':');
+  if (parts.length !== 2) return null;
+  const mm = parseInt(parts[0], 10);
+  const ss = parseInt(parts[1], 10);
+  if (isNaN(mm) || isNaN(ss)) return null;
+  return mm * 60 + ss;
+}
+
+export interface ShotContext {
+  /** All shots from the same game/team-list, chronologically ordered. */
+  priorShots?: ShotEvent[];
+  /** Index of this shot within that list (optional — we search by time). */
+  shotIndex?: number;
+  /** Whether the shooter is the home team (used for emptyNet disambiguation). */
+  isHomeShooter?: boolean;
+  /** Optional full event list for rush detection (faceoffs, takeaways). */
+  priorEvents?: Array<{
+    typeDescKey?: string;
+    periodDescriptor?: { number: number };
+    timeInPeriod?: string;
+    details?: { eventOwnerTeamId?: number; zoneCode?: string };
+  }>;
+}
+
+/**
+ * Derive the three contextual xG features (rebound / rush / empty-net)
+ * from the surrounding events of a shot. Callers that have the full
+ * game event list should pass it; when unavailable the flags stay
+ * `undefined` and the empirical lookup falls back to the matching
+ * shallower bucket.
+ *
+ * No third-party values — every flag is derived from the NHL API's
+ * own event stream.
+ */
+export function deriveShotContext(
+  shot: ShotEvent,
+  ctx: ShotContext = {}
+): { isRebound?: boolean; isRushShot?: boolean; isEmptyNet?: boolean } {
+  const result: { isRebound?: boolean; isRushShot?: boolean; isEmptyNet?: boolean } = {};
+
+  // --- Empty net (from 4-digit situation code) ---
+  const rawSit = shot.situation?.strength;
+  if (rawSit && /^\d{4}$/.test(rawSit) && ctx.isHomeShooter !== undefined) {
+    const defenderGoalieDigit = ctx.isHomeShooter ? rawSit[0] : rawSit[3];
+    result.isEmptyNet = defenderGoalieDigit === '0';
+  } else if (rawSit && /^\d{4}$/.test(rawSit)) {
+    // Fallback: both goalies in → definitely not empty net.
+    if (rawSit[0] === '1' && rawSit[3] === '1') result.isEmptyNet = false;
+  }
+
+  // --- Rebound (same-team shot within REBOUND_WINDOW_SEC) ---
+  if (ctx.priorShots && ctx.priorShots.length > 0) {
+    const shotTime = parseTimeSec(shot.timeInPeriod);
+    if (shotTime !== null) {
+      for (const prev of ctx.priorShots) {
+        if (prev === shot) continue;
+        if (prev.teamId !== shot.teamId) continue;
+        if (prev.period !== shot.period) continue;
+        const prevTime = parseTimeSec(prev.timeInPeriod);
+        if (prevTime === null) continue;
+        const delta = shotTime - prevTime;
+        if (delta > 0 && delta <= REBOUND_WINDOW_SEC) {
+          result.isRebound = true;
+          break;
+        }
+      }
+      if (result.isRebound === undefined) result.isRebound = false;
+    }
+  }
+
+  // --- Rush shot (prior event was same-team possession change in N/D zone) ---
+  if (ctx.priorEvents && ctx.priorEvents.length > 0) {
+    const shotTime = parseTimeSec(shot.timeInPeriod);
+    if (shotTime !== null) {
+      let foundRush = false;
+      // Walk backwards from the shot's moment in the event stream.
+      for (let i = ctx.priorEvents.length - 1; i >= 0; i--) {
+        const ev = ctx.priorEvents[i];
+        if (ev.periodDescriptor?.number !== shot.period) continue;
+        const evTime = parseTimeSec(ev.timeInPeriod);
+        if (evTime === null) continue;
+        const delta = shotTime - evTime;
+        if (delta < 0) continue;
+        if (delta > RUSH_WINDOW_SEC) break;
+        const ownerTeam = ev.details?.eventOwnerTeamId;
+        const zone = ev.details?.zoneCode; // 'O' / 'N' / 'D'
+        const isPossessionChange =
+          ev.typeDescKey === 'takeaway' ||
+          ev.typeDescKey === 'faceoff' ||
+          ev.typeDescKey === 'blocked-shot';
+        if (
+          isPossessionChange &&
+          ownerTeam === shot.teamId &&
+          (zone === 'N' || zone === 'D')
+        ) {
+          foundRush = true;
+          break;
+        }
+      }
+      result.isRushShot = foundRush;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * xG for a ShotEvent with optional surrounding-context derivation. Strength
+ * is parsed from the situation code; distance/angle from coordinates;
+ * rebound / rush / empty-net from `ctx` when provided.
+ *
+ * When called with no context (legacy callers), rebound/rush stay
+ * undefined and the empirical lookup degrades gracefully to the next
+ * bucket level.
+ */
+export function calculateShotEventXG(shot: ShotEvent, ctx?: ShotContext): number {
   const netX = shot.xCoord >= 0 ? 89 : -89;
   const distance = Math.sqrt(
     Math.pow(shot.xCoord - netX, 2) + Math.pow(shot.yCoord, 2)
@@ -185,24 +329,16 @@ export function calculateShotEventXG(shot: ShotEvent): number {
     strengthRaw === '3v3' ? '3v3' :
     '5v5';
 
-  // homeTeamDefending is 'l' or 'r'. Combined with shot xCoord we can
-  // infer whether the shooter is home or away — but we don't have the
-  // shooter's teamId on a ShotEvent in isolation. Best-effort: when
-  // situation.strength is the raw 4-digit code AND we can detect both
-  // goalies are present we know it's not empty net; otherwise undefined.
-  let isEmptyNet: boolean | undefined;
-  const rawSit = shot.situation?.strength;
-  if (rawSit && /^\d{4}$/.test(rawSit)) {
-    // Both goalies in → definitely not empty net regardless of perspective.
-    if (rawSit[0] === '1' && rawSit[3] === '1') isEmptyNet = false;
-  }
+  const derived = deriveShotContext(shot, ctx);
 
   return calculateXG({
     distance,
     angle,
     shotType: mapShotType(shot.shotType),
     strength,
-    isEmptyNet,
+    isEmptyNet: derived.isEmptyNet,
+    isRebound: derived.isRebound,
+    isRushShot: derived.isRushShot,
   }).xGoal;
 }
 

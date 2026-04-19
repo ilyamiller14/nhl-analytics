@@ -178,9 +178,19 @@ export function analyzeLineCombinations(
     }
   }
 
-  // Convert to LineCombination objects
-  const forwardLines = buildCombinations(forwardTrioMap, playerNames, playerPositions, 'forward');
-  const defensePairs = buildCombinations(defensePairMap, playerNames, playerPositions, 'defense');
+  // Convert to LineCombination objects. Ranking (effectiveness vs
+  // frequency) is deferred to the UI layer via `rankLineCombos()` so
+  // both modes are available without re-running the expensive build.
+  const forwardLines = rankLineCombos(
+    buildCombinations(forwardTrioMap, playerNames, playerPositions, 'forward'),
+    'effectiveness',
+    12
+  );
+  const defensePairs = rankLineCombos(
+    buildCombinations(defensePairMap, playerNames, playerPositions, 'defense'),
+    'effectiveness',
+    12
+  );
 
   return {
     teamId,
@@ -210,10 +220,20 @@ function buildCombinations(
 
     const shotsFor = data.shotsFor.length;
     const goalsFor = data.shotsFor.filter(s => s.result === 'goal').length;
-    const xGFor = data.shotsFor.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
+    // Pass the full shot list as context so rebound/empty-net are derived
+    // per shot (same team, 3s window → rebound). Without this each xG call
+    // falls back to a bucket that ignores rebound inflation, which
+    // systematically under-credits rebound-heavy lines.
+    const xGFor = data.shotsFor.reduce(
+      (sum, s) => sum + calculateShotEventXG(s, { priorShots: data.shotsFor }),
+      0
+    );
     const shotsAgainst = data.shotsAgainst.length;
     const goalsAgainst = data.shotsAgainst.filter(s => s.result === 'goal').length;
-    const xGAgainst = data.shotsAgainst.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
+    const xGAgainst = data.shotsAgainst.reduce(
+      (sum, s) => sum + calculateShotEventXG(s, { priorShots: data.shotsAgainst }),
+      0
+    );
 
     const gp = data.gameIds.size;
     const cfPct = totalShots > 0 ? Math.round((shotsFor / totalShots) * 1000) / 10 : 50;
@@ -258,8 +278,37 @@ function buildCombinations(
     }
   }
 
-  // Sort by xG% descending (best overall share first)
-  combos.sort((a, b) => b.xGPct - a.xGPct);
+  // Return all qualified combos, unsorted. Callers decide how to rank:
+  //   * by xGPct     → effectiveness (who played best together)
+  //   * by games     → frequency (who the coach actually deployed)
+  //   * by TOI       → deployment weight
+  // Returning unsorted lets the UI expose a toggle rather than
+  // baking in one opinion.
+  return combos;
+}
 
-  return combos.slice(0, 12);
+export type LineComboSortMode = 'effectiveness' | 'frequency';
+
+/**
+ * Sort line combos by either effectiveness (xG%) or frequency
+ * (games-together × shots-together) and return the top N.
+ *
+ * Effectiveness mode is best for "who played well when they played";
+ * frequency mode is best for "who is the actual top line tonight".
+ */
+export function rankLineCombos(
+  combos: LineCombination[],
+  mode: LineComboSortMode = 'effectiveness',
+  limit: number = 12
+): LineCombination[] {
+  const copy = [...combos];
+  if (mode === 'frequency') {
+    copy.sort(
+      (a, b) => b.gamesAppeared - a.gamesAppeared ||
+                b.shotsFor + b.shotsAgainst - (a.shotsFor + a.shotsAgainst)
+    );
+  } else {
+    copy.sort((a, b) => b.xGPct - a.xGPct);
+  }
+  return copy.slice(0, limit);
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchTrendingPlayers, fetchTeamStandings, fetchGoalieLeaders, type LeagueLeader, type TeamStanding } from '../services/statsService';
+import HomeLeadersList from '../components/HomeLeadersList';
 import './Home.css';
 
 function Home() {
@@ -41,16 +42,17 @@ function Home() {
     <div className="home">
       <section className="hero">
         <div className="hero-content">
-          <h1 className="hero-title">NHL Player Analytics</h1>
+          <h1 className="hero-title">NHL Analytics, In Depth</h1>
           <p className="hero-subtitle">
-            Track, compare, and analyze NHL player statistics with advanced metrics and visualizations
+            Player profiles, team breakdowns, shot maps, advanced metrics, and cap analysis —
+            powered by real NHL data.
           </p>
           <div className="hero-actions">
             <Link to="/search" className="btn btn-primary">
-              Search Players
+              Find a Player
             </Link>
             <Link to="/trends" className="btn btn-secondary">
-              View Analytics
+              League Leaders
             </Link>
           </div>
         </div>
@@ -59,16 +61,16 @@ function Home() {
       {/* Live Standings & Leaders */}
       {isLoading && (
         <section className="features">
-          <div className="features-container" style={{ textAlign: 'center', padding: '3rem 0' }}>
-            <div className="loading-spinner" style={{ margin: '0 auto 1rem' }} />
-            <p style={{ color: '#6b7280' }}>Loading standings and leaders...</p>
+          <div className="features-container home-feedback">
+            <div className="loading-spinner" />
+            <p className="home-feedback__text">Loading standings and leaders…</p>
           </div>
         </section>
       )}
       {error && (
         <section className="features">
-          <div className="features-container" style={{ textAlign: 'center', padding: '2rem 0' }}>
-            <p style={{ color: '#dc2626', marginBottom: '1rem' }}>{error}</p>
+          <div className="features-container home-feedback">
+            <p className="home-feedback__error">{error}</p>
             <button onClick={() => window.location.reload()} className="btn btn-secondary">
               Retry
             </button>
@@ -78,68 +80,50 @@ function Home() {
       {!isLoading && !error && (leaders.length > 0 || standings.length > 0) && (
         <section className="features">
           <div className="features-container">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem' }}>
-              {/* League Leaders */}
+            <div className="home-leaders-grid">
               {leaders.length > 0 && (
-                <div>
-                  <h2 className="features-title" style={{ textAlign: 'left' }}>Points Leaders</h2>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {leaders.slice(0, 5).map((player, i) => (
-                      <Link
-                        key={player.playerId}
-                        to={`/player/${player.playerId}`}
-                        style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem 1rem', background: '#f9fafb', borderRadius: '8px', textDecoration: 'none', color: 'inherit' }}
-                      >
-                        <span><strong>{i + 1}.</strong> {player.name} <span style={{ color: '#6b7280' }}>({player.team})</span></span>
-                        <strong>{player.value} PTS</strong>
-                      </Link>
-                    ))}
-                  </div>
-                  <Link to="/trends" style={{ display: 'inline-block', marginTop: '1rem', color: '#003087' }}>
-                    View all leaders →
-                  </Link>
-                </div>
+                <HomeLeadersList
+                  title="Points Leaders"
+                  entries={leaders.slice(0, 5).map((player) => ({
+                    id: player.playerId,
+                    primary: player.name,
+                    secondary: player.team,
+                    value: player.value,
+                    valueSuffix: 'PTS',
+                    href: `/player/${player.playerId}`,
+                  }))}
+                  footerHref="/trends"
+                  footerLabel="View all leaders →"
+                />
               )}
 
-              {/* Goalie Leaders */}
               {goalieLeaders.length > 0 && (
-                <div>
-                  <h2 className="features-title" style={{ textAlign: 'left' }}>Goalie Wins Leaders</h2>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {goalieLeaders.slice(0, 5).map((player, i) => (
-                      <Link
-                        key={player.playerId}
-                        to={`/player/${player.playerId}`}
-                        style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem 1rem', background: '#f9fafb', borderRadius: '8px', textDecoration: 'none', color: 'inherit' }}
-                      >
-                        <span><strong>{i + 1}.</strong> {player.name} <span style={{ color: '#6b7280' }}>({player.team})</span></span>
-                        <strong>{player.value} W</strong>
-                      </Link>
-                    ))}
-                  </div>
-                </div>
+                <HomeLeadersList
+                  title="Goalie Wins Leaders"
+                  entries={goalieLeaders.slice(0, 5).map((player) => ({
+                    id: player.playerId,
+                    primary: player.name,
+                    secondary: player.team,
+                    value: player.value,
+                    valueSuffix: 'W',
+                    href: `/player/${player.playerId}`,
+                  }))}
+                />
               )}
 
-              {/* Standings */}
               {standings.length > 0 && (
-                <div>
-                  <h2 className="features-title" style={{ textAlign: 'left' }}>Standings</h2>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {standings.slice(0, 5).map((team, i) => (
-                      <Link
-                        key={team.teamId}
-                        to={`/team/${team.teamAbbrev}`}
-                        style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem 1rem', background: '#f9fafb', borderRadius: '8px', textDecoration: 'none', color: 'inherit' }}
-                      >
-                        <span><strong>{i + 1}.</strong> {team.teamName}</span>
-                        <span><strong>{team.points}</strong> PTS ({team.wins}-{team.losses}-{team.otLosses})</span>
-                      </Link>
-                    ))}
-                  </div>
-                  <Link to="/trends" style={{ display: 'inline-block', marginTop: '1rem', color: '#003087' }}>
-                    View full standings →
-                  </Link>
-                </div>
+                <HomeLeadersList
+                  title="Standings"
+                  entries={standings.slice(0, 5).map((team) => ({
+                    id: team.teamId,
+                    primary: team.teamName,
+                    value: team.points,
+                    valueSuffix: `PTS (${team.wins}-${team.losses}-${team.otLosses})`,
+                    href: `/team/${team.teamAbbrev}`,
+                  }))}
+                  footerHref="/trends"
+                  footerLabel="View full standings →"
+                />
               )}
             </div>
           </div>

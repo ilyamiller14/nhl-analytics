@@ -67,12 +67,11 @@
 
 .stat-value {
   font-size: 1.25rem;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   color: var(--gray-900);
   margin-bottom: 0.25rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
 }
 
 .stat-meta {

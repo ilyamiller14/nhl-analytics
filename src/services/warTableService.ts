@@ -100,7 +100,18 @@ export interface LeagueContext {
     wins: number; losses: number; otLosses: number;
     goalsFor: number; goalsAgainst: number; gamesCompleted: number;
   };
-  skaters: { F: LeaguePositionStats; D: LeaguePositionStats };
+  // Position-stratified baselines. Historical builds only provided F/D;
+  // newer worker builds may additionally surface C / LW / RW split buckets
+  // so centers get compared to centers (faceoffs push their GAR higher
+  // than wingers' on average). Consumers prefer the most specific bucket
+  // that's present and fall back to F when C/LW/RW aren't populated.
+  skaters: {
+    F: LeaguePositionStats;
+    D: LeaguePositionStats;
+    C?: LeaguePositionStats;
+    LW?: LeaguePositionStats;
+    RW?: LeaguePositionStats;
+  };
   goalies: LeagueGoalieStats;
   ppXGPerMinute: number;
   // v2 additions — empirical goal-values for micro-components.

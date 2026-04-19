@@ -206,7 +206,21 @@ export function computeSkaterWAR(
   const netPenalty = row.penaltiesDrawn - row.penaltiesTaken;
   const penalties = netPenalty * penaltyValue;
 
-  const posStats = pos === 'F' ? context.skaters.F : context.skaters.D;
+  // Prefer the most specific position bucket the worker exposed.
+  // Centers vs. wingers have meaningfully different GAR distributions
+  // (centers accrue faceoff value wingers can't), so grading McDavid
+  // against a mixed forward pool inflates his percentile vs a pure
+  // centers pool. When `C` / `LW` / `RW` buckets aren't populated
+  // (older table builds), fall back to the general `F` bucket.
+  const resolvePosStats = (): typeof context.skaters.F => {
+    if (pos === 'D') return context.skaters.D;
+    const posCode = row.positionCode;
+    if (posCode === 'C' && context.skaters.C) return context.skaters.C;
+    if (posCode === 'L' && context.skaters.LW) return context.skaters.LW;
+    if (posCode === 'R' && context.skaters.RW) return context.skaters.RW;
+    return context.skaters.F;
+  };
+  const posStats = resolvePosStats();
 
   // --- Component 4: EV Offense / Defense — TEAM-RELATIVE (xGF%/xGA% Rel)
   // Raw on-ice rates penalize players on bad teams (their teammates
@@ -299,6 +313,12 @@ export function computeSkaterWAR(
   // --- Component 5: Faceoffs — centers only. NHL positionCode "C"
   // identifies centers; all other positions get zero. Value formula
   // per the spec: (FO% − 0.5) × attempts × faceoffValuePerWin.
+  //
+  // Small-sample shrinkage: a rookie center with 12 faceoffs at 75%
+  // must not score +3 goals of credit. We add `K_PHANTOM_FO = 100`
+  // phantom attempts at exactly 50% — empirical Bayes with a neutral
+  // prior. A center with 100 real attempts gets his observed rate 50%
+  // toward reality; at 1000+ real attempts the prior washes out.
   const faceoffValuePerWin = context.faceoffValuePerWin ?? null;
   let faceoffs = 0;
   const isCenter = row.positionCode === 'C';
@@ -310,8 +330,11 @@ export function computeSkaterWAR(
     ) {
       const attempts = row.faceoffWins + row.faceoffLosses;
       if (attempts > 0) {
-        const winPct = row.faceoffWins / attempts;
-        faceoffs = (winPct - 0.5) * attempts * faceoffValuePerWin;
+        const K_PHANTOM_FO = 100;
+        const shrunkWins = row.faceoffWins + K_PHANTOM_FO * 0.5;
+        const shrunkAttempts = attempts + K_PHANTOM_FO;
+        const shrunkPct = shrunkWins / shrunkAttempts;
+        faceoffs = (shrunkPct - 0.5) * attempts * faceoffValuePerWin;
       }
     } else {
       notes.push(
@@ -381,7 +404,25 @@ export function computeSkaterWAR(
   const totalGAR = rawGAR + replacementAdjust;
 
   const WAR = totalGAR / context.marginalGoalsPerWin;
-  const WAR_per_82 = row.gamesPlayed > 0 ? (WAR / row.gamesPlayed) * 82 : 0;
+
+  // WAR per 82 with Bayesian shrinkage toward 0 (replacement level).
+  //
+  // A raw projection — `(WAR / gp) * 82` — explodes under small samples:
+  // a 5-GP call-up who put up +1 WAR pace-projects to +16.4 WAR over
+  // 82, which is nonsense. Season-level shot/result metrics stabilize
+  // around GP ≈ 25–30. We shrink toward 0 with an empirical Bayes
+  // prior of K = 25 phantom replacement games:
+  //
+  //   shrunk = raw × gp / (gp + K)
+  //
+  // At GP=82 this barely changes the value (≈ 76.6%); at GP=10 it
+  // brings the projection down to 10/35 ≈ 28% of the raw pace — a
+  // conservative anchor that reflects how little a 10-game stretch
+  // really tells us.
+  const K_GP_SHRINKAGE = 25;
+  const rawWARPer82 = row.gamesPlayed > 0 ? (WAR / row.gamesPlayed) * 82 : 0;
+  const shrinkageFactor = row.gamesPlayed / (row.gamesPlayed + K_GP_SHRINKAGE);
+  const WAR_per_82 = rawWARPer82 * shrinkageFactor;
 
   const percentile = percentileFromQuantiles(
     WAR_per_82 * context.marginalGoalsPerWin,  // convert back to GAR space
@@ -474,7 +515,16 @@ export function computeGoalieWAR(
   const baseline = replacementGSAxPerGame * row.gamesPlayed;
   const GSAxAboveReplacement = GSAx - baseline;
   const WAR = GSAxAboveReplacement / Math.max(0.001, context.marginalGoalsPerWin);
-  const WAR_per_82 = row.gamesPlayed > 0 ? (WAR / row.gamesPlayed) * 82 : 0;
+
+  // Same shrinkage pattern as skaters, but on shots-faced rather than
+  // GP: goalie performance stabilizes around ~500 shots faced (the
+  // standard public-model threshold). We shrink the per-82 projection
+  // toward 0 using K_SHOTS = 500 phantom shots at replacement-level
+  // GSAx.
+  const K_SHOTS_SHRINKAGE = 500;
+  const rawWARPer82 = row.gamesPlayed > 0 ? (WAR / row.gamesPlayed) * 82 : 0;
+  const shotShrinkage = row.shotsFaced / (row.shotsFaced + K_SHOTS_SHRINKAGE);
+  const WAR_per_82 = rawWARPer82 * shotShrinkage;
 
   const percentile = percentileFromQuantiles(WAR_per_82, context.goalies.warPer82Quantiles);
 

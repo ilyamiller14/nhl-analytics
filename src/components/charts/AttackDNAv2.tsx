@@ -39,6 +39,24 @@ interface AttackDNAv2Props {
    * possession-to-shot time percentile (fallback only).
    */
   speedAxisLabel?: 'Skating Speed' | 'Tempo';
+  /**
+   * Real league baseline values for each radar axis, each on the same
+   * physical 0–100 scale the profile uses. When provided the radar
+   * draws an honest "league avg" polygon at those values; when omitted
+   * no baseline is drawn (better than drawing the fake 50-on-every-axis
+   * ring that used to ship — that wasn't a league average, it was a
+   * decorative circle).
+   *
+   * Caller is expected to derive these by running `calculateAttackProfile`
+   * against a league-wide shot sample and averaging the resulting axis
+   * values — no third-party constants.
+   */
+  leagueBaseline?: {
+    attackSpeed: number;
+    dangerZoneFocus: number;
+    shootingAccuracy: number;
+    shootingDepth: number;
+  } | null;
 }
 
 // ============================================================================
@@ -76,6 +94,7 @@ export default function AttackDNAv2({
   showProfile = true,
   showMetrics = true,
   speedAxisLabel = 'Tempo',
+  leagueBaseline = null,
 }: AttackDNAv2Props) {
   const [hoveredZone, setHoveredZone] = useState<ShotZone | null>(null);
   const [selectedResult, setSelectedResult] = useState<ShotLocation['result'] | 'all'>('all');
@@ -201,17 +220,26 @@ export default function AttackDNAv2({
       `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`
     ).join(' ') + ' Z';
 
-    // League average polygon (all at 50)
-    const avgPoints = axes.map((axis) => {
-      const angleRad = (axis.angle * Math.PI) / 180;
-      return {
-        x: center + Math.cos(angleRad) * radius * 0.5,
-        y: center + Math.sin(angleRad) * radius * 0.5,
-      };
-    });
-    const avgPathD = avgPoints.map((p, i) =>
-      `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`
-    ).join(' ') + ' Z';
+    // League baseline polygon — only rendered when real league axis
+    // averages have been computed and passed in. The old behavior drew
+    // a circle at 50 on every axis; that wasn't a league average, it
+    // was a drawn constant. Better to show nothing than a lie.
+    const avgPathD = leagueBaseline
+      ? axes
+          .map((axis) => {
+            const angleRad = (axis.angle * Math.PI) / 180;
+            const rawAvg = (leagueBaseline as Record<string, number>)[axis.key];
+            const avg = Number.isFinite(rawAvg)
+              ? Math.max(0, Math.min(100, rawAvg)) / 100
+              : 0;
+            return {
+              x: center + Math.cos(angleRad) * radius * avg,
+              y: center + Math.sin(angleRad) * radius * avg,
+            };
+          })
+          .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`)
+          .join(' ') + ' Z'
+      : null;
 
     return (
       <svg viewBox={`0 0 ${svgSize} ${svgSize}`} className="fingerprint-radar" style={{ width: '100%', maxWidth: `${svgSize}px`, height: 'auto' }}>
@@ -260,15 +288,18 @@ export default function AttackDNAv2({
           );
         })}
 
-        {/* League average line */}
-        <path
-          d={avgPathD}
-          fill="none"
-          stroke="#9ca3af"
-          strokeWidth={1.5}
-          strokeDasharray="4,4"
-          opacity={0.6}
-        />
+        {/* League baseline line — rendered only when a real computed
+            league baseline is supplied. */}
+        {avgPathD && (
+          <path
+            d={avgPathD}
+            fill="none"
+            stroke="#9ca3af"
+            strokeWidth={1.5}
+            strokeDasharray="4,4"
+            opacity={0.6}
+          />
+        )}
 
         {/* Main profile polygon */}
         <path
@@ -500,17 +531,19 @@ export default function AttackDNAv2({
               <span className="style-label">{analytics.profile.primaryStyle}</span>
             </div>
             <div className="style-strength">
-              {analytics.profile.styleStrength}% distinct from league avg
+              {analytics.profile.styleStrength}% style clarity (top axis vs average axis)
             </div>
             <div className="comparison-legend">
               <div className="legend-item">
                 <span className="color-indicator primary" />
                 <span>Team Profile</span>
               </div>
-              <div className="legend-item">
-                <span className="color-indicator comparison" />
-                <span>League Avg (50)</span>
-              </div>
+              {leagueBaseline && (
+                <div className="legend-item">
+                  <span className="color-indicator comparison" />
+                  <span>League Avg</span>
+                </div>
+              )}
             </div>
           </div>
         )}

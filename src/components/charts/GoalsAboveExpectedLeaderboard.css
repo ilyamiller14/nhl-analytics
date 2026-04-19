@@ -1,6 +1,6 @@
-.gax-leader { color: #e5e7eb; display: flex; flex-direction: column; gap: 8px; }
-.gax-title { font-size: 1rem; font-weight: 600; margin: 0; color: #f3f4f6; }
-.gax-empty { padding: 20px; border: 1px dashed #374151; border-radius: 8px; text-align: center; color: #9ca3af; font-size: 0.85rem; }
+.gax-leader { color: var(--gray-200); display: flex; flex-direction: column; gap: 8px; }
+.gax-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--gray-100); }
+.gax-empty { padding: 20px; border: 1px dashed var(--gray-700); border-radius: 8px; text-align: center; color: var(--gray-400); font-size: 0.85rem; }
 .gax-table {
   width: 100%;
   border-collapse: collapse;
@@ -18,8 +18,8 @@
 .gax-th-rank, .gax-th-name, .gax-rank, .gax-name {
   text-align: left;
 }
-.gax-th-rank { width: 32px; color: #94a3b8; }
-.gax-rank { color: #94a3b8; }
+.gax-th-rank { width: 32px; color: var(--gray-400); }
+.gax-rank { color: var(--gray-400); }
 .gax-th-name { width: 40%; }
 .gax-th {
   color: #cbd5f5;
@@ -30,19 +30,19 @@
   font-size: 0.72rem;
   letter-spacing: 0.04em;
 }
-.gax-th:hover { color: #f3f4f6; }
+.gax-th:hover { color: var(--gray-100); }
 .gax-th.active { color: #60a5fa; }
 .gax-table tbody tr:hover { background: rgba(30, 41, 59, 0.4); }
 .gax-table tbody tr.focus {
   background: rgba(59, 130, 246, 0.14);
   font-weight: 600;
 }
-.gax-name { color: #e5e7eb; }
+.gax-name { color: var(--gray-200); }
 .gax-table .pos { color: #34d399; font-weight: 600; }
 .gax-table .neg { color: #f87171; font-weight: 600; }
 .gax-caption {
   font-size: 0.72rem;
-  color: #94a3b8;
+  color: var(--gray-400);
   padding-top: 6px;
 }
 
@@ -85,6 +85,6 @@
   height: 100%;
   opacity: 0.85;
 }
-.gax-bar-fill.pos { background: linear-gradient(to right, #34d399, #10b981); }
-.gax-bar-fill.neg { background: linear-gradient(to left, #f87171, #ef4444); }
+.gax-bar-fill.pos { background: linear-gradient(to right, #34d399, var(--success)); }
+.gax-bar-fill.neg { background: linear-gradient(to left, #f87171, var(--error)); }
 .gax-bar-value { text-align: left !important; font-weight: 600; }

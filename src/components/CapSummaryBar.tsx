@@ -35,7 +35,10 @@ export default function CapSummaryBar({ summary }: CapSummaryBarProps) {
     playerCount,
   } = summary;
 
-  const utilizationPct = Math.min((totalCapHit / capCeiling) * 100, 100);
+  // Let the utilization bar overshoot 100% so a team that's actually
+  // $3M over the cap doesn't visually read identical to a team at
+  // exactly the ceiling. Capped at 150% to avoid runaway overflow.
+  const utilizationPct = Math.min((totalCapHit / capCeiling) * 100, 150);
   const isOverCap = capSpace < 0;
 
   const forwardPct = (forwardCapHit / capCeiling) * 100;
@@ -60,12 +63,13 @@ export default function CapSummaryBar({ summary }: CapSummaryBarProps) {
             {isOverCap ? '-' : ''}{formatDollars(Math.abs(capSpace))}
           </span>
         </div>
-        {ltirRelief > 0 && (
-          <div className="cap-stat">
-            <span className="cap-stat-label">LTIR Relief</span>
-            <span className="cap-stat-value cap-ltir">{formatDollars(ltirRelief)}</span>
-          </div>
-        )}
+        {/* LTIR Relief is always rendered so users know the concept
+            exists — showing "$0" is informative; hiding it entirely
+            would hide the mechanic. */}
+        <div className="cap-stat">
+          <span className="cap-stat-label">LTIR Relief</span>
+          <span className="cap-stat-value cap-ltir">{formatDollars(ltirRelief)}</span>
+        </div>
         <div className="cap-stat">
           <span className="cap-stat-label">Active Players</span>
           <span className="cap-stat-value">{playerCount}</span>
@@ -86,6 +90,21 @@ export default function CapSummaryBar({ summary }: CapSummaryBarProps) {
           <span>{formatDollars(capCeiling)}</span>
         </div>
       </div>
+
+      {/* Methodology disclosure — cap math here is sum-of-active-hits
+          only. It does NOT model: buried contracts (AHL stash above
+          minimum + $375k), 35+ contract penalties, retained-salary
+          transactions (sending-team residual), bonus overages carried
+          to next season, offseason vs in-season rules (23-man limit),
+          or LTIR daily accrual. The NHL's in-season accrual figure
+          can differ from this headline by a few million at trade
+          deadline — treat it as a snapshot, not an auditable figure. */}
+      <p className="cap-methodology-note">
+        Snapshot based on active roster cap hits. Does not include buried
+        contracts, retained-salary adjustments, bonus overages, or LTIR
+        daily accrual — values may drift from official NHL figures around
+        trade deadline.
+      </p>
 
       {/* Position breakdown */}
       <div className="cap-position-breakdown">

@@ -1,5 +1,5 @@
 import { NHL_API_BASE_URL } from './nhlApi';
-import { calculateXG } from './xgModel';
+import { calculateXG, deriveShotContext } from './xgModel';
 import { API_CONFIG } from '../config/api';
 import { CacheManager, ANALYTICS_CACHE } from '../utils/cacheUtils';
 import { parseTimeToSeconds } from '../utils/timeUtils';
@@ -554,10 +554,18 @@ export interface ShotAttempt {
 }
 
 /**
- * Convert NHL API ShotEvent to ShotAttempt format for our analytics
- * Keeps original NHL coordinates for proper visualization
+ * Convert NHL API ShotEvent to ShotAttempt format for our analytics.
+ * Keeps original NHL coordinates for proper visualization.
+ *
+ * Optionally accepts `priorShots` (same game, chronologically ordered)
+ * so rebound detection can run — without this the xG value falls back
+ * to the rebound-agnostic bucket, which systematically under-counts
+ * rebound goals.
  */
-export function convertToShotAttempt(shotEvent: ShotEvent): ShotAttempt {
+export function convertToShotAttempt(
+  shotEvent: ShotEvent,
+  priorShots?: ShotEvent[]
+): ShotAttempt {
   // Calculate distance and angle from coordinates
   const { distance, angle } = calculateShotMetrics(
     shotEvent.xCoord,
@@ -601,14 +609,18 @@ export function convertToShotAttempt(shotEvent: ShotEvent): ShotAttempt {
     else if (homeSkaters === 3) strength = '3v3';
   }
 
-  // Calculate expected goals (xG)
+  // Derive rebound + empty-net from surrounding context when available.
+  const ctx = deriveShotContext(shotEvent, { priorShots });
+
+  // Calculate expected goals (xG) with real context.
   const xgPrediction = calculateXG({
     distance,
     angle,
     shotType,
     strength,
-    isRebound: false,
-    isRushShot: false,
+    isRebound: ctx.isRebound,
+    isRushShot: ctx.isRushShot,
+    isEmptyNet: ctx.isEmptyNet,
   });
 
   return {
@@ -619,8 +631,8 @@ export function convertToShotAttempt(shotEvent: ShotEvent): ShotAttempt {
     angle,
     shotType,
     strength,
-    rebound: false,
-    rushShot: false,
+    rebound: ctx.isRebound ?? false,
+    rushShot: ctx.isRushShot ?? false,
     xGoal: xgPrediction.xGoal,
     shooterId: shotEvent.shootingPlayerId,
   };

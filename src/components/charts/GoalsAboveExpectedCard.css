@@ -1,6 +1,6 @@
-.gax-card { color: #e5e7eb; display: flex; flex-direction: column; gap: 10px; }
-.gax-card-title { font-size: 1rem; font-weight: 600; margin: 0; color: #f3f4f6; }
-.gax-card-empty { padding: 18px; border: 1px dashed #374151; border-radius: 8px; text-align: center; color: #9ca3af; font-size: 0.85rem; }
+.gax-card { color: var(--gray-200); display: flex; flex-direction: column; gap: 10px; }
+.gax-card-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--gray-100); }
+.gax-card-empty { padding: 18px; border: 1px dashed var(--gray-700); border-radius: 8px; text-align: center; color: var(--gray-400); font-size: 0.85rem; }
 .gax-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
@@ -15,7 +15,7 @@
   gap: 3px;
 }
 .gax-card-label {
-  color: #94a3b8;
+  color: var(--gray-400);
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -24,7 +24,7 @@
   font-size: 1.3rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: #f3f4f6;
+  color: var(--gray-100);
 }
 .gax-hero {
   border-left: 3px solid rgba(148, 163, 184, 0.4);

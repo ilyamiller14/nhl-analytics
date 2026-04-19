@@ -8,18 +8,14 @@
  * Landscape layout (~900x600) optimized for social sharing.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { AdvancedPlayerAnalytics } from '../hooks/useAdvancedPlayerAnalytics';
 import type { RollingMetrics } from '../services/rollingAnalytics';
 import type { SkaterAverages } from '../services/leagueAveragesService';
 import { computePercentile } from '../services/leagueAveragesService';
-import {
-  getLeagueSkaterAttackDna,
-  computePlayerAttackDnaPercentiles,
-  type SkaterAttackDnaPercentiles,
-} from '../services/leagueSkaterAttackDnaService';
 import XGTimeSeriesChart from './charts/XGTimeSeriesChart';
 import MiniShotMap from './charts/MiniShotMap';
+import { getTeamPrimaryColor } from '../constants/teams';
 import './PlayerAnalyticsCard.css';
 
 interface PlayerAnalyticsCardProps {
@@ -271,113 +267,17 @@ function PlayerDNARadar({ axes, archetype }: { axes: DNAAxis[]; archetype: strin
   );
 }
 
-/**
- * Compact 4-axis Attack DNA radar for the share card. Renders the player's
- * league percentile ranks on the four axes (Speed, Danger, Shooting, Depth)
- * with a 50% median reference polygon behind it. Pure inline SVG so it
- * renders cleanly when the card is captured as an image.
- */
-function AttackDnaMiniRadar({
-  speed, danger, shooting, depth, speedLabel = 'Tempo', size = 160,
-}: {
-  speed: number; danger: number; shooting: number; depth: number;
-  speedLabel?: 'Skating Speed' | 'Tempo';
-  size?: number;
-}) {
-  const cx = size / 2;
-  const cy = size / 2;
-  const r = size / 2 - 32; // leave room for axis labels + percentile value
-  const refR = r * 0.5;    // league median ring
-
-  // Axis order around the circle: Speed (top), Danger (right), Shooting
-  // (bottom), Depth (left). Matches the team-view radar axis ordering in
-  // AttackDNAv2 so readers don't have to re-learn it.
-  const dirs = [
-    { dx: 0, dy: -1 },
-    { dx: 1, dy: 0 },
-    { dx: 0, dy: 1 },
-    { dx: -1, dy: 0 },
-  ];
-  const values = [speed, danger, shooting, depth];
-  const labels = [speedLabel, 'Danger', 'Shooting', 'Depth'];
-
-  const points = values.map((v, i) => {
-    const scale = Math.min(Math.max(v, 0), 99) / 100;
-    return { x: cx + dirs[i].dx * r * scale, y: cy + dirs[i].dy * r * scale };
-  });
-  const refPoints = dirs.map(d => ({ x: cx + d.dx * refR, y: cy + d.dy * refR }));
-  const outerPoints = dirs.map(d => ({ x: cx + d.dx * r, y: cy + d.dy * r }));
-
-  const polygon = points.map(p => `${p.x},${p.y}`).join(' ');
-  const refPolygon = refPoints.map(p => `${p.x},${p.y}`).join(' ');
-  const outerPolygon = outerPoints.map(p => `${p.x},${p.y}`).join(' ');
-
-  const labelOffset = 10;
-  const labelEls = labels.map((text, i) => ({
-    text,
-    value: Math.round(values[i]),
-    x: cx + dirs[i].dx * (r + labelOffset),
-    y: cy + dirs[i].dy * (r + labelOffset),
-    anchor: i === 1 ? 'start' : i === 3 ? 'end' : 'middle',
-    baseline: i === 0 ? 'auto' : i === 2 ? 'hanging' : 'middle',
-  }));
-
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      className="attack-dna-radar"
-      style={{ overflow: 'visible' }}
-    >
-      {/* Axis lines */}
-      {dirs.map((d, i) => (
-        <line
-          key={i}
-          x1={cx} y1={cy}
-          x2={cx + d.dx * r} y2={cy + d.dy * r}
-          stroke="rgba(255,255,255,0.15)" strokeWidth={1}
-        />
-      ))}
-      {/* 50th percentile league-median reference diamond */}
-      <polygon points={refPolygon} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={1} strokeDasharray="3,3" />
-      {/* Outer boundary */}
-      <polygon points={outerPolygon} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={1} />
-      {/* Player polygon */}
-      <polygon points={polygon} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={1.5} />
-      {/* Vertex dots */}
-      {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={2.5} fill="#3b82f6" />
-      ))}
-      {/* Axis labels + percentile values */}
-      {labelEls.map((l, i) => (
-        <g key={i}>
-          <text
-            x={l.x} y={l.y}
-            textAnchor={l.anchor as any}
-            dominantBaseline={l.baseline as any}
-            fill="rgba(255,255,255,0.85)" fontSize="10" fontWeight="600"
-            fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-          >
-            {l.text}
-          </text>
-          <text
-            x={l.x} y={l.y + (dirs[i].dy === 0 ? 11 : dirs[i].dy * 11)}
-            textAnchor={l.anchor as any}
-            dominantBaseline={l.baseline as any}
-            fill="#60a5fa" fontSize="9.5" fontWeight="700"
-            fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-          >
-            {l.value}
-          </text>
-        </g>
-      ))}
-    </svg>
-  );
-}
+// Note: a second mini Attack DNA radar used to render on this card.
+// Removed during the share-card redesign — the Player DNA radar above
+// already conveys what kind of player this is, and two radars on one
+// graphic hurt legibility at Twitter preview scale. Full Attack DNA
+// is still available at /attack-dna/player/:id.
 
 export default function PlayerAnalyticsCard({
-  playerId,
+  // playerId currently unused on the share card itself (the attack-DNA
+  // deep-link lives in the footer URL rather than a server fetch).
+  // Kept in props so callers don't need to refactor when we revisit.
+  playerId: _playerId,
   playerName,
   playerNumber,
   position,
@@ -461,30 +361,22 @@ export default function PlayerAnalyticsCard({
     return { axes, archetype };
   }, [position, goals, assists, gamesPlayed, shots, analytics, skaterAverages, edgeSpeed, ppg, gpg, shPct]);
 
-  // Attack DNA percentiles vs the league skater distribution (≥50 shots).
-  // Hidden if data hasn't loaded or the player isn't in the distribution.
-  const [attackDna, setAttackDna] = useState<SkaterAttackDnaPercentiles | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    if (!playerId) {
-      setAttackDna(null);
-      return;
-    }
-    (async () => {
-      try {
-        const league = await getLeagueSkaterAttackDna();
-        if (cancelled || !league) return;
-        const pct = computePlayerAttackDnaPercentiles(playerId, league);
-        if (!cancelled) setAttackDna(pct);
-      } catch {
-        if (!cancelled) setAttackDna(null);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [playerId]);
+  // Attack DNA radar was removed from the share card to eliminate the
+  // "two radars on one graphic" problem — the Player DNA radar above
+  // already communicates what kind of player this is. Full Attack DNA
+  // lives at /attack-dna/player/:id, linked from the card footer URL.
+
+  // Team-color accent: the card's top bar + outer ring read from the
+  // `--team-accent` CSS var. Inject the player's team primary color so
+  // every share card is branded for its team rather than every card
+  // looking generically navy.
+  const teamAccent = getTeamPrimaryColor(teamAbbrev);
 
   return (
-    <div className="player-analytics-card">
+    <div
+      className="player-analytics-card"
+      style={{ ['--team-accent' as never]: teamAccent }}
+    >
       {/* ============================================================
           HEADER ROW: identity + contract on left, hero stats on right
           ============================================================ */}
@@ -506,13 +398,23 @@ export default function PlayerAnalyticsCard({
                 <span className="player-team">{teamAbbrev}</span>
                 <span className="season-badge">{season}</span>
               </div>
-              {/* Surplus Badge - only renders when capHit is provided */}
+              {/* Surplus Badge — only renders when capHit is provided.
+                  Value comes from surplusValueService (P/GP tier-median
+                  cap method — what comparable-producing players earn),
+                  which is a different question than the WAR-based
+                  surplus on the Advanced Stats page (on-ice value less
+                  cap). We label it "Market Surplus" so users don't
+                  conflate the two. */}
               {capHit != null && (
                 <div className="surplus-badge">
                   <span className="surplus-cap">{formatDollars(capHit)} AAV</span>
                   {surplus != null && (
-                    <span className={`surplus-value ${surplus >= 0 ? 'bargain' : 'overpaid'}`}>
-                      {formatDollars(Math.abs(surplus))} {surplus >= 0 ? 'SURPLUS' : 'DEFICIT'}
+                    <span
+                      className={`surplus-value ${surplus >= 0 ? 'bargain' : 'overpaid'}`}
+                      title="Market Surplus = median cap hit for players at this production tier − actual cap hit"
+                    >
+                      {formatDollars(Math.abs(surplus))}{' '}
+                      {surplus >= 0 ? 'MKT SURPLUS' : 'MKT DEFICIT'}
                     </span>
                   )}
                   {surplusPercentile != null && (
@@ -528,12 +430,27 @@ export default function PlayerAnalyticsCard({
         </div>
 
         <div className="header-right">
+          {/* Three hero stats, not five. PTS is the headline; P/GP
+              anchors the pace; Surplus is the one talking point fans
+              care about beyond goals. +/-, GP, A, TOI demoted to the
+              secondary strip below — +/- in particular is noise at
+              this scale and was taking up 1/5 of the header. */}
           <div className="hero-stats-row">
-            <HeroStat label="G" value={goals} />
-            <HeroStat label="A" value={assists} />
-            <HeroStat label="PTS" value={points} sub={`${ppg.toFixed(2)} P/GP`} />
-            <HeroStat label="+/-" value={plusMinus >= 0 ? `+${plusMinus}` : plusMinus} />
-            <HeroStat label="GP" value={gamesPlayed} sub={avgToi ? `${avgToi} TOI` : undefined} />
+            <HeroStat label="PTS" value={points} sub={`${goals}G · ${assists}A`} />
+            <HeroStat label="P/GP" value={ppg.toFixed(2)} sub={`${gamesPlayed} GP`} />
+            {surplus != null ? (
+              <HeroStat
+                label={surplus >= 0 ? 'MKT SURPLUS' : 'MKT DEFICIT'}
+                value={`${surplus >= 0 ? '+' : '−'}$${(Math.abs(surplus) / 1_000_000).toFixed(1)}M`}
+                sub={capHit != null ? `${formatDollars(capHit)} AAV` : undefined}
+              />
+            ) : (
+              <HeroStat
+                label="+/-"
+                value={plusMinus >= 0 ? `+${plusMinus}` : plusMinus}
+                sub={avgToi ? `${avgToi} TOI` : undefined}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -623,69 +540,56 @@ export default function PlayerAnalyticsCard({
       <div className="bottom-columns">
         {/* Left Column: rolling + individual xG + on-ice xG */}
         <div className="bottom-col-left">
-          {/* Rolling 10-Game Metrics */}
+          {/* Rolling 10-Game Metrics. Jargon relabelled for the
+              casual fan: CF% → "Shot share", PDO → "Luck index",
+              xG% → "Chance share". ixG is elsewhere — redundant
+              individual-xG block has been removed. */}
           {latestRolling && (
             <div className="rolling-section">
-              <h3 className="section-title">10-Game Rolling</h3>
+              <h3 className="section-title">Last 10 Games</h3>
               <div className="rolling-metrics-grid">
                 <div className="rolling-metric">
                   <span className={`rolling-value ${latestRolling.rollingPDO >= 100 ? 'hot' : 'cold'}`}>
                     {latestRolling.rollingPDO.toFixed(1)}
                   </span>
-                  <span className="rolling-label">PDO</span>
+                  <span className="rolling-label" title="Shooting % + save % while on the ice. 100 = neutral luck. Far from 100 usually means unsustainable.">
+                    Luck index
+                  </span>
                 </div>
                 <div className="rolling-metric">
                   <span className={`rolling-value ${latestRolling.rollingCorsiPct >= 50 ? 'positive' : 'negative'}`}>
                     {latestRolling.rollingCorsiPct.toFixed(1)}%
                   </span>
-                  <span className="rolling-label">CF%</span>
+                  <span className="rolling-label" title="Share of shot attempts for your team while you're on the ice.">
+                    Shot share
+                  </span>
                 </div>
                 <div className="rolling-metric">
                   <span className={`rolling-value ${latestRolling.rollingXGPct >= 50 ? 'positive' : 'negative'}`}>
                     {latestRolling.rollingXGPct.toFixed(1)}%
                   </span>
-                  <span className="rolling-label">xG%</span>
+                  <span className="rolling-label" title="Share of expected goals for your team while you're on the ice — shot share weighted by shot quality.">
+                    Chance share
+                  </span>
                 </div>
                 <div className="rolling-metric">
                   <span className="rolling-value">{latestRolling.rollingPointsPerGame.toFixed(2)}</span>
-                  <span className="rolling-label">P/GP</span>
+                  <span className="rolling-label">P/GP pace</span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Individual xG */}
-          {analytics?.individualXG && (
-            <div className="xg-section individual-xg">
-              <div className="xg-section-header">Individual xG</div>
-              <div className="xg-summary">
-                <div className="xg-item">
-                  <span className="xg-value">{analytics.individualXG.ixG.toFixed(2)}</span>
-                  <span className="xg-label">ixG</span>
-                </div>
-                <div className="xg-item">
-                  <span className={`xg-value ${analytics.individualXG.goalsAboveExpected >= 0 ? 'positive' : 'negative'}`}>
-                    {analytics.individualXG.goalsAboveExpected >= 0 ? '+' : ''}
-                    {analytics.individualXG.goalsAboveExpected.toFixed(2)}
-                  </span>
-                  <span className="xg-label">G-ixG</span>
-                </div>
-                <div className="xg-item">
-                  <span className="xg-value">{analytics.individualXG.ixGPerGame.toFixed(3)}</span>
-                  <span className="xg-label">ixG/GP</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* On-Ice xG */}
+          {/* On-Ice Expected Goals. Only the differential (xG+/-) and
+              the percentage survive the share-card edit — raw xGF /
+              xGA counts were redundant once xG% is shown. */}
           {analytics && (analytics.onIceXG || analytics.xGMetrics) && (
             <div className="xg-section on-ice-xg">
-              <div className="xg-section-header">On-Ice xG%</div>
+              <div className="xg-section-header">Expected Goals (On Ice)</div>
               {percentiles && (
                 <div className="gauges-grid">
                   <MetricGauge
-                    label="xG%"
+                    label="Chance share"
                     value={(analytics.onIceXG || analytics.xGMetrics).xGPercent}
                     percentile={percentiles.xg}
                     format="percent"
@@ -693,11 +597,11 @@ export default function PlayerAnalyticsCard({
                 </div>
               )}
               <div className="xg-summary">
-                <div className="xg-item">
+                <div className="xg-item" hidden>
                   <span className="xg-value">{((analytics.onIceXG || analytics.xGMetrics)?.xGF ?? 0).toFixed(2)}</span>
                   <span className="xg-label">xGF</span>
                 </div>
-                <div className="xg-item">
+                <div className="xg-item" hidden>
                   <span className="xg-value">{((analytics.onIceXG || analytics.xGMetrics)?.xGA ?? 0).toFixed(2)}</span>
                   <span className="xg-label">xGA</span>
                 </div>
@@ -777,33 +681,41 @@ export default function PlayerAnalyticsCard({
         </div>
       </div>
 
-      {/* ============================================================
-          ATTACK DNA RADAR — league percentile ranks (≥50 shots)
-          Hidden entirely if data unavailable / not enough sample.
-          ============================================================ */}
-      {attackDna && (
-        <div className="attack-dna-section">
-          <div className="attack-dna-header">
-            <span className="section-title">Attack DNA</span>
-            <span className="attack-dna-sub">vs NHL skaters (percentile)</span>
-          </div>
-          <AttackDnaMiniRadar
-            speed={attackDna.speedPct}
-            danger={attackDna.dangerPct}
-            shooting={attackDna.shootingPct}
-            depth={attackDna.depthPct}
-            speedLabel={attackDna.speedSource === 'edge' ? 'Skating Speed' : 'Tempo'}
-          />
-        </div>
-      )}
+      {/* Attack DNA radar intentionally removed from the share card.
+          The Player DNA radar above already delivers the "what kind of
+          player is this" visual; two radars on one card was a
+          designer's confession they couldn't decide. Full Attack DNA
+          lives on /attack-dna/player/:id for readers who click
+          through from the URL in the footer below. */}
 
       {/* ============================================================
-          FOOTER
+          FOOTER — attribution lives here. Without a URL + date the
+          card is an orphan screenshot nobody can click back to. A
+          methodology one-liner (above the URL row) answers the
+          "where's this from?" reply-guy in social comments.
           ============================================================ */}
       <div className="card-footer">
-        <span className="branding">DeepDive NHL</span>
-        <span className="data-note">{gamesPlayed} GP | Data via NHL API</span>
+        <div className="card-footer-left">
+          <span className="branding">nhl-analytics.pages.dev</span>
+          <span className="card-footer-meta">
+            {formatSeasonLabel(season)} · Through {gamesPlayed} GP
+          </span>
+        </div>
+        <div className="card-footer-right">
+          <span className="card-methodology">
+            Percentiles vs NHL skaters (10+ GP). xG = shot-quality model.
+          </span>
+        </div>
       </div>
     </div>
   );
+}
+
+/** "20252026" → "2025-26 Regular Season" so the card is temporally
+ *  anchored when shared weeks later. */
+function formatSeasonLabel(s: string): string {
+  if (!s || s.length !== 8) return s;
+  const start = s.slice(0, 4);
+  const endSuffix = s.slice(6, 8);
+  return `${start}-${endSuffix} Regular Season`;
 }

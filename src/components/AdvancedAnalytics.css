@@ -11,12 +11,12 @@
 
 .analytics-header h2 {
   font-size: 28px;
-  color: #2c3e50;
+  color: var(--gray-800);
   margin-bottom: 8px;
 }
 
 .analytics-subtitle {
-  color: #657786;
+  color: var(--gray-500);
   font-size: 15px;
 }
 
@@ -35,7 +35,7 @@
   display: flex;
   align-items: flex-start;
   gap: 16px;
-  border: 2px solid #e1e8ed;
+  border: 2px solid var(--gray-200);
   transition: transform 0.3s, box-shadow 0.3s;
 }
 
@@ -45,9 +45,9 @@
 }
 
 .metric-card.highlight {
-  background: linear-gradient(135deg, #003087 0%, #0055A4 100%);
+  background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
   color: white;
-  border-color: #003087;
+  border-color: var(--primary-blue);
 }
 
 .metric-icon {
@@ -85,10 +85,10 @@
 
 .section-title {
   font-size: 22px;
-  color: #2c3e50;
+  color: var(--gray-800);
   margin-bottom: 24px;
   padding-bottom: 12px;
-  border-bottom: 3px solid #003087;
+  border-bottom: 3px solid var(--primary-blue);
   font-weight: 600;
 }
 
@@ -104,12 +104,12 @@
   background: #f8fafb;
   padding: 20px;
   border-radius: 8px;
-  border: 1px solid #e1e8ed;
+  border: 1px solid var(--gray-200);
 }
 
 .metric-group h4 {
   font-size: 16px;
-  color: #003087;
+  color: var(--primary-blue);
   margin-bottom: 16px;
   font-weight: 600;
 }
@@ -135,12 +135,12 @@
 }
 
 .stat-label {
-  color: #657786;
+  color: var(--gray-500);
   font-size: 14px;
 }
 
 .stat-value {
-  color: #2c3e50;
+  color: var(--gray-800);
   font-size: 16px;
   font-weight: 600;
 }
@@ -157,14 +157,14 @@
   background: white;
   padding: 24px;
   border-radius: 12px;
-  border: 2px solid #e1e8ed;
+  border: 2px solid var(--gray-200);
   text-align: center;
 }
 
 .efficiency-label {
   font-size: 14px;
   text-transform: uppercase;
-  color: #657786;
+  color: var(--gray-500);
   margin-bottom: 12px;
   font-weight: 600;
   letter-spacing: 0.5px;
@@ -173,7 +173,7 @@
 .efficiency-value {
   font-size: 36px;
   font-weight: 700;
-  color: #003087;
+  color: var(--primary-blue);
   margin-bottom: 16px;
 }
 
@@ -191,7 +191,7 @@
 }
 
 .efficiency-fill.shooting {
-  background: linear-gradient(90deg, #003087 0%, #00A4E4 100%);
+  background: linear-gradient(90deg, var(--primary-blue) 0%, #00A4E4 100%);
 }
 
 .efficiency-fill.save {
@@ -204,7 +204,7 @@
 
 .efficiency-note {
   font-size: 13px;
-  color: #657786;
+  color: var(--gray-500);
 }
 
 /* Per 60 Grid */
@@ -215,7 +215,7 @@
 }
 
 .per60-card {
-  background: linear-gradient(135deg, #003087 0%, #0055A4 100%);
+  background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
   color: white;
   padding: 20px;
   border-radius: 8px;
@@ -278,7 +278,7 @@
 .deployment-description {
   text-align: center;
   font-size: 16px;
-  color: #2c3e50;
+  color: var(--gray-800);
   font-weight: 500;
 }
 
@@ -300,19 +300,19 @@
   background: white;
   padding: 20px;
   border-radius: 8px;
-  border-left: 4px solid #003087;
+  border-left: 4px solid var(--primary-blue);
 }
 
 .info-card h4 {
   font-size: 16px;
-  color: #003087;
+  color: var(--primary-blue);
   margin-bottom: 8px;
   font-weight: 600;
 }
 
 .info-card p {
   font-size: 14px;
-  color: #657786;
+  color: var(--gray-500);
   line-height: 1.5;
 }
 
@@ -322,7 +322,7 @@
   background: white;
   padding: 20px;
   border-radius: 8px;
-  border: 1px solid #e1e8ed;
+  border: 1px solid var(--gray-200);
 }
 
 /* Responsive */

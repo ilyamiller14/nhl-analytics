@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
 import { ComparisonProvider } from './context/ComparisonContext';
 import Navigation from './components/Navigation';
 import LoadingFallback from './components/LoadingFallback';
@@ -17,6 +17,7 @@ const TeamProfile = lazy(() => import('./pages/TeamProfile'));
 const AttackDNAPage = lazy(() => import('./pages/AttackDNAPage'));
 const ManagementDashboard = lazy(() => import('./pages/ManagementDashboard'));
 const DeepLeaderboards = lazy(() => import('./pages/DeepLeaderboards'));
+const Glossary = lazy(() => import('./pages/Glossary'));
 
 function LazyRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -45,17 +46,24 @@ function App() {
               <Route path="/team/:teamAbbrev" element={<LazyRoute><TeamProfile /></LazyRoute>} />
               <Route path="/attack-dna/player/:playerId" element={<LazyRoute><AttackDNAPage /></LazyRoute>} />
               <Route path="/attack-dna/team/:teamAbbrev" element={<LazyRoute><AttackDNAPage /></LazyRoute>} />
-              <Route path="/contracts" element={<LazyRoute><ManagementDashboard /></LazyRoute>} />
-              <Route path="/contracts/:teamAbbrev" element={<LazyRoute><ManagementDashboard /></LazyRoute>} />
-              <Route path="/management" element={<LazyRoute><ManagementDashboard /></LazyRoute>} />
-              <Route path="/management/:teamAbbrev" element={<LazyRoute><ManagementDashboard /></LazyRoute>} />
-              <Route path="/deep" element={<LazyRoute><DeepLeaderboards /></LazyRoute>} />
+              {/* Canonical cap/roster route. /contracts and /management
+                  were two URLs pointing at the same page — collapsed
+                  to /cap with redirects so existing bookmarks survive. */}
+              <Route path="/cap" element={<LazyRoute><ManagementDashboard /></LazyRoute>} />
+              <Route path="/cap/:teamAbbrev" element={<LazyRoute><ManagementDashboard /></LazyRoute>} />
+              <Route path="/contracts" element={<Navigate to="/cap" replace />} />
+              <Route path="/contracts/:teamAbbrev" element={<Navigate to="/cap" replace />} />
+              <Route path="/management" element={<Navigate to="/cap" replace />} />
+              <Route path="/management/:teamAbbrev" element={<Navigate to="/cap" replace />} />
+              <Route path="/advanced" element={<LazyRoute><DeepLeaderboards /></LazyRoute>} />
+              <Route path="/deep" element={<Navigate to="/advanced" replace />} />
+              <Route path="/glossary" element={<LazyRoute><Glossary /></LazyRoute>} />
               <Route path="*" element={
                 <LazyRoute>
-                  <div className="page-container" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-                    <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>404</h1>
-                    <h2 style={{ marginBottom: '1rem' }}>Page Not Found</h2>
-                    <p style={{ marginBottom: '2rem', color: '#6b7280' }}>
+                  <div className="page-container not-found">
+                    <h1 className="not-found__code">404</h1>
+                    <h2 className="not-found__title">Page Not Found</h2>
+                    <p className="not-found__message">
                       The page you're looking for doesn't exist or has been moved.
                     </p>
                     <Link to="/" className="btn btn-primary">Go Home</Link>

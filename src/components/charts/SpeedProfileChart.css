@@ -18,13 +18,13 @@
 .speed-profile-chart .chart-title {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--gray-800);
   margin: 0 0 0.25rem 0;
 }
 
 .speed-profile-chart .chart-subtitle {
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--gray-500);
   margin: 0;
   line-height: 1.4;
 }
@@ -43,19 +43,19 @@
   align-items: center;
   text-align: center;
   padding: 1rem;
-  background: #f8fafc;
+  background: var(--gray-50);
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--gray-200);
 }
 
 .metric-card.highlight {
   background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  border-color: #f59e0b;
+  border-color: var(--warning);
 }
 
 .metric-label {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--gray-500);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 0.5rem;
@@ -64,7 +64,7 @@
 .metric-value {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--gray-800);
   margin-bottom: 0.25rem;
 }
 
@@ -74,20 +74,20 @@
 }
 
 .metric-diff.positive {
-  color: #10b981;
+  color: var(--success);
 }
 
 .metric-diff.negative {
-  color: #ef4444;
+  color: var(--error);
 }
 
 .metric-diff.neutral {
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .metric-percentile {
   font-size: 0.7rem;
-  color: #9ca3af;
+  color: var(--gray-400);
   margin-top: 0.25rem;
 }
 
@@ -99,10 +99,10 @@
 .section-title {
   font-size: 1rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
   margin: 0 0 1rem 0;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--gray-200);
 }
 
 .chart-container {
@@ -114,7 +114,7 @@
   align-items: center;
   justify-content: center;
   height: 200px;
-  color: #6b7280;
+  color: var(--gray-500);
   font-size: 0.95rem;
 }
 
@@ -129,9 +129,9 @@
   display: flex;
   flex-direction: column;
   padding: 0.75rem 1rem;
-  background: #f8fafc;
+  background: var(--gray-50);
   border-radius: 6px;
-  border-left: 4px solid #e5e7eb;
+  border-left: 4px solid var(--gray-200);
   flex: 1;
   min-width: 120px;
 }
@@ -139,19 +139,19 @@
 .per-game-stat .tier-label {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
   margin-bottom: 0.25rem;
 }
 
 .per-game-stat .per-game-value {
   font-size: 1.25rem;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--gray-800);
 }
 
 .per-game-stat .per-game-sublabel {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--gray-500);
   margin-top: 0.125rem;
 }
 
@@ -159,13 +159,13 @@
 .burst-legend {
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--gray-200);
 }
 
 .burst-legend .legend-title {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
   margin-bottom: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -182,7 +182,7 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .legend-color {
@@ -206,8 +206,8 @@
   text-align: left;
   padding: 0.5rem 0.75rem;
   font-weight: 600;
-  color: #6b7280;
-  border-bottom: 2px solid #e5e7eb;
+  color: var(--gray-500);
+  border-bottom: 2px solid var(--gray-200);
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -215,8 +215,8 @@
 
 .mini-table td {
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #f3f4f6;
-  color: #374151;
+  border-bottom: 1px solid var(--gray-100);
+  color: var(--gray-700);
 }
 
 .mini-table tr:last-child td {
@@ -225,7 +225,7 @@
 
 .mini-table .highlight-value {
   font-weight: 700;
-  color: #1f2937;
+  color: var(--gray-800);
 }
 
 /* Responsive */

@@ -105,11 +105,11 @@
 }
 
 .trend-value.positive {
-  color: #10b981;
+  color: var(--success);
 }
 
 .trend-value.negative {
-  color: #ef4444;
+  color: var(--error);
 }
 
 /* Chart Container */

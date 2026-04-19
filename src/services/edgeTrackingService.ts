@@ -31,6 +31,32 @@ import { getCurrentSeason } from '../utils/seasonUtils';
 // Default game type (regular season)
 const DEFAULT_GAME_TYPE: EdgeGameType = 2;
 
+/** EDGE tracking first shipped for the 2023-24 NHL season. Anything
+ *  earlier returns 404 / empty bodies that silently fall back to zeros
+ *  in the UI. We throw a typed error instead so charts can show a
+ *  proper "tracking unavailable" state. */
+export class EdgeUnavailableError extends Error {
+  readonly season: string;
+  constructor(season: string) {
+    super(
+      `EDGE tracking data is not available for season ${season}. ` +
+        `NHL EDGE coverage starts with 2023-24 (season id 20232024).`
+    );
+    this.name = 'EdgeUnavailableError';
+    this.season = season;
+  }
+}
+
+/** First EDGE-covered season as an 8-digit id. */
+const EDGE_MIN_SEASON_YEAR = 2023;
+
+function assertEdgeSeason(season: string): void {
+  const startYear = parseInt(season.slice(0, 4), 10);
+  if (!Number.isFinite(startYear) || startYear < EDGE_MIN_SEASON_YEAR) {
+    throw new EdgeUnavailableError(season);
+  }
+}
+
 // ============================================================================
 // Raw API Response Types (what the NHL API actually returns)
 // ============================================================================
@@ -727,6 +753,9 @@ class EdgeTrackingService {
     comparison: SkaterComparison;
     shotSpeed: ShotSpeedWithLeagueAvg;
   }> {
+    // Bail fast on pre-EDGE seasons so the UI gets a proper error instead
+    // of silently zeroed charts.
+    assertEdgeSeason(season);
     const [detail, speed, distance, zoneTime, comparison, shotSpeed] = await Promise.all([
       this.getSkaterDetail(playerId, season, gameType),
       this.getSkaterSpeedDetail(playerId, season, gameType),
@@ -775,6 +804,7 @@ class EdgeTrackingService {
     shotSpeed: TeamShotSpeedDetail;
     shotLocation: TeamShotLocationDetail;
   }> {
+    assertEdgeSeason(season);
     const [detail, speed, distance, zoneTime, shotSpeed, shotLocation] = await Promise.all([
       this.getTeamDetail(teamId, season, gameType),
       this.getTeamSpeedDetail(teamId, season, gameType),

@@ -24,13 +24,13 @@
 .tracking-radar-chart .chart-title {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--gray-800);
   margin: 0 0 0.25rem 0;
 }
 
 .tracking-radar-chart .chart-subtitle {
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--gray-500);
   margin: 0;
 }
 
@@ -40,7 +40,7 @@
   flex-direction: column;
   align-items: center;
   padding: 1rem 1.5rem;
-  background: #f8fafc;
+  background: var(--gray-50);
   border-radius: 12px;
   border: 3px solid;
   min-width: 100px;
@@ -55,7 +55,7 @@
 .rating-label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--gray-500);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-top: 0.25rem;
@@ -72,16 +72,16 @@
   padding: 12px 16px;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--gray-200);
   min-width: 180px;
 }
 
 .radar-tooltip .tooltip-header {
   font-weight: 600;
-  color: #1f2937;
+  color: var(--gray-800);
   margin-bottom: 8px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--gray-200);
 }
 
 .radar-tooltip .tooltip-row {
@@ -92,21 +92,21 @@
 }
 
 .radar-tooltip .tooltip-label {
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .radar-tooltip .tooltip-value {
   font-weight: 600;
-  color: #1f2937;
+  color: var(--gray-800);
 }
 
 .radar-tooltip .tooltip-value.percentile {
-  color: #3b82f6;
+  color: var(--info);
 }
 
 .radar-tooltip .tooltip-description {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--gray-400);
   margin-top: 8px;
   font-style: italic;
 }
@@ -115,13 +115,13 @@
 .metric-details {
   margin-top: 1.5rem;
   padding-top: 1.5rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--gray-200);
 }
 
 .details-title {
   font-size: 1rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
   margin: 0 0 1rem 0;
 }
 
@@ -133,9 +133,9 @@
 
 .metric-detail-card {
   padding: 1rem;
-  background: #f8fafc;
+  background: var(--gray-50);
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--gray-200);
 }
 
 .metric-detail-card .metric-header {
@@ -148,7 +148,7 @@
 .metric-detail-card .metric-name {
   font-size: 0.8rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
 }
 
 .metric-detail-card .metric-percentile {
@@ -171,23 +171,23 @@
 }
 
 .value-row .value-label {
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .value-row .value-number {
   font-weight: 600;
-  color: #1f2937;
+  color: var(--gray-800);
 }
 
 .value-row.league .value-number {
-  color: #9ca3af;
+  color: var(--gray-400);
 }
 
 /* Percentile Bar */
 .percentile-bar {
   position: relative;
   height: 6px;
-  background: #e5e7eb;
+  background: var(--gray-200);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -203,7 +203,7 @@
   top: -2px;
   width: 2px;
   height: 10px;
-  background: #374151;
+  background: var(--gray-700);
   border-radius: 1px;
   transform: translateX(-50%);
 }
@@ -215,7 +215,7 @@
   gap: 2rem;
   margin-top: 1.5rem;
   padding-top: 1rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--gray-200);
 }
 
 .chart-legend .legend-item {
@@ -223,7 +223,7 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .legend-line {
@@ -233,15 +233,15 @@
 }
 
 .legend-line.player {
-  background: #3b82f6;
+  background: var(--info);
 }
 
 .legend-line.league {
-  background: #9ca3af;
+  background: var(--gray-400);
   background-image: repeating-linear-gradient(
     90deg,
-    #9ca3af 0px,
-    #9ca3af 5px,
+    var(--gray-400) 0px,
+    var(--gray-400) 5px,
     transparent 5px,
     transparent 10px
   );
@@ -253,7 +253,7 @@
   align-items: center;
   justify-content: center;
   min-height: 300px;
-  color: #6b7280;
+  color: var(--gray-500);
   font-size: 0.95rem;
 }
 

@@ -1,7 +1,7 @@
 /* Mini Shot Map Styles */
 
 .mini-shot-map {
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  background: linear-gradient(135deg, var(--panel-bg-elev-strong) 0%, var(--panel-bg-elev) 100%);
   border-radius: 8px;
   padding: 0.75rem;
 }
@@ -16,7 +16,7 @@
 .map-title {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--gray-400);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -24,7 +24,7 @@
 .map-stat {
   font-size: 0.8rem;
   font-weight: 700;
-  color: #10b981;
+  color: var(--success);
 }
 
 .mini-rink-svg {
@@ -48,7 +48,7 @@
   gap: 0.75rem;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px solid #334155;
+  border-top: 1px solid var(--panel-border-strong);
 }
 
 .legend-item {
@@ -56,7 +56,7 @@
   align-items: center;
   gap: 0.25rem;
   font-size: 0.6rem;
-  color: #94a3b8;
+  color: var(--gray-400);
 }
 
 .legend-item .dot {
@@ -66,15 +66,15 @@
 }
 
 .legend-item .dot.goal {
-  background: #10b981;
+  background: var(--success);
 }
 
 .legend-item .dot.shot {
-  background: #3b82f6;
+  background: var(--info);
 }
 
 .legend-item .dot.miss {
-  background: #f59e0b;
+  background: var(--warning);
 }
 
 .map-footer {
@@ -87,11 +87,11 @@
 
 .xg-label {
   font-size: 0.65rem;
-  color: #64748b;
+  color: var(--gray-500);
 }
 
 .xg-value {
   font-size: 0.8rem;
   font-weight: 700;
-  color: #f59e0b;
+  color: var(--warning);
 }

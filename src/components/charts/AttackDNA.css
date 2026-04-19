@@ -10,13 +10,13 @@
 /* CSS Variables for theming */
 :root {
   --attack-dna-bg: #ffffff;
-  --attack-dna-border: #e5e7eb;
-  --attack-dna-text: #1f2937;
-  --attack-dna-text-secondary: #6b7280;
-  --attack-dna-text-muted: #9ca3af;
-  --attack-dna-surface: #f9fafb;
-  --attack-dna-surface-alt: #f3f4f6;
-  --attack-dna-primary: #3b82f6;
+  --attack-dna-border: var(--gray-200);
+  --attack-dna-text: var(--gray-800);
+  --attack-dna-text-secondary: var(--gray-500);
+  --attack-dna-text-muted: var(--gray-400);
+  --attack-dna-surface: var(--gray-50);
+  --attack-dna-surface-alt: var(--gray-100);
+  --attack-dna-primary: var(--info);
 }
 
 /* Container */
@@ -173,7 +173,7 @@
 }
 
 .ribbon-tooltip .stat-label {
-  color: #9ca3af;
+  color: var(--gray-400);
   font-size: 0.8rem;
 }
 
@@ -363,12 +363,12 @@
 }
 
 .comparison-legend .color-indicator.primary {
-  background: #3b82f6;
+  background: var(--info);
 }
 
 .comparison-legend .color-indicator.comparison {
-  background: #9ca3af;
-  border: 1px dashed #6b7280;
+  background: var(--gray-400);
+  border: 1px dashed var(--gray-500);
 }
 
 /* Stats Panel */
@@ -535,7 +535,7 @@
 .flow-field-legend .size-indicator {
   width: 20px;
   height: 4px;
-  background: linear-gradient(to right, #d1d5db, var(--attack-dna-primary));
+  background: linear-gradient(to right, var(--gray-300), var(--attack-dna-primary));
   border-radius: 2px;
 }
 
@@ -549,12 +549,12 @@
 
 .flow-field-legend .color-gradient .low {
   flex: 1;
-  background: #ef4444;
+  background: var(--error);
 }
 
 .flow-field-legend .color-gradient .high {
   flex: 1;
-  background: #22c55e;
+  background: var(--success);
 }
 
 /* Responsive Design */
@@ -641,7 +641,7 @@
   border: 2px solid var(--attack-dna-border);
   border-radius: 6px;
   font-size: 0.8rem;
-  color: var(--attack-dna-text, #1f2937);
+  color: var(--attack-dna-text, var(--gray-800));
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -721,7 +721,7 @@
   top: -2px;
   bottom: -2px;
   width: 2px;
-  background: #1f2937;
+  background: var(--gray-800);
   border-radius: 1px;
   z-index: 2;
 }
@@ -744,11 +744,11 @@
 }
 
 .zone-value .deviation.positive {
-  color: #22c55e;
+  color: var(--success);
 }
 
 .zone-value .deviation.negative {
-  color: #ef4444;
+  color: var(--error);
 }
 
 .zone-legend-note {
@@ -760,7 +760,7 @@
 
 .zone-legend-note .marker {
   display: inline-block;
-  background: #1f2937;
+  background: var(--gray-800);
   width: 2px;
   height: 14px;
   vertical-align: middle;
@@ -813,12 +813,12 @@
 }
 
 .metric-card .metric-deviation.positive {
-  color: #22c55e;
+  color: var(--success);
   background: rgba(34, 197, 94, 0.1);
 }
 
 .metric-card .metric-deviation.negative {
-  color: #ef4444;
+  color: var(--error);
   background: rgba(239, 68, 68, 0.1);
 }
 
@@ -900,24 +900,24 @@
 /* Dark Mode Support */
 @media (prefers-color-scheme: dark) {
   .attack-dna-container {
-    --attack-dna-bg: #1f2937;
-    --attack-dna-border: #374151;
-    --attack-dna-text: #f9fafb;
-    --attack-dna-text-secondary: #9ca3af;
-    --attack-dna-text-muted: #6b7280;
-    --attack-dna-surface: #111827;
-    --attack-dna-surface-alt: #1f2937;
+    --attack-dna-bg: var(--gray-800);
+    --attack-dna-border: var(--gray-700);
+    --attack-dna-text: var(--gray-50);
+    --attack-dna-text-secondary: var(--gray-400);
+    --attack-dna-text-muted: var(--gray-500);
+    --attack-dna-surface: var(--gray-900);
+    --attack-dna-surface-alt: var(--gray-800);
     --attack-dna-primary: #60a5fa;
   }
 
   .attack-dna-rink {
-    background: #111827;
+    background: var(--gray-900);
   }
 
   .attack-dna-container .stat-card,
   .attack-dna-container .metric-card {
-    background: #1f2937;
-    color: #f9fafb;
+    background: var(--gray-800);
+    color: var(--gray-50);
   }
 
   .ribbon-tooltip {
@@ -925,11 +925,11 @@
   }
 
   .league-avg-marker {
-    background: #9ca3af;
+    background: var(--gray-400);
   }
 
   .zone-legend-note .marker {
-    background: #9ca3af;
+    background: var(--gray-400);
   }
 
   .legend-button {

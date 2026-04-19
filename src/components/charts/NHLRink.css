@@ -4,11 +4,11 @@
 }
 
 .rink-ice {
-  fill: #f8fafc;
+  fill: var(--gray-50);
 }
 
 .rink-boards {
-  stroke: #475569;
+  stroke: var(--gray-600);
   stroke-width: 0.8;
   fill: none;
 }
@@ -19,28 +19,28 @@
 }
 
 .red-line {
-  stroke: #dc2626;
+  stroke: var(--error);
   stroke-width: 1.5;
 }
 
 .faceoff-circle {
   fill: none;
-  stroke: #dc2626;
+  stroke: var(--error);
   stroke-width: 0.4;
 }
 
 .faceoff-dot {
-  fill: #dc2626;
+  fill: var(--error);
 }
 
 .goal-crease {
   fill: #bfdbfe;
-  stroke: #dc2626;
+  stroke: var(--error);
 }
 
 /* Danger zone colors */
 .high-danger-zone {
-  fill: #ef4444;
+  fill: var(--error);
   opacity: 0.25;
 }
 
@@ -57,7 +57,7 @@
 .zone-labels text {
   font-family: system-ui, -apple-system, sans-serif;
   font-weight: 600;
-  fill: #94a3b8;
+  fill: var(--gray-400);
   text-transform: uppercase;
   font-size: 6px;
   letter-spacing: 0.5px;

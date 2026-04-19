@@ -119,17 +119,17 @@
 }
 
 .rating-badge.rating-elite-value {
-  background: linear-gradient(135deg, #10b981, #059669);
+  background: linear-gradient(135deg, var(--success), #059669);
   color: white;
 }
 
 .rating-badge.rating-great-value {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  background: linear-gradient(135deg, var(--info), #2563eb);
   color: white;
 }
 
 .rating-badge.rating-fair-value {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
+  background: linear-gradient(135deg, var(--warning), #d97706);
   color: white;
 }
 
@@ -139,7 +139,7 @@
 }
 
 .rating-badge.rating-poor-value {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
+  background: linear-gradient(135deg, var(--error), var(--error));
   color: white;
 }
 
@@ -203,11 +203,11 @@
 }
 
 .clause-badge.nmc {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
+  background: linear-gradient(135deg, var(--error), var(--error));
 }
 
 .clause-badge.ntc {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
+  background: linear-gradient(135deg, var(--warning), #d97706);
 }
 
 .clause-icon {

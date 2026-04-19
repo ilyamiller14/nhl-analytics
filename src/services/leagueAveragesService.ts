@@ -80,16 +80,30 @@ export async function getLeagueAverages(season?: string): Promise<LeagueAverages
 
     if (teams.length === 0) return null;
 
-    // Compute averages from all teams
+    // Compute averages from all teams. Per-game and per-shot rates are
+    // weighted by games played; percentage metrics (PP/PK/FO) must be
+    // weighted by their denominator (opportunities / attempts) so a
+    // team with many PP opportunities counts proportionally more than
+    // a team with few — otherwise we'd report the unweighted mean of
+    // team percentages, which biases toward low-sample teams.
     const n = teams.length;
     let totalGoalsFor = 0;
     let totalGoalsAgainst = 0;
     let totalShotsFor = 0;
     let totalShotsAgainst = 0;
-    let totalPP = 0;
-    let totalPK = 0;
-    let totalFO = 0;
     let totalGP = 0;
+
+    // Numerators and denominators for weighted percentages. NHL API
+    // exposes `powerPlayGoalsFor`, `powerPlayNetGoalsFor`,
+    // `powerPlayOpportunities`, `faceoffsWon`, `faceoffsLost` etc. —
+    // falling back to per-game × GP when the explicit totals aren't
+    // provided.
+    let ppGoalsFor = 0;
+    let ppOpportunities = 0;
+    let pkGoalsAgainst = 0;
+    let pkOpportunities = 0;
+    let faceoffsWon = 0;
+    let faceoffsTotal = 0;
 
     for (const team of teams) {
       const gp = team.gamesPlayed || 0;
@@ -98,9 +112,30 @@ export async function getLeagueAverages(season?: string): Promise<LeagueAverages
       totalGoalsAgainst += (team.goalsAgainstPerGame || 0) * gp;
       totalShotsFor += (team.shotsForPerGame || 0) * gp;
       totalShotsAgainst += (team.shotsAgainstPerGame || 0) * gp;
-      totalPP += (team.powerPlayPct || 0) * 100;
-      totalPK += (team.penaltyKillPct || 0) * 100;
-      totalFO += (team.faceoffWinPct || 0) * 100;
+
+      // --- PP / PK / FO weighted numerators & denominators ---
+      const ppGoals =
+        typeof team.powerPlayGoalsFor === 'number' ? team.powerPlayGoalsFor :
+        typeof team.powerPlayGoals === 'number'    ? team.powerPlayGoals :
+        (team.powerPlayPct || 0) * (team.powerPlayOpportunities || 0);
+      const ppOpps =
+        typeof team.powerPlayOpportunities === 'number' ? team.powerPlayOpportunities : 0;
+      ppGoalsFor    += ppGoals;
+      ppOpportunities += ppOpps;
+
+      const pkGA =
+        typeof team.powerPlayGoalsAgainst === 'number' ? team.powerPlayGoalsAgainst :
+        (1 - (team.penaltyKillPct || 0)) * (team.timesShortHanded || 0);
+      const pkOpps =
+        typeof team.timesShortHanded === 'number' ? team.timesShortHanded : 0;
+      pkGoalsAgainst  += pkGA;
+      pkOpportunities += pkOpps;
+
+      const foWon = team.faceoffsWon ?? ((team.faceoffWinPct || 0) * (team.totalFaceoffs || 0));
+      const foLost = team.faceoffsLost ?? 0;
+      const foTotal = team.totalFaceoffs ?? (foWon + foLost);
+      faceoffsWon   += foWon;
+      faceoffsTotal += foTotal;
     }
 
     const goalsPerGame = totalGP > 0 ? totalGoalsFor / totalGP : 0;
@@ -112,6 +147,12 @@ export async function getLeagueAverages(season?: string): Promise<LeagueAverages
       ? ((shotsAgainstPerGame - goalsAgainstPerGame) / shotsAgainstPerGame) * 100
       : 0;
 
+    const powerPlayPct = ppOpportunities > 0 ? (ppGoalsFor / ppOpportunities) * 100 : 0;
+    const penaltyKillPct = pkOpportunities > 0
+      ? ((pkOpportunities - pkGoalsAgainst) / pkOpportunities) * 100
+      : 0;
+    const faceoffWinPct = faceoffsTotal > 0 ? (faceoffsWon / faceoffsTotal) * 100 : 0;
+
     const result: LeagueAverages = {
       season: currentSeason,
       computedAt: Date.now(),
@@ -122,9 +163,9 @@ export async function getLeagueAverages(season?: string): Promise<LeagueAverages
       shotsAgainstPerGame: Math.round(shotsAgainstPerGame * 10) / 10,
       shootingPct: Math.round(shootingPct * 100) / 100,
       savePct: Math.round(savePct * 100) / 100,
-      powerPlayPct: Math.round((totalPP / n) * 100) / 100,
-      penaltyKillPct: Math.round((totalPK / n) * 100) / 100,
-      faceoffWinPct: Math.round((totalFO / n) * 100) / 100,
+      powerPlayPct: Math.round(powerPlayPct * 100) / 100,
+      penaltyKillPct: Math.round(penaltyKillPct * 100) / 100,
+      faceoffWinPct: Math.round(faceoffWinPct * 100) / 100,
     };
 
     CacheManager.set(cacheKey, result, ANALYTICS_CACHE.LEAGUE_STATS);

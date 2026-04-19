@@ -1,0 +1,81 @@
+.glossary-page {
+  padding-top: var(--space-2xl);
+  padding-bottom: var(--space-4xl);
+}
+
+.glossary-header {
+  margin-bottom: var(--space-2xl);
+  text-align: center;
+}
+
+.glossary-header h1 {
+  font-size: clamp(1.75rem, 5vw, 2.5rem);
+  color: var(--gray-900);
+  margin-bottom: var(--space-md);
+}
+
+.glossary-subtitle {
+  color: var(--gray-600);
+  max-width: 56ch;
+  margin: 0 auto;
+  font-size: 1.05rem;
+}
+
+.glossary-section {
+  margin-bottom: var(--space-3xl);
+}
+
+.glossary-section__title {
+  font-size: 1.125rem;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--gray-500);
+  margin-bottom: var(--space-lg);
+  border-bottom: 1px solid var(--gray-200);
+  padding-bottom: var(--space-sm);
+}
+
+.glossary-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-lg);
+  margin: 0;
+}
+
+.glossary-entry {
+  background: #fff;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  box-shadow: var(--shadow-xs);
+}
+
+.glossary-term {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.glossary-abbr {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  font-weight: var(--fw-bold);
+  color: var(--primary-blue);
+  background: rgba(var(--primary-blue-rgb) / 0.08);
+  padding: 2px var(--space-sm);
+  border-radius: var(--radius-sm);
+}
+
+.glossary-name {
+  font-size: 0.95rem;
+  font-weight: var(--fw-semibold);
+  color: var(--gray-900);
+}
+
+.glossary-def {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--gray-600);
+  line-height: 1.5;
+}

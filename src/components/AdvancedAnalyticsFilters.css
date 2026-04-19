@@ -4,7 +4,7 @@
   padding: 24px;
   margin-bottom: 32px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  border: 2px solid #e1e8ed;
+  border: 2px solid var(--gray-200);
 }
 
 .filters-header {
@@ -13,7 +13,7 @@
   align-items: center;
   margin-bottom: 24px;
   padding-bottom: 16px;
-  border-bottom: 2px solid #e1e8ed;
+  border-bottom: 2px solid var(--gray-200);
 }
 
 .filters-title {
@@ -28,12 +28,12 @@
 
 .filters-title h3 {
   font-size: 20px;
-  color: #2c3e50;
+  color: var(--gray-800);
   margin: 0;
 }
 
 .filter-badge {
-  background: #003087;
+  background: var(--primary-blue);
   color: white;
   padding: 4px 12px;
   border-radius: 12px;
@@ -59,7 +59,7 @@
 
 .btn-toggle-advanced {
   background: #e8f0f7;
-  color: #003087;
+  color: var(--primary-blue);
 }
 
 .btn-toggle-advanced:hover {
@@ -92,14 +92,14 @@
 .filter-group label {
   font-size: 13px;
   font-weight: 600;
-  color: #657786;
+  color: var(--gray-500);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .filter-group select {
   padding: 10px 12px;
-  border: 2px solid #e1e8ed;
+  border: 2px solid var(--gray-200);
   border-radius: 6px;
   font-size: 14px;
   background: white;
@@ -108,12 +108,12 @@
 }
 
 .filter-group select:hover {
-  border-color: #003087;
+  border-color: var(--primary-blue);
 }
 
 .filter-group select:focus {
   outline: none;
-  border-color: #003087;
+  border-color: var(--primary-blue);
   box-shadow: 0 0 0 3px rgba(0, 48, 135, 0.1);
 }
 
@@ -123,7 +123,7 @@
   padding: 24px;
   border-radius: 8px;
   margin-top: 24px;
-  border: 1px solid #e1e8ed;
+  border: 1px solid var(--gray-200);
 }
 
 .filters-section {
@@ -136,10 +136,10 @@
 
 .filters-section h4 {
   font-size: 16px;
-  color: #2c3e50;
+  color: var(--gray-800);
   margin-bottom: 16px;
   padding-bottom: 8px;
-  border-bottom: 2px solid #e1e8ed;
+  border-bottom: 2px solid var(--gray-200);
 }
 
 .filter-grid {
@@ -160,7 +160,7 @@
 .summary-label {
   font-size: 13px;
   font-weight: 600;
-  color: #003087;
+  color: var(--primary-blue);
   margin-bottom: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -180,7 +180,7 @@
   padding: 6px 12px;
   border-radius: 16px;
   font-size: 13px;
-  color: #2c3e50;
+  color: var(--gray-800);
   border: 1px solid #d1e0ed;
 }
 

@@ -50,15 +50,15 @@
 }
 
 .legend-dot.goal {
-  background: #10b981;
+  background: var(--success);
 }
 
 .legend-dot.shot {
-  background: #003087;
+  background: var(--primary-blue);
 }
 
 .legend-dot.miss {
-  background: #f59e0b;
+  background: var(--warning);
 }
 
 .legend-gradient {

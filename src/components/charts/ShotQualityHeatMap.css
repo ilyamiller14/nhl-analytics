@@ -1,7 +1,7 @@
 .shot-quality-heatmap {
   width: 100%;
   padding: 1.5rem;
-  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  background: linear-gradient(145deg, #ffffff 0%, var(--gray-50) 100%);
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
 }
@@ -10,7 +10,7 @@
   font-size: 1.25rem;
   font-weight: 600;
   margin-bottom: 1rem;
-  color: #1e293b;
+  color: var(--panel-bg-elev-strong);
   text-align: center;
 }
 
@@ -20,10 +20,10 @@
   gap: 1rem;
   margin-bottom: 1.5rem;
   padding: 1rem 1.5rem;
-  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  background: linear-gradient(135deg, var(--gray-50) 0%, var(--gray-100) 100%);
   border-radius: 10px;
   flex-wrap: wrap;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
 }
 
 .stat-item {
@@ -36,7 +36,7 @@
 
 .stat-label {
   font-size: 0.75rem;
-  color: #64748b;
+  color: var(--gray-500);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-weight: 500;
@@ -45,11 +45,11 @@
 .stat-value {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #1e293b;
+  color: var(--panel-bg-elev-strong);
 }
 
 .danger-high {
-  color: #dc2626;
+  color: var(--error);
 }
 
 .danger-medium {
@@ -64,7 +64,7 @@
   display: flex;
   justify-content: center;
   padding: 1rem;
-  background: #f1f5f9;
+  background: var(--gray-100);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -91,7 +91,7 @@
 .heatmap-legend {
   margin-top: 1.25rem;
   padding: 1rem;
-  background: #f1f5f9;
+  background: var(--gray-100);
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -102,7 +102,7 @@
 
 .legend-title {
   font-weight: 600;
-  color: #334155;
+  color: var(--panel-border-strong);
   font-size: 0.9rem;
 }
 
@@ -117,7 +117,7 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.85rem;
-  color: #475569;
+  color: var(--gray-600);
 }
 
 .legend-gradient {
@@ -136,7 +136,7 @@
 }
 
 .legend-gradient.high {
-  background: radial-gradient(circle, #dc2626 0%, rgba(220, 38, 38, 0.3) 70%, transparent 100%);
+  background: radial-gradient(circle, var(--error) 0%, rgba(220, 38, 38, 0.3) 70%, transparent 100%);
 }
 
 /* Responsive */

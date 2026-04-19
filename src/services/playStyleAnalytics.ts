@@ -10,6 +10,7 @@
  */
 
 import type { GamePlayByPlay } from './playByPlayService';
+import { isHighDangerByCoord } from './xgModel';
 import type {
   AttackSequence,
   AttackWaypoint,
@@ -1016,14 +1017,16 @@ function classifyShotZone(x: number, y: number): ShotZone {
 }
 
 /**
- * Calculate if shot is from high-danger area
+ * High-danger classification — delegates to the canonical polygon in
+ * xgModel so the leaderboard's HD% and the Attack DNA's HD% can never
+ * drift apart. The distance check below is redundant with
+ * `isHighDangerByCoord` but kept so the local `HIGH_DANGER_DISTANCE`
+ * constant is still a single configurable knob if the polygon ever
+ * needs to widen.
  */
 function isHighDangerShot(x: number, y: number): boolean {
-  const distance = getDistanceFromGoal(x, y);
-  const absY = Math.abs(y);
-
-  // High danger: close to net AND in the slot (not wide angle)
-  return distance < HIGH_DANGER_DISTANCE && absY < 20;
+  if (getDistanceFromGoal(x, y) > HIGH_DANGER_DISTANCE) return false;
+  return isHighDangerByCoord(x, y);
 }
 
 /**
@@ -1108,9 +1111,29 @@ export function computeShotDensityMap(shots: ShotLocation[]): ShotDensityMap {
     }
   }
 
-  // Accumulate shots into cells
+  // Accumulate shots into cells.
+  //
+  // Coordinate normalization to the offensive half-rink (positive X):
+  //   * X is mirrored via Math.abs — a shot from (-80, y) becomes (+80, y).
+  //   * Y is flipped when X is negative. This is a CHOICE, not a
+  //     coordinate-math requirement. Rationale:
+  //       - NHL API Y is rink-relative (east-west across the ice).
+  //         Physically, shots from the same side of the ice retain
+  //         their Y sign regardless of attacking direction.
+  //       - But this visualization shows "shots toward the NET" in a
+  //         single half-rink frame. We want a shot from the shooter's
+  //         strong side to land on the same screen side whether the
+  //         player is attacking the +X or -X net. That requires
+  //         flipping Y when mirroring from -X to +X.
+  //       - This is SHOOTER-PERSPECTIVE normalization. MoneyPuck and
+  //         Evolving-Hockey's shot maps preserve rink coordinates
+  //         (no flip); our map is a different (and equally valid)
+  //         projection for an individual-player heat map.
+  //   * If you're building a TEAM attack-direction map (e.g. "how
+  //     does this team generate offense in their own offensive
+  //     zone"), use `normY = shot.y` (no flip). Build a separate
+  //     utility rather than changing this one.
   shots.forEach((shot) => {
-    // Normalize to positive x (offensive zone)
     const normX = Math.abs(shot.x);
     const normY = shot.x < 0 ? -shot.y : shot.y;
 
@@ -1303,6 +1326,56 @@ export function calculateAttackProfile(
     shootingDepth: Math.round(shootingDepth),
     primaryStyle,
     styleStrength,
+  };
+}
+
+// ============================================================================
+// LEAGUE BASELINE FOR ATTACK DNA RADAR
+// ============================================================================
+
+/**
+ * Compute the league-wide baseline for each Attack DNA axis from a pool
+ * of pre-computed `AttackProfile` values (e.g. every team's profile or
+ * every qualified skater's profile). The result is the arithmetic mean
+ * of each axis across the sample and can be passed to `AttackDNAv2`
+ * as `leagueBaseline` to draw a real reference polygon instead of the
+ * fake "50 on every axis" ring that previously shipped.
+ *
+ * No third-party constants: input must be a pool of profiles that were
+ * themselves computed from real shot data via `calculateAttackProfile`.
+ */
+export function computeLeagueAttackBaseline(
+  profiles: AttackProfile[]
+): {
+  attackSpeed: number;
+  dangerZoneFocus: number;
+  shootingAccuracy: number;
+  shootingDepth: number;
+  sampleSize: number;
+} | null {
+  if (!profiles || profiles.length < 5) return null;
+
+  const totals = {
+    attackSpeed: 0,
+    dangerZoneFocus: 0,
+    shootingAccuracy: 0,
+    shootingDepth: 0,
+  };
+
+  for (const p of profiles) {
+    totals.attackSpeed += p.attackSpeed;
+    totals.dangerZoneFocus += p.dangerZoneFocus;
+    totals.shootingAccuracy += p.shootingAccuracy;
+    totals.shootingDepth += p.shootingDepth;
+  }
+
+  const n = profiles.length;
+  return {
+    attackSpeed: Math.round(totals.attackSpeed / n),
+    dangerZoneFocus: Math.round(totals.dangerZoneFocus / n),
+    shootingAccuracy: Math.round(totals.shootingAccuracy / n),
+    shootingDepth: Math.round(totals.shootingDepth / n),
+    sampleSize: n,
   };
 }
 

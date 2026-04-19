@@ -336,13 +336,27 @@ export function createPlayerTrackingData(
 ): PlayerTrackingData {
   const avg = leagueAverage || EMPTY_LEAGUE_AVERAGES[position];
 
-  // Calculate percentiles using ratio to league average (no assumed std devs)
-  // When league average is 0 (unavailable), percentile defaults to 50 (neutral)
+  // APPROXIMATION — not a true percentile.
+  //
+  // A real percentile needs either (a) the league's full distribution
+  // for this metric, or (b) a reliable mean + stdDev so we can z-score.
+  // The NHL EDGE API gives us the mean but not the variance, so we
+  // fall back to a dampened deviation-from-average formula:
+  //
+  //   output = 50 + clamp(−45, 45, (value/avg − 1) × 45)
+  //
+  // At parity the radar sits at 50. +20% above avg lands near 59; +50%
+  // pegs near 72. That's more conservative than the old `value/avg × 50`
+  // formula, which put a +7% shooter at the "54th percentile" when his
+  // real NHL-EDGE percentile would typically be 70+. When the detailed
+  // EDGE endpoint exposes a real `percentiles.*` value, wire that in
+  // and this fallback should be bypassed entirely.
   const calculatePercentile = (value: number, average: number): number => {
     if (average === 0 || value === 0) return 50;
     const ratio = value / average;
-    const percentile = Math.round(50 * ratio);
-    return Math.max(1, Math.min(99, percentile));
+    const deviation = (ratio - 1) * 45;
+    const clamped = Math.max(-45, Math.min(45, deviation));
+    return Math.round(50 + clamped);
   };
 
   return {

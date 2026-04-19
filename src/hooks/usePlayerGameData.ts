@@ -93,10 +93,11 @@ export function usePlayerGameData(
               (shot) => shot.shootingPlayerId === playerId
             );
 
-            // Convert to ShotAttempt format
-            allShotsFor.push(...shotsFor.map(convertToShotAttempt));
-            allShotsAgainst.push(...shotsAgainst.map(convertToShotAttempt));
-            allPersonalShots.push(...personalShots.map(convertToShotAttempt));
+            // Convert to ShotAttempt format. Pass the full shot list as
+            // priorShots so rebound/empty-net flags can be derived.
+            allShotsFor.push(...shotsFor.map((s) => convertToShotAttempt(s, shotsFor)));
+            allShotsAgainst.push(...shotsAgainst.map((s) => convertToShotAttempt(s, shotsAgainst)));
+            allPersonalShots.push(...personalShots.map((s) => convertToShotAttempt(s, personalShots)));
             allPasses.push(...passes);
 
             gamesProcessed++;

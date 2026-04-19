@@ -1,15 +1,15 @@
 .navigation {
-  background: linear-gradient(135deg, #003087 0%, #C8102E 100%);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-red) 100%);
+  box-shadow: var(--shadow-md);
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: var(--z-nav);
 }
 
 .nav-container {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 0 2rem;
+  padding: 0 var(--space-2xl);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -21,10 +21,10 @@
   color: white;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  font-weight: 700;
+  gap: var(--space-md);
+  font-weight: var(--fw-bold);
   font-size: 1.5rem;
-  transition: opacity 0.2s;
+  transition: opacity var(--transition-normal);
 }
 
 .nav-logo:hover {
@@ -89,7 +89,9 @@
   border: none;
   cursor: pointer;
   padding: 8px;
-  z-index: 101;
+  z-index: var(--z-nav-overlay);
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .hamburger-line {
@@ -143,10 +145,17 @@
     top: 56px;
     left: 0;
     right: 0;
-    background: linear-gradient(135deg, #003087 0%, #C8102E 100%);
-    padding: 1rem;
-    gap: 0.25rem;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-red) 100%);
+    padding: var(--space-lg);
+    padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom, 0));
+    gap: var(--space-xs);
+    box-shadow: var(--shadow-lg);
+    /* Contain the menu so it never extends past the viewport — if we
+       ever add enough links to overflow, this scrolls inside the menu
+       rather than pushing the page. */
+    max-height: calc(100vh - 56px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .nav-links.nav-open {

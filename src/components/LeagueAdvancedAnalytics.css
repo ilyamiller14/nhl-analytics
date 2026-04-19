@@ -10,12 +10,12 @@
 
 .analytics-intro h2 {
   font-size: 32px;
-  color: #2c3e50;
+  color: var(--gray-800);
   margin-bottom: 8px;
 }
 
 .analytics-intro p {
-  color: #657786;
+  color: var(--gray-500);
   font-size: 16px;
 }
 
@@ -24,7 +24,7 @@
   background: white;
   border-radius: 12px;
   margin-bottom: 32px;
-  border: 2px solid #e1e8ed;
+  border: 2px solid var(--gray-200);
   overflow: hidden;
 }
 
@@ -40,7 +40,7 @@
   transition: background 0.2s;
   font-size: 16px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--gray-800);
 }
 
 .computation-toggle:hover {
@@ -49,7 +49,7 @@
 
 .toggle-icon {
   font-size: 14px;
-  color: #003087;
+  color: var(--primary-blue);
   transition: transform 0.2s;
 }
 
@@ -61,7 +61,7 @@
 .computation-content {
   padding: 32px 24px;
   background: white;
-  border-top: 2px solid #e1e8ed;
+  border-top: 2px solid var(--gray-200);
 }
 
 .computation-grid {
@@ -74,32 +74,32 @@
   background: #f8fafb;
   padding: 20px;
   border-radius: 8px;
-  border-left: 4px solid #003087;
+  border-left: 4px solid var(--primary-blue);
 }
 
 .computation-item h4 {
   font-size: 16px;
-  color: #003087;
+  color: var(--primary-blue);
   margin-bottom: 12px;
   font-weight: 600;
 }
 
 .computation-item p {
   font-size: 13px;
-  color: #2c3e50;
+  color: var(--gray-800);
   line-height: 1.6;
   margin: 0;
 }
 
 .computation-item strong {
-  color: #003087;
+  color: var(--primary-blue);
   font-weight: 600;
 }
 
 .computation-item em {
   display: block;
   margin-top: 8px;
-  color: #657786;
+  color: var(--gray-500);
   font-size: 12px;
 }
 
@@ -118,23 +118,24 @@
   align-items: center;
   margin-bottom: 20px;
   padding-bottom: 12px;
-  border-bottom: 3px solid #003087;
+  border-bottom: 3px solid var(--primary-blue);
 }
 
 .table-header h3 {
   font-size: 20px;
-  color: #2c3e50;
+  color: var(--gray-800);
   margin: 0;
   font-weight: 600;
 }
 
 .table-meta {
   font-size: 14px;
-  color: #657786;
+  color: var(--gray-500);
 }
 
 .table-wrapper {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .league-analytics-table {
@@ -155,8 +156,8 @@
   padding: 14px 16px;
   text-align: left;
   font-weight: 600;
-  color: #2c3e50;
-  border-bottom: 2px solid #e1e8ed;
+  color: var(--gray-800);
+  border-bottom: 2px solid var(--gray-200);
   text-transform: uppercase;
   font-size: 12px;
   letter-spacing: 0.5px;
@@ -176,7 +177,7 @@
 .league-analytics-table td {
   padding: 16px;
   border-bottom: 1px solid #f0f3f5;
-  color: #2c3e50;
+  color: var(--gray-800);
 }
 
 .league-analytics-table tbody tr:hover {
@@ -193,21 +194,21 @@
 }
 
 .player-name-link {
-  color: #003087;
+  color: var(--primary-blue);
   font-weight: 600;
   text-decoration: none;
   transition: color 0.2s;
 }
 
 .player-name-link:hover {
-  color: #0055A4;
+  color: var(--secondary-blue);
   text-decoration: underline;
 }
 
 .highlight-cell {
   background: #e8f0f7;
   font-weight: 700;
-  color: #003087;
+  color: var(--primary-blue);
 }
 
 .positive {
@@ -226,7 +227,7 @@
   padding: 16px;
   background: #e8f0f7;
   border-radius: 8px;
-  color: #657786;
+  color: var(--gray-500);
   font-size: 14px;
   font-style: italic;
 }
@@ -245,10 +246,22 @@
 
   .league-analytics-table {
     font-size: 12px;
+    min-width: 800px; /* was 1200px — shorter horizontal scroll on mobile */
   }
 
   .league-analytics-table th,
   .league-analytics-table td {
     padding: 10px 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .league-analytics-table {
+    min-width: 680px;
+    font-size: 11px;
+  }
+  .league-analytics-table th,
+  .league-analytics-table td {
+    padding: 8px 6px;
   }
 }

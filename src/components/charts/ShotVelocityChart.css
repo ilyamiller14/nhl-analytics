@@ -24,13 +24,13 @@
 .shot-velocity-chart .chart-title {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--gray-800);
   margin: 0 0 0.25rem 0;
 }
 
 .shot-velocity-chart .chart-subtitle {
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--gray-500);
   margin: 0;
 }
 
@@ -42,7 +42,7 @@
 
 .view-toggle {
   display: flex;
-  background: #f3f4f6;
+  background: var(--gray-100);
   border-radius: 8px;
   padding: 4px;
 }
@@ -54,18 +54,18 @@
   border-radius: 6px;
   font-size: 0.875rem;
   font-weight: 500;
-  color: #6b7280;
+  color: var(--gray-500);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .toggle-btn:hover {
-  color: #374151;
+  color: var(--gray-700);
 }
 
 .toggle-btn.active {
   background: white;
-  color: #1f2937;
+  color: var(--gray-800);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
@@ -83,19 +83,19 @@
   align-items: center;
   text-align: center;
   padding: 1rem;
-  background: #f8fafc;
+  background: var(--gray-50);
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--gray-200);
 }
 
 .shot-velocity-chart .metric-card.highlight {
   background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-  border-color: #ef4444;
+  border-color: var(--error);
 }
 
 .shot-velocity-chart .metric-label {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--gray-500);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 0.5rem;
@@ -104,12 +104,12 @@
 .shot-velocity-chart .metric-value {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--gray-800);
 }
 
 .metric-detail {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--gray-500);
   margin-top: 0.25rem;
 }
 
@@ -121,10 +121,10 @@
 .shot-velocity-chart .section-title {
   font-size: 1rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
   margin: 0 0 1rem 0;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--gray-200);
 }
 
 .shot-velocity-chart .chart-container {
@@ -136,7 +136,7 @@
   align-items: center;
   justify-content: center;
   height: 200px;
-  color: #6b7280;
+  color: var(--gray-500);
   font-size: 0.95rem;
 }
 
@@ -149,7 +149,7 @@
 
 .shot-type-card {
   padding: 1rem;
-  background: #f8fafc;
+  background: var(--gray-50);
   border-radius: 8px;
   border-left: 4px solid;
 }
@@ -157,20 +157,20 @@
 .type-name {
   display: block;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--gray-800);
   margin-bottom: 0.5rem;
 }
 
 .type-count {
   display: block;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .type-avg {
   display: block;
   font-size: 0.8rem;
-  color: #9ca3af;
+  color: var(--gray-400);
   margin-top: 0.25rem;
 }
 
@@ -184,23 +184,23 @@
 
 .filter-btn {
   padding: 0.4rem 0.75rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--gray-300);
   background: white;
   border-radius: 6px;
   font-size: 0.8rem;
   font-weight: 500;
-  color: #6b7280;
+  color: var(--gray-500);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .filter-btn:hover {
-  border-color: #9ca3af;
-  color: #374151;
+  border-color: var(--gray-400);
+  color: var(--gray-700);
 }
 
 .filter-btn.active {
-  background: #f3f4f6;
+  background: var(--gray-100);
   font-weight: 600;
 }
 
@@ -211,7 +211,7 @@
   margin: 1rem 0;
   padding: 1rem;
   background: #fafafa;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
 }
 
@@ -257,7 +257,7 @@
 .velocity-legend .legend-title {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
   margin-bottom: 0.5rem;
 }
 
@@ -268,9 +268,9 @@
 
 .gradient-bar.velocity {
   height: 16px;
-  background: linear-gradient(to right, #60a5fa 0%, #34d399 25%, #fbbf24 50%, #f97316 75%, #ef4444 100%);
+  background: linear-gradient(to right, #60a5fa 0%, #34d399 25%, #fbbf24 50%, #f97316 75%, var(--error) 100%);
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--gray-200);
 }
 
 .gradient-labels {
@@ -278,20 +278,20 @@
   justify-content: space-between;
   margin-top: 4px;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 /* Type Legend */
 .type-legend {
   margin-top: 1.5rem;
   padding-top: 1rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--gray-200);
 }
 
 .type-legend .legend-title {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
   margin-bottom: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -308,7 +308,7 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .shot-velocity-chart .legend-color {
@@ -332,8 +332,8 @@
   text-align: left;
   padding: 0.5rem 0.75rem;
   font-weight: 600;
-  color: #6b7280;
-  border-bottom: 2px solid #e5e7eb;
+  color: var(--gray-500);
+  border-bottom: 2px solid var(--gray-200);
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -341,8 +341,8 @@
 
 .shot-velocity-chart .mini-table td {
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #f3f4f6;
-  color: #374151;
+  border-bottom: 1px solid var(--gray-100);
+  color: var(--gray-700);
 }
 
 .shot-velocity-chart .mini-table tr:last-child td {
@@ -351,7 +351,7 @@
 
 .shot-velocity-chart .mini-table .highlight-value {
   font-weight: 700;
-  color: #1f2937;
+  color: var(--gray-800);
 }
 
 /* Responsive */

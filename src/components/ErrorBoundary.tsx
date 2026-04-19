@@ -1,4 +1,5 @@
 import { Component, type ReactNode, type ErrorInfo } from 'react';
+import './ErrorBoundary.css';
 
 interface Props {
   children: ReactNode;
@@ -49,44 +50,20 @@ export default class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) return this.props.fallback;
 
       return (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: '60vh',
-          gap: '1rem',
-          padding: '2rem',
-          textAlign: 'center',
-        }}>
-          <h2 style={{ color: '#e53e3e', margin: 0 }}>Something went wrong</h2>
-          <p style={{ color: '#718096', maxWidth: '400px' }}>
+        <div className="error-boundary" role="alert">
+          <h2 className="error-boundary__title">Something went wrong</h2>
+          <p className="error-boundary__message">
             This page encountered an unexpected error. You can try reloading it.
           </p>
           {this.state.error && (
-            <pre style={{
-              background: '#1a202c',
-              color: '#fc8181',
-              padding: '0.75rem 1rem',
-              borderRadius: '6px',
-              fontSize: '0.8rem',
-              maxWidth: '500px',
-              overflow: 'auto',
-            }}>
+            <pre className="error-boundary__detail">
               {this.state.error.message}
             </pre>
           )}
           <button
+            type="button"
             onClick={this.handleReload}
-            style={{
-              padding: '0.5rem 1.5rem',
-              background: '#3182ce',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-            }}
+            className="btn btn-primary"
           >
             Reload Page
           </button>

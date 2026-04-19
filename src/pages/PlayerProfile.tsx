@@ -15,6 +15,7 @@ import XGFlowChart from '../components/charts/XGFlowChart';
 import PlayerAnalyticsCard from '../components/PlayerAnalyticsCard';
 import { useComparison } from '../context/ComparisonContext';
 import PlayerSearch from '../components/PlayerSearch';
+import ProfileHero from '../components/ProfileHero';
 // EDGE charts
 import SpeedProfileChart from '../components/charts/SpeedProfileChart';
 import ZoneTimeChart from '../components/charts/ZoneTimeChart';
@@ -41,9 +42,6 @@ import type { Shot } from '../components/charts/ShotChart';
 import type { Hit } from '../components/charts/HitChart';
 import type { Faceoff } from '../components/charts/FaceoffChart';
 import {
-  formatDate,
-  formatHeight,
-  formatWeight,
   calculateAge,
   formatPosition,
   formatPlusMinus,
@@ -162,11 +160,21 @@ function PlayerProfile() {
       // with overflow:hidden to clip it visually, while the clone itself is
       // absolutely positioned at 0,0 inside it so mobile browsers still
       // compute full layout (unlike left:-9999px which Safari can skip).
+      //
+      // 16:9 share target — 1200×675 — so the PNG lands cleanly on
+      // Twitter (2:1 crop), iMessage (center square), Discord (full),
+      // and any iOS share sheet. Width is fixed because we export at
+      // pixel scale 2 → 2400×1350 which downscales gracefully on
+      // social previews without text becoming illegible.
+      const SHARE_CARD_WIDTH = 1200;
+      const SHARE_CARD_HEIGHT = 675;
       const original = cardRef.current;
       const wrapper = document.createElement('div');
       wrapper.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;overflow:hidden;pointer-events:none;z-index:-1;';
       const clone = original.cloneNode(true) as HTMLElement;
-      clone.style.cssText = 'position:absolute;left:0;top:0;width:900px;min-width:900px;zoom:1;overflow:visible;';
+      clone.style.cssText =
+        `position:absolute;left:0;top:0;width:${SHARE_CARD_WIDTH}px;min-width:${SHARE_CARD_WIDTH}px;` +
+        `height:${SHARE_CARD_HEIGHT}px;max-height:${SHARE_CARD_HEIGHT}px;aspect-ratio:unset;overflow:hidden;`;
       wrapper.appendChild(clone);
       document.body.appendChild(wrapper);
 
@@ -174,19 +182,14 @@ function PlayerProfile() {
       await new Promise(r => requestAnimationFrame(r));
       await new Promise(r => requestAnimationFrame(r));
 
-      // Measure full content height explicitly — on mobile (especially iOS Safari),
-      // html-to-image's internal clientHeight can be too short, cropping the PNG.
-      // scrollHeight returns the full content height regardless of viewport constraints.
-      const cloneHeight = clone.scrollHeight;
-
       let dataUrl: string;
       try {
         dataUrl = await toPng(clone, {
           quality: 0.95,
           backgroundColor: '#0c0c1d',
           pixelRatio: 2,
-          width: 900,
-          height: cloneHeight,
+          width: SHARE_CARD_WIDTH,
+          height: SHARE_CARD_HEIGHT,
           cacheBust: true,
           includeQueryParams: true,
         });
@@ -196,8 +199,8 @@ function PlayerProfile() {
           quality: 0.95,
           backgroundColor: '#0c0c1d',
           pixelRatio: 2,
-          width: 900,
-          height: cloneHeight,
+          width: SHARE_CARD_WIDTH,
+          height: SHARE_CARD_HEIGHT,
           filter: (node: HTMLElement) => {
             if (node.tagName === 'IMG') {
               const src = (node as HTMLImageElement).src;
@@ -391,23 +394,35 @@ function PlayerProfile() {
     };
   }, [edgeData, player]);
 
-  // Generate EDGE tracking badges for player header
+  // Generate EDGE tracking badges for player header.
+  //
+  // The NHL EDGE /comparison endpoint returns `leaguePercentile` fields
+  // that come through our transformer as 0 (the raw API doesn't surface
+  // them reliably at the comparison level). The detailed endpoints DO
+  // return real per-metric percentiles, so we read from those instead:
+  //   - speed.percentiles.topSpeed        (max speed percentile)
+  //   - speed.percentiles.bursts22Plus    (explosiveness)
+  //   - distance.percentiles.distancePer60 (workload)
+  // Values are on a 0–100 scale already (transformer multiplies by 100).
   const edgeBadges: { label: string; color: string }[] = useMemo(() => {
-    if (!edgeData?.comparison) return [];
+    if (!edgeData) return [];
     const badges: { label: string; color: string }[] = [];
-    const c = edgeData.comparison;
 
-    if (c.percentiles.topSpeed?.leaguePercentile >= 90) {
+    const topSpeedPct = edgeData.speed?.percentiles?.topSpeed ?? 0;
+    const bursts22PlusPct = edgeData.speed?.percentiles?.bursts22Plus ?? 0;
+    const distancePer60Pct = edgeData.distance?.percentiles?.distancePer60 ?? 0;
+
+    if (topSpeedPct >= 90) {
       badges.push({ label: 'Top 10% Speed', color: '#ef4444' });
-    } else if (c.percentiles.topSpeed?.leaguePercentile >= 75) {
+    } else if (topSpeedPct >= 75) {
       badges.push({ label: 'Elite Skater', color: '#f97316' });
     }
 
-    if (c.percentiles.bursts22Plus?.leaguePercentile >= 90) {
+    if (bursts22PlusPct >= 90) {
       badges.push({ label: 'Explosive', color: '#3b82f6' });
     }
 
-    if (c.percentiles.distancePerGame?.leaguePercentile >= 90) {
+    if (distancePer60Pct >= 90) {
       badges.push({ label: 'Workhorse', color: '#10b981' });
     }
 
@@ -500,87 +515,15 @@ function PlayerProfile() {
 
   return (
     <div className="player-profile">
-      <div className="profile-header">
-        <div className="profile-header-content">
-          <div className="profile-hero">
-            <div className="profile-image-container">
-              {player.headshot ? (
-                <img src={player.headshot} alt={`${player.firstName.default} ${player.lastName.default}`} className="profile-image" />
-              ) : (
-                <div className="profile-image-placeholder">
-                  {player.firstName.default[0]}
-                  {player.lastName.default[0]}
-                </div>
-              )}
-              {player.teamLogo && (
-                <img src={player.teamLogo} alt={`${player.fullTeamName?.default || player.currentTeamAbbrev} logo`} className="profile-team-logo" />
-              )}
-            </div>
-
-            <div className="profile-info">
-              <div className="profile-name-section">
-                <h1 className="profile-name">
-                  {player.firstName.default} {player.lastName.default}
-                </h1>
-                {player.sweaterNumber && (
-                  <span className="profile-number">#{player.sweaterNumber}</span>
-                )}
-              </div>
-
-              <div className="profile-meta">
-                <span className={`profile-position position-${player.position}`}>
-                  {formatPosition(player.position)}
-                </span>
-                {player.fullTeamName && (
-                  <>
-                    <span className="meta-divider">•</span>
-                    <span className="profile-team">{player.fullTeamName.default}</span>
-                  </>
-                )}
-                {!player.isActive && (
-                  <>
-                    <span className="meta-divider">•</span>
-                    <span className="inactive-badge">Inactive</span>
-                  </>
-                )}
-                {edgeBadges.length > 0 && edgeBadges.map((badge, idx) => (
-                  <span
-                    key={idx}
-                    className="edge-badge"
-                    style={{ backgroundColor: badge.color, marginLeft: idx === 0 ? '0.5rem' : '0.25rem' }}
-                  >
-                    {badge.label}
-                  </span>
-                ))}
-              </div>
-
-              <div className="profile-bio-stats">
-                {age && <div className="bio-stat">Age: {age}</div>}
-                {player.heightInInches && (
-                  <div className="bio-stat">Height: {formatHeight(player.heightInInches)}</div>
-                )}
-                {player.weightInPounds && (
-                  <div className="bio-stat">Weight: {formatWeight(player.weightInPounds)}</div>
-                )}
-                {player.shootsCatches && (
-                  <div className="bio-stat">Shoots: {player.shootsCatches}</div>
-                )}
-                {player.birthCity && (
-                  <div className="bio-stat">
-                    Born: {player.birthCity.default}, {player.birthCountry} ({formatDate(player.birthDate)})
-                  </div>
-                )}
-                {player.draftDetails && (
-                  <div className="bio-stat">
-                    Draft: {player.draftDetails.year} - Round {player.draftDetails.round}, Pick{' '}
-                    {player.draftDetails.overallPick} ({player.draftDetails.teamAbbrev})
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <ProfileHero
+        player={player}
+        age={age}
+        edgeBadges={edgeBadges}
+        onCompare={() => {
+          addPlayer(player);
+          navigate('/compare');
+        }}
+      />
 
       <div className="profile-body">
         <div className="page-container">

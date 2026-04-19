@@ -104,21 +104,37 @@ export default function SpeedProfileChart({
     ];
   }, [speedData, avgData]);
 
-  // Calculate comparison metrics using REAL EDGE values
+  // Comparison card values. Prefer the REAL percentile the NHL EDGE API
+  // returns (already scaled 0–100 by the transformer); fall back only
+  // when the API didn't supply one, and when falling back make the
+  // fallback explicitly honest (null → "—" in UI) rather than
+  // manufacturing a fake percentile from a value/leagueAvg ratio.
   const comparison = useMemo(() => {
     const topSpeedDiff = (speedData.topSpeed || 0) - avgData.topSpeed;
     const avgTopSpeedDiff = (speedData.avgTopSpeed || 0) - avgData.topSpeed;
+
+    // Cast to the league-avg-augmented type — the component is always
+    // passed this wider shape by its callers, but the prop declaration
+    // stays on the base type to avoid leaking internal details.
+    const speedWithPct = speedData as { percentiles?: { topSpeed?: number } };
+    const realTopSpeedPercentile = speedWithPct.percentiles?.topSpeed;
 
     return {
       topSpeed: {
         value: speedData.topSpeed || 0,
         diff: topSpeedDiff,
-        percentile: calculatePercentile(speedData.topSpeed || 0, avgData.topSpeed),
+        percentile:
+          typeof realTopSpeedPercentile === 'number' && realTopSpeedPercentile > 0
+            ? Math.round(realTopSpeedPercentile)
+            : null,
       },
       avgTopSpeed: {
         value: speedData.avgTopSpeed || 0,
         diff: avgTopSpeedDiff,
-        percentile: calculatePercentile(speedData.avgTopSpeed || 0, avgData.topSpeed),
+        // Avg top-speed doesn't get its own percentile from the API;
+        // leave it null rather than fabricating one. The value + diff
+        // already communicate enough for the UI.
+        percentile: null,
       },
     };
   }, [speedData, avgData]);
@@ -165,7 +181,11 @@ export default function SpeedProfileChart({
           <span className={`metric-diff ${comparison.topSpeed.diff >= 0 ? 'positive' : 'negative'}`}>
             {comparison.topSpeed.diff >= 0 ? '+' : ''}{comparison.topSpeed.diff.toFixed(1)} vs avg
           </span>
-          <span className="metric-percentile">{comparison.topSpeed.percentile}th percentile</span>
+          {comparison.topSpeed.percentile !== null && (
+            <span className="metric-percentile">
+              {comparison.topSpeed.percentile}th percentile
+            </span>
+          )}
         </div>
         <div className="metric-card">
           <span className="metric-label">Avg Top Speed</span>
@@ -310,10 +330,8 @@ export default function SpeedProfileChart({
   );
 }
 
-// Calculate percentile using ratio to league average (no assumed std devs)
-function calculatePercentile(value: number, average: number): number {
-  if (average === 0 || value === 0) return 50;
-  const ratio = value / average;
-  const percentile = Math.round(50 * ratio);
-  return Math.max(1, Math.min(99, percentile));
-}
+// Previously this computed a fake percentile as `value / leagueAvg × 50`.
+// That's a ratio, not a percentile — a player at 1.07× average would
+// read as "54th percentile" when the real percentile is usually 70–80.
+// We removed it. Use `speedData.percentiles.*` (real percentiles from
+// the NHL EDGE API) or show no percentile at all.

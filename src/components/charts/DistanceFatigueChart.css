@@ -24,13 +24,13 @@
 .distance-fatigue-chart .chart-title {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--gray-800);
   margin: 0 0 0.25rem 0;
 }
 
 .distance-fatigue-chart .chart-subtitle {
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--gray-500);
   margin: 0;
 }
 
@@ -42,7 +42,7 @@
 
 .distance-fatigue-chart .view-toggle {
   display: flex;
-  background: #f3f4f6;
+  background: var(--gray-100);
   border-radius: 8px;
   padding: 4px;
 }
@@ -54,18 +54,18 @@
   border-radius: 6px;
   font-size: 0.875rem;
   font-weight: 500;
-  color: #6b7280;
+  color: var(--gray-500);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .distance-fatigue-chart .toggle-btn:hover {
-  color: #374151;
+  color: var(--gray-700);
 }
 
 .distance-fatigue-chart .toggle-btn.active {
   background: white;
-  color: #1f2937;
+  color: var(--gray-800);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
@@ -83,19 +83,19 @@
   align-items: center;
   text-align: center;
   padding: 1rem;
-  background: #f8fafc;
+  background: var(--gray-50);
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--gray-200);
 }
 
 .distance-fatigue-chart .metric-card.highlight {
   background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-  border-color: #3b82f6;
+  border-color: var(--info);
 }
 
 .distance-fatigue-chart .metric-label {
   font-size: 0.7rem;
-  color: #6b7280;
+  color: var(--gray-500);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 0.5rem;
@@ -104,15 +104,15 @@
 .distance-fatigue-chart .metric-value {
   font-size: 1.25rem;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--gray-800);
 }
 
 .distance-fatigue-chart .metric-value.positive {
-  color: #10b981;
+  color: var(--success);
 }
 
 .distance-fatigue-chart .metric-value.negative {
-  color: #ef4444;
+  color: var(--error);
 }
 
 /* Chart Section */
@@ -123,10 +123,10 @@
 .distance-fatigue-chart .section-title {
   font-size: 1rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
   margin: 0 0 1rem 0;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--gray-200);
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -136,9 +136,9 @@
   font-size: 0.75rem;
   font-weight: 500;
   padding: 0.25rem 0.5rem;
-  background: #f3f4f6;
+  background: var(--gray-100);
   border-radius: 4px;
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .distance-fatigue-chart .chart-container {
@@ -150,7 +150,7 @@
   align-items: center;
   justify-content: center;
   height: 200px;
-  color: #6b7280;
+  color: var(--gray-500);
   font-size: 0.95rem;
 }
 
@@ -162,12 +162,12 @@
   gap: 1rem;
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--gray-200);
 }
 
 .correlation-legend .legend-label {
   font-size: 0.8rem;
-  color: #6b7280;
+  color: var(--gray-500);
   font-weight: 500;
 }
 
@@ -176,7 +176,7 @@
   align-items: center;
   gap: 0.3rem;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .correlation-legend .legend-dot {
@@ -192,7 +192,7 @@
   gap: 2rem;
   margin-top: 1rem;
   padding: 1rem;
-  background: #f8fafc;
+  background: var(--gray-50);
   border-radius: 8px;
 }
 
@@ -205,7 +205,7 @@
 
 .shift-stat .stat-label {
   font-size: 0.7rem;
-  color: #6b7280;
+  color: var(--gray-500);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 0.25rem;
@@ -214,19 +214,19 @@
 .shift-stat .stat-value {
   font-size: 1.1rem;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--gray-800);
 }
 
 /* Footer */
 .chart-footer {
   margin-top: 1.5rem;
   padding-top: 1rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--gray-200);
 }
 
 .footer-note {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--gray-400);
   text-align: center;
   margin: 0;
   line-height: 1.5;

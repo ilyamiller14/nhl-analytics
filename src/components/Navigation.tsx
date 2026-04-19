@@ -3,20 +3,47 @@ import { Link, useLocation } from 'react-router-dom';
 import { CacheManager } from '../utils/cacheUtils';
 import './Navigation.css';
 
+interface NavItem {
+  label: string;
+  to: string;
+  /** Prefix used to mark the link active — distinct from `to` because
+      some links point to sub-paths we want highlighted for the whole family. */
+  match?: string;
+}
+
+/**
+ * Nav is grouped mentally as:
+ *   Explore → Compare → League → Glossary
+ * so a fan's path is: browse Teams/Players, then Compare, then dig
+ * into League-wide Leaders / Advanced Stats / Cap. Labels are written
+ * for fans, not analytics nerds — "Advanced Stats" beats "Deep",
+ * "Cap Space" beats "Management".
+ */
+const NAV_ITEMS: NavItem[] = [
+  { label: 'Home',          to: '/' },
+  { label: 'Teams',         to: '/teams',    match: '/team' },
+  { label: 'Players',       to: '/search',   match: '/search' },
+  { label: 'Compare',       to: '/compare' },
+  { label: 'Leaders',       to: '/trends' },
+  { label: 'Advanced Stats', to: '/advanced' },
+  { label: 'Cap Space',     to: '/cap' },
+  { label: 'Glossary',      to: '/glossary' },
+];
+
 function Navigation() {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Close menu on route change
   useEffect(() => {
     setMenuOpen(false);
   }, [location.pathname]);
 
-  const isActive = (path: string) => {
-    if (path === '/') {
-      return location.pathname === path ? 'active' : '';
+  const isActive = (item: NavItem) => {
+    if (item.to === '/') {
+      return location.pathname === '/' ? 'active' : '';
     }
-    return location.pathname.startsWith(path) ? 'active' : '';
+    const prefix = item.match ?? item.to;
+    return location.pathname.startsWith(prefix) ? 'active' : '';
   };
 
   const handleClearCache = () => {
@@ -25,7 +52,7 @@ function Navigation() {
   };
 
   return (
-    <nav className="navigation">
+    <nav className="navigation" aria-label="Main">
       <div className="nav-container">
         <Link to="/" className="nav-logo">
           <span className="logo-text">NHL Analytics</span>
@@ -36,57 +63,30 @@ function Navigation() {
           onClick={() => setMenuOpen(!menuOpen)}
           aria-label={menuOpen ? 'Close menu' : 'Open menu'}
           aria-expanded={menuOpen}
+          aria-controls="primary-nav-list"
         >
           <span className={`hamburger-line ${menuOpen ? 'open' : ''}`} />
           <span className={`hamburger-line ${menuOpen ? 'open' : ''}`} />
           <span className={`hamburger-line ${menuOpen ? 'open' : ''}`} />
         </button>
 
-        <ul className={`nav-links ${menuOpen ? 'nav-open' : ''}`}>
-          <li>
-            <Link to="/" className={`nav-link ${isActive('/')}`}>
-              Home
-            </Link>
-          </li>
-          <li>
-            <Link to="/search" className={`nav-link ${isActive('/search')}`}>
-              Players
-            </Link>
-          </li>
-          <li>
-            <Link to="/teams" className={`nav-link ${isActive('/teams')}`}>
-              Teams
-            </Link>
-          </li>
-          <li>
-            <Link to="/contracts" className={`nav-link ${isActive('/contracts')}`}>
-              Contracts
-            </Link>
-          </li>
-          <li>
-            <Link to="/compare" className={`nav-link ${isActive('/compare')}`}>
-              Compare
-            </Link>
-          </li>
-          <li>
-            <Link to="/trends" className={`nav-link ${isActive('/trends')}`}>
-              Analytics
-            </Link>
-          </li>
-          <li>
-            <Link to="/deep" className={`nav-link ${isActive('/deep')}`}>
-              Deep
-            </Link>
-          </li>
-          <li>
-            <Link to="/management" className={`nav-link ${isActive('/management')}`}>
-              Management
-            </Link>
-          </li>
+        <ul
+          id="primary-nav-list"
+          className={`nav-links ${menuOpen ? 'nav-open' : ''}`}
+        >
+          {NAV_ITEMS.map((item) => (
+            <li key={item.to}>
+              <Link to={item.to} className={`nav-link ${isActive(item)}`}>
+                {item.label}
+              </Link>
+            </li>
+          ))}
           <li>
             <button
+              type="button"
               onClick={handleClearCache}
               className="nav-link nav-button"
+              aria-label="Clear cached data and reload"
               title="Clear cached data and reload fresh stats"
             >
               ↻ Refresh

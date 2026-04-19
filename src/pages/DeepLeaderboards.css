@@ -82,6 +82,10 @@
   font-weight: 500;
 }
 .deep-tab:hover { background: var(--panel-border-strong); }
+.deep-tab:focus-visible {
+  outline: 2px solid var(--panel-link-hover);
+  outline-offset: 2px;
+}
 .deep-tab.active {
   background: var(--panel-tab-active-bg);
   border-color: var(--panel-tab-active-border);
@@ -241,12 +245,15 @@
   .deep-filter-label {
     justify-content: space-between;
   }
+  /* Previously min-width:900px — still 2.4× an iPhone SE viewport.
+     Tighter cells + shorter min-width reduces the horizontal scroll
+     distance by half while keeping every column legible. */
   .deep-table {
-    min-width: 900px;
+    min-width: 720px;
     font-size: 0.78rem;
   }
   .deep-table th, .deep-table td {
-    padding: 6px 7px;
+    padding: 5px 6px;
   }
   .deep-table .deep-th-name, .deep-name {
     min-width: 120px;
@@ -273,4 +280,18 @@
   .deep-table tbody tr:hover td.deep-rank {
     background: var(--panel-bg-row-hover);
   }
+}
+
+/* Very small phones — further tighten cells. */
+@media (max-width: 480px) {
+  .deep-table {
+    min-width: 640px;
+    font-size: 0.72rem;
+  }
+  .deep-table th,
+  .deep-table td {
+    padding: 4px 5px;
+  }
+  .deep-header h1 { font-size: 1.15rem; }
+  .deep-context-bar { grid-template-columns: 1fr 1fr; }
 }

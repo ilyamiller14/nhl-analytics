@@ -4,7 +4,7 @@
 
 .season-trends-container {
   background: white;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--gray-200);
   border-radius: 12px;
   padding: 24px;
   margin: 20px 0;
@@ -14,16 +14,16 @@
   margin: 0 0 24px 0;
   font-size: 1.5rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--gray-800);
   text-align: center;
   padding-bottom: 12px;
-  border-bottom: 2px solid #e5e7eb;
+  border-bottom: 2px solid var(--gray-200);
 }
 
 .trends-empty {
   text-align: center;
   padding: 60px 20px;
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .trends-empty p {
@@ -34,14 +34,14 @@
 .trends-empty .subtitle {
   font-size: 0.875rem;
   margin-top: 8px;
-  color: #9ca3af;
+  color: var(--gray-400);
 }
 
 /* Section Labels */
 .section-label {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--gray-800);
   margin-bottom: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -64,22 +64,22 @@
   padding: 8px 16px;
   font-size: 0.85rem;
   font-weight: 500;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: #4b5563;
+  color: var(--gray-600);
 }
 
 .metric-button:hover {
-  background: #f3f4f6;
-  border-color: #d1d5db;
+  background: var(--gray-100);
+  border-color: var(--gray-300);
 }
 
 .metric-button.active {
-  background: #3b82f6;
-  border-color: #3b82f6;
+  background: var(--info);
+  border-color: var(--info);
   color: white;
 }
 
@@ -102,13 +102,13 @@
   align-items: center;
   justify-content: center;
   min-height: 200px;
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .line-chart .chart-label {
   font-size: 0.9rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
   margin-bottom: 8px;
   text-align: center;
 }
@@ -125,8 +125,8 @@
 }
 
 .sparkline-card {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   padding: 12px 16px;
 }
@@ -141,7 +141,7 @@
 .sparkline-label {
   font-size: 0.8rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
 }
 
 .sparkline-trend {
@@ -159,17 +159,17 @@
   justify-content: space-between;
   align-items: center;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .sparkline-values .start,
 .sparkline-values .end {
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
 }
 
 .sparkline-values .arrow {
-  color: #9ca3af;
+  color: var(--gray-400);
 }
 
 /* Inflection Points */
@@ -188,23 +188,23 @@
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
-  background: #f9fafb;
+  background: var(--gray-50);
   border-radius: 8px;
-  border-left: 4px solid #6b7280;
+  border-left: 4px solid var(--gray-500);
 }
 
 .inflection-item.up {
-  border-left-color: #22c55e;
+  border-left-color: var(--success);
 }
 
 .inflection-item.down {
-  border-left-color: #ef4444;
+  border-left-color: var(--error);
 }
 
 .inflection-date {
   font-size: 0.8rem;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--gray-500);
   min-width: 60px;
 }
 
@@ -217,7 +217,7 @@
 
 .inflection-details .metric-name {
   font-size: 0.85rem;
-  color: #374151;
+  color: var(--gray-700);
 }
 
 .inflection-details .change {
@@ -226,16 +226,16 @@
 }
 
 .inflection-details .change.up {
-  color: #22c55e;
+  color: var(--success);
 }
 
 .inflection-details .change.down {
-  color: #ef4444;
+  color: var(--error);
 }
 
 .possible-cause {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--gray-500);
   background: white;
   padding: 4px 8px;
   border-radius: 4px;
@@ -243,7 +243,7 @@
 
 /* Game Summary Section */
 .game-summary-section {
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--gray-200);
   padding-top: 20px;
 }
 
@@ -264,12 +264,12 @@
 .summary-stat .value {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--gray-800);
 }
 
 .summary-stat .label {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--gray-500);
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
@@ -314,77 +314,77 @@
 /* Dark Mode */
 @media (prefers-color-scheme: dark) {
   .season-trends-container {
-    background: #1f2937;
-    border-color: #374151;
+    background: var(--gray-800);
+    border-color: var(--gray-700);
   }
 
   .trends-title {
-    color: #f9fafb;
-    border-bottom-color: #374151;
+    color: var(--gray-50);
+    border-bottom-color: var(--gray-700);
   }
 
   .section-label {
-    color: #f9fafb;
+    color: var(--gray-50);
   }
 
   .metric-button {
-    background: #374151;
-    border-color: #4b5563;
-    color: #d1d5db;
+    background: var(--gray-700);
+    border-color: var(--gray-600);
+    color: var(--gray-300);
   }
 
   .metric-button:hover {
-    background: #4b5563;
-    border-color: #6b7280;
+    background: var(--gray-600);
+    border-color: var(--gray-500);
   }
 
   .metric-button.active {
-    background: #3b82f6;
-    border-color: #3b82f6;
+    background: var(--info);
+    border-color: var(--info);
     color: white;
   }
 
   .line-chart {
-    background: #111827;
+    background: var(--gray-900);
   }
 
   .line-chart .chart-label {
-    color: #f9fafb;
+    color: var(--gray-50);
   }
 
   .sparkline-card {
-    background: #111827;
-    border-color: #374151;
+    background: var(--gray-900);
+    border-color: var(--gray-700);
   }
 
   .sparkline-label,
   .sparkline-values .start,
   .sparkline-values .end {
-    color: #f9fafb;
+    color: var(--gray-50);
   }
 
   .inflection-item {
-    background: #111827;
+    background: var(--gray-900);
   }
 
   .inflection-details .metric-name {
-    color: #d1d5db;
+    color: var(--gray-300);
   }
 
   .possible-cause {
-    background: #374151;
-    color: #9ca3af;
+    background: var(--gray-700);
+    color: var(--gray-400);
   }
 
   .game-summary-section {
-    border-top-color: #374151;
+    border-top-color: var(--gray-700);
   }
 
   .summary-stat .value {
-    color: #f9fafb;
+    color: var(--gray-50);
   }
 
   .summary-stat .label {
-    color: #9ca3af;
+    color: var(--gray-400);
   }
 }

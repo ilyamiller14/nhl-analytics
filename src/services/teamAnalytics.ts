@@ -3,7 +3,6 @@
  *
  * Derives only metrics that come directly from NHL API team stats.
  * All estimated/regressed/rated/odds values were removed — they were hardcoded guesses.
- * Use pbpComputedStats.ts for real Corsi/Fenwick/PDO from play-by-play.
  */
 
 import type { TeamStats } from './teamStatsService';

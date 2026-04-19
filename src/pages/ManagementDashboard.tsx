@@ -1,18 +1,13 @@
 /**
- * Management Dashboard Page
+ * Management / Cap Dashboard Page
  *
- * Weekly reports for front office with unique insights:
- * - Behavioral evolution (10-game rolling comparisons)
- * - Chemistry metrics (linemate pair analysis)
- * - Player/team toggle view
- *
- * Routes:
- * - /management (team selector)
- * - /management/:teamAbbrev (team view)
+ * Front-office view: chemistry matrix, line combinations, roster
+ * balance, and contract/cap summary. Routed at /cap (canonical);
+ * /contracts and /management redirect here for backwards compat.
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { fetchTeamData, type TeamData } from '../services/teamStatsService';
 import { fetchGamePlayByPlay, fetchGameShifts, enrichShotsWithOnIcePlayers, type GamePlayByPlay } from '../services/playByPlayService';
 import { fetchCachedTeamPBP, convertCachedToGamePBP } from '../services/cachedDataService';
@@ -60,10 +55,9 @@ type ViewMode = 'chemistry' | 'lines' | 'roster' | 'contracts';
 export default function ManagementDashboard() {
   const { teamAbbrev } = useParams<{ teamAbbrev: string }>();
   const navigate = useNavigate();
-  const location = useLocation();
-  const isContractsRoute = location.pathname.startsWith('/contracts');
+  const basePath = '/cap';
 
-  const [viewMode, setViewMode] = useState<ViewMode>(isContractsRoute ? 'contracts' : 'chemistry');
+  const [viewMode, setViewMode] = useState<ViewMode>('chemistry');
   const [teamData, setTeamData] = useState<TeamData | null>(null);
   const [playByPlayData, setPlayByPlayData] = useState<GamePlayByPlay[]>([]);
   const [playerInfo, setPlayerInfo] = useState<{
@@ -470,7 +464,7 @@ export default function ManagementDashboard() {
             <button
               key={team.abbrev}
               className="team-selector-card"
-              onClick={() => navigate(`${isContractsRoute ? '/contracts' : '/management'}/${team.abbrev}`)}
+              onClick={() => navigate(`${basePath}/${team.abbrev}`)}
             >
               <span className="team-abbrev">{team.abbrev}</span>
               <span className="team-name">{team.name}</span>
@@ -505,7 +499,7 @@ export default function ManagementDashboard() {
         </div>
         <div className="error-container">
           <p className="error-text">{error}</p>
-          <button onClick={() => navigate(isContractsRoute ? '/contracts' : '/management')} className="back-button">
+          <button onClick={() => navigate(basePath)} className="back-button">
             Select Different Team
           </button>
         </div>
@@ -539,7 +533,7 @@ export default function ManagementDashboard() {
               className={`toggle-btn ${viewMode === 'chemistry' ? 'active' : ''}`}
               onClick={() => setViewMode('chemistry')}
             >
-              Chemistry
+              On-Ice Pairs
             </button>
             <button
               className={`toggle-btn ${viewMode === 'lines' ? 'active' : ''}`}
@@ -582,11 +576,15 @@ export default function ManagementDashboard() {
 
         {viewMode === 'chemistry' && !isLoadingChemistry && chemistryMatrix && chemistryExtremes && (
           <>
-            {/* Best Chemistry Pairs */}
+            {/* Best On-Ice Pairs — real WOWY delta would be (together −
+                apart); until that lands we rank by per-60 shot differential
+                while two players share the ice. Minimum sample is 2 hours
+                together so the ranking isn't noise. */}
             <section className="dashboard-section">
-              <h2 className="section-title">Best Chemistry Pairs</h2>
+              <h2 className="section-title">Best On-Ice Pairs</h2>
               <p className="section-subtitle">
-                Player pairs with highest chemistry index
+                Top pairs ranked by shot differential per 60 while on the ice together
+                (minimum 2 hours shared TOI).
               </p>
 
               <div className="chemistry-pairs-grid">
@@ -596,11 +594,12 @@ export default function ManagementDashboard() {
               </div>
             </section>
 
-            {/* Worst Chemistry Pairs */}
+            {/* Pairs to Evaluate */}
             <section className="dashboard-section">
               <h2 className="section-title">Pairs to Evaluate</h2>
               <p className="section-subtitle">
-                Player pairs that may benefit from separation
+                Bottom pairs by on-ice shot differential — may benefit from separation
+                (minimum 2 hours shared TOI).
               </p>
 
               <div className="chemistry-pairs-grid">
@@ -610,9 +609,9 @@ export default function ManagementDashboard() {
               </div>
             </section>
 
-            {/* Chemistry Matrix Summary */}
+            {/* Summary */}
             <section className="dashboard-section">
-              <h2 className="section-title">Chemistry Analysis Summary</h2>
+              <h2 className="section-title">On-Ice Pair Analysis Summary</h2>
               <div className="chemistry-summary">
                 <div className="cs-stat">
                   <span className="cs-value">{chemistryMatrix.players.length}</span>

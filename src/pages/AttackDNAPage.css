@@ -4,7 +4,7 @@
 
 .attack-dna-page {
   min-height: 100vh;
-  background: #f9fafb;
+  background: var(--gray-50);
 }
 
 /* Loading State */
@@ -21,8 +21,8 @@
 .loading-spinner {
   width: 48px;
   height: 48px;
-  border: 4px solid #e5e7eb;
-  border-top-color: #3b82f6;
+  border: 4px solid var(--gray-200);
+  border-top-color: var(--info);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 20px;
@@ -36,13 +36,13 @@
 
 .loading-container p {
   font-size: 1.1rem;
-  color: #374151;
+  color: var(--gray-700);
   margin: 0;
 }
 
 .loading-subtitle {
   font-size: 0.9rem !important;
-  color: #6b7280 !important;
+  color: var(--gray-500) !important;
   margin-top: 8px !important;
 }
 
@@ -59,19 +59,19 @@
 
 .error-container h2 {
   font-size: 1.5rem;
-  color: #1f2937;
+  color: var(--gray-800);
   margin: 0 0 12px 0;
 }
 
 .error-container p {
-  color: #6b7280;
+  color: var(--gray-500);
   margin: 0 0 24px 0;
 }
 
 .back-link {
   display: inline-block;
   padding: 10px 24px;
-  background: #3b82f6;
+  background: var(--info);
   color: white;
   border-radius: 8px;
   text-decoration: none;
@@ -86,7 +86,7 @@
 /* Header */
 .attack-dna-header {
   background: white;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--gray-200);
   padding: 0;
 }
 
@@ -101,12 +101,12 @@
   align-items: center;
   gap: 8px;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--gray-500);
   margin-bottom: 16px;
 }
 
 .breadcrumb a {
-  color: #3b82f6;
+  color: var(--info);
   text-decoration: none;
 }
 
@@ -115,7 +115,7 @@
 }
 
 .breadcrumb span {
-  color: #9ca3af;
+  color: var(--gray-400);
 }
 
 .header-main {
@@ -132,13 +132,13 @@
 .entity-name {
   font-size: 2rem;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--gray-800);
   margin: 0 0 4px 0;
 }
 
 .entity-subtitle {
   font-size: 1rem;
-  color: #6b7280;
+  color: var(--gray-500);
   margin: 0;
 }
 
@@ -153,7 +153,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 20px;
-  background: #1f2937;
+  background: var(--gray-800);
   color: white;
   border: none;
   border-radius: 8px;
@@ -164,7 +164,7 @@
 }
 
 .share-button:hover {
-  background: #374151;
+  background: var(--gray-700);
 }
 
 .share-button svg {
@@ -176,7 +176,7 @@
   align-items: center;
   gap: 8px;
   font-size: 0.9rem;
-  color: #4b5563;
+  color: var(--gray-600);
 }
 
 .game-range-filter label {
@@ -186,21 +186,21 @@
 .game-range-select {
   padding: 8px 12px;
   font-size: 0.9rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--gray-300);
   border-radius: 6px;
   background: white;
-  color: #374151;
+  color: var(--gray-700);
   cursor: pointer;
   min-width: 140px;
 }
 
 .game-range-select:hover {
-  border-color: #9ca3af;
+  border-color: var(--gray-400);
 }
 
 .game-range-select:focus {
   outline: none;
-  border-color: #3b82f6;
+  border-color: var(--info);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
 }
 
@@ -209,14 +209,14 @@
   align-items: center;
   gap: 8px;
   font-size: 0.9rem;
-  color: #4b5563;
+  color: var(--gray-600);
   cursor: pointer;
 }
 
 .comparison-toggle input {
   width: 18px;
   height: 18px;
-  accent-color: #3b82f6;
+  accent-color: var(--info);
 }
 
 /* Tab Navigation */
@@ -225,7 +225,7 @@
   gap: 8px;
   margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--gray-200);
 }
 
 .tab-button {
@@ -233,24 +233,24 @@
   font-size: 0.9rem;
   font-weight: 500;
   background: transparent;
-  border: 2px solid #e5e7eb;
+  border: 2px solid var(--gray-200);
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: #4b5563;
+  color: var(--gray-600);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .tab-button:hover:not(:disabled) {
-  background: #f9fafb;
-  border-color: #d1d5db;
+  background: var(--gray-50);
+  border-color: var(--gray-300);
 }
 
 .tab-button.active {
-  background: #3b82f6;
-  border-color: #3b82f6;
+  background: var(--info);
+  border-color: var(--info);
   color: white;
 }
 
@@ -278,7 +278,7 @@
   margin-top: 24px;
   padding: 16px;
   background: white;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   text-align: center;
 }
@@ -286,13 +286,13 @@
 .data-info p {
   margin: 0;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--gray-500);
 }
 
 .data-info .data-disclaimer {
   margin-top: 8px;
   font-size: 0.8rem;
-  color: #9ca3af;
+  color: var(--gray-400);
 }
 
 /* Responsive */
@@ -338,24 +338,24 @@
 /* Dark Mode */
 @media (prefers-color-scheme: dark) {
   .attack-dna-page {
-    background: #111827;
+    background: var(--gray-900);
   }
 
   .attack-dna-header {
-    background: #1f2937;
-    border-bottom-color: #374151;
+    background: var(--gray-800);
+    border-bottom-color: var(--gray-700);
   }
 
   .entity-name {
-    color: #f9fafb;
+    color: var(--gray-50);
   }
 
   .entity-subtitle {
-    color: #9ca3af;
+    color: var(--gray-400);
   }
 
   .breadcrumb {
-    color: #9ca3af;
+    color: var(--gray-400);
   }
 
   .breadcrumb a {
@@ -363,58 +363,58 @@
   }
 
   .comparison-toggle {
-    color: #d1d5db;
+    color: var(--gray-300);
   }
 
   .game-range-filter {
-    color: #d1d5db;
+    color: var(--gray-300);
   }
 
   .game-range-select {
-    background: #374151;
-    border-color: #4b5563;
-    color: #f9fafb;
+    background: var(--gray-700);
+    border-color: var(--gray-600);
+    color: var(--gray-50);
   }
 
   .game-range-select:hover {
-    border-color: #6b7280;
+    border-color: var(--gray-500);
   }
 
   .data-info {
-    background: #1f2937;
-    border-color: #374151;
+    background: var(--gray-800);
+    border-color: var(--gray-700);
   }
 
   .data-info p {
-    color: #9ca3af;
+    color: var(--gray-400);
   }
 
   .loading-container p,
   .error-container h2 {
-    color: #f9fafb;
+    color: var(--gray-50);
   }
 
   .error-container p {
-    color: #9ca3af;
+    color: var(--gray-400);
   }
 
   .tab-navigation {
-    border-top-color: #374151;
+    border-top-color: var(--gray-700);
   }
 
   .tab-button {
-    border-color: #374151;
-    color: #d1d5db;
+    border-color: var(--gray-700);
+    color: var(--gray-300);
   }
 
   .tab-button:hover:not(:disabled) {
-    background: #374151;
-    border-color: #4b5563;
+    background: var(--gray-700);
+    border-color: var(--gray-600);
   }
 
   .tab-button.active {
-    background: #3b82f6;
-    border-color: #3b82f6;
+    background: var(--info);
+    border-color: var(--info);
     color: white;
   }
 }

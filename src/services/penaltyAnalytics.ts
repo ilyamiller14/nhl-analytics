@@ -171,7 +171,7 @@ export function analyzeSpecialTeams(
       situationBreakdown[situation] = { shots: 0, goals: 0, xG: 0 };
     }
 
-    const shotXG = calculateShotEventXG(shot);
+    const shotXG = calculateShotEventXG(shot, { priorShots: shots });
 
     if (shot.teamId === teamId) {
       // Team's own shots
@@ -194,11 +194,16 @@ export function analyzeSpecialTeams(
     }
   });
 
-  // Calculate PP analytics
+  // Calculate PP analytics — pass priorShots so rebounds are captured
   const ppGoals = ppShots.filter((s) => s.result === 'goal').length;
   const ppShotsOnGoal = ppShots.filter((s) => s.result === 'shot-on-goal' || s.result === 'goal').length;
-  const ppXG = ppShots.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
-  const highDangerPP = ppShots.filter((s) => calculateShotEventXG(s) >= 0.15).length;
+  const ppXG = ppShots.reduce(
+    (sum, s) => sum + calculateShotEventXG(s, { priorShots: ppShots }),
+    0
+  );
+  const highDangerPP = ppShots.filter(
+    (s) => calculateShotEventXG(s, { priorShots: ppShots }) >= 0.15
+  ).length;
 
   // Estimate PP opportunities (rough approximation: cluster of PP shots = 1 PP)
   const totalPowerPlays = Math.max(1, Math.ceil(ppShots.length / 3));
@@ -206,13 +211,19 @@ export function analyzeSpecialTeams(
   // Calculate PK analytics
   const pkGoalsAllowed = pkShotsAgainst.filter((s) => s.result === 'goal').length;
   const pkShotsOnGoalAllowed = pkShotsAgainst.filter((s) => s.result === 'shot-on-goal' || s.result === 'goal').length;
-  const pkXGAllowed = pkShotsAgainst.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
+  const pkXGAllowed = pkShotsAgainst.reduce(
+    (sum, s) => sum + calculateShotEventXG(s, { priorShots: pkShotsAgainst }),
+    0
+  );
   const pkShotsBlocked = pkShotsAgainst.filter((s) => s.result === 'blocked-shot').length;
   const totalPenaltyKills = Math.max(1, Math.ceil(pkShotsAgainst.length / 3));
 
   // ES analytics
   const esGoals = evenStrengthShots.filter((s) => s.result === 'goal').length;
-  const esXG = evenStrengthShots.reduce((sum, s) => sum + calculateShotEventXG(s), 0);
+  const esXG = evenStrengthShots.reduce(
+    (sum, s) => sum + calculateShotEventXG(s, { priorShots: evenStrengthShots }),
+    0
+  );
 
   return {
     powerPlay: {
