@@ -194,14 +194,28 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
 
   const warClass = result.WAR_per_82 > 1 ? 'pos' : result.WAR_per_82 < 0 ? 'neg' : 'neutral';
 
+  // Pace multiplier — bars are cumulative across games played; this
+  // converts any segment to its 82-game pace so a viewer can mentally
+  // reconcile a partial-season number against a full-season expectation.
+  const paceMult = result.gamesPlayed > 0 ? 82 / result.gamesPlayed : 0;
+
   return (
     <div className="war-break">
       {title && <h3 className="war-title">{title}</h3>}
 
+      <p className="war-explainer">
+        <strong>How to read this:</strong> bars are <em>cumulative wins</em> across the
+        {' '}{result.gamesPlayed} games this player has played, and they sum to the
+        {' '}<strong>{result.WAR.toFixed(2)} WAR</strong> shown to the left. Multiply any bar by
+        {' '}<strong>{paceMult.toFixed(2)}× </strong>
+        (i.e. 82 ÷ {result.gamesPlayed}) to get its 82-game pace.
+        Each component is its goal-units value ÷ {gpw.toFixed(2)} goals-per-win.
+      </p>
+
       <div className="war-headline">
         <div className={`war-number ${warClass}`}>
           <span className="war-value">{result.WAR.toFixed(2)}</span>
-          <span className="war-unit">WAR</span>
+          <span className="war-unit">WAR · cumulative</span>
         </div>
         <div className="war-meta">
           <div>
@@ -255,7 +269,11 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
               <rect x={barX} y={y} width={Math.max(w, 1)} height={rowHeight}
                 fill={seg.color} opacity={opacity} rx={3}>
                 <title>
-                  {`${seg.label}: ${fmt(wins)} wins (${fmt(seg.value)} goals ÷ ${gpw.toFixed(2)} goals/win)\n${seg.desc}\nsource: ${seg.sourceLabel}`}
+                  {`${seg.label}
+Cumulative: ${fmt(wins)} wins (${fmt(seg.value)} goals ÷ ${gpw.toFixed(2)} goals/win)
+82-game pace: ${fmt(wins * paceMult)} wins (${result.gamesPlayed} GP × ${paceMult.toFixed(2)}× pace)
+${seg.desc}
+source: ${seg.sourceLabel}`}
                 </title>
               </rect>
               {seg.pending ? (

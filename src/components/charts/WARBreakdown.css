@@ -1,5 +1,17 @@
 .war-break { color: var(--chart-text); display: flex; flex-direction: column; gap: 12px; }
 .war-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--chart-title); }
+.war-explainer {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--chart-border);
+  color: var(--chart-text);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.war-explainer strong { color: var(--chart-title); font-weight: 600; }
+.war-explainer em { font-style: normal; color: var(--chart-blue); font-weight: 600; }
 .war-empty {
   padding: 18px;
   border: 1px dashed var(--gray-700);
