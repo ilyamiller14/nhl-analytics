@@ -1203,7 +1203,7 @@ function PlayerProfile() {
                         <WARBreakdown
                           title="Wins Above Replacement"
                           playerName={`${player.firstName.default} ${player.lastName.default}`}
-                          result={computeSkaterWAR(row, warTables.context)}
+                          result={computeSkaterWAR(row, warTables.context, rapm)}
                         />
                       </div>
                     );
