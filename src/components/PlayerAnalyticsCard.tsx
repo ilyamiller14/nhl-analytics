@@ -558,6 +558,7 @@ export default function PlayerAnalyticsCard({
               result={warResult}
               title="Wins Above Replacement"
               width={1080}
+              compact
             />
           </div>
         </div>

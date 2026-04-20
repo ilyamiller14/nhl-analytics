@@ -15,6 +15,12 @@ interface Props {
   title?: string;
   playerName?: string;
   width?: number;
+  /** When true, the SVG + headline render at reduced natural height
+   *  (smaller rows, tighter padding, no axis label row) so the full
+   *  breakdown fits inside a share-card-style bounded container
+   *  without relying on CSS overflow clipping (which html-to-image
+   *  ignores during export). */
+  compact?: boolean;
 }
 
 // Distinct colors per domain:
@@ -55,7 +61,7 @@ function fmt(n: number, d = 2): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(d)}`;
 }
 
-export default function WARBreakdown({ result, title, playerName, width = 720 }: Props) {
+export default function WARBreakdown({ result, title, playerName, width = 720, compact = false }: Props) {
   if (!result.dataComplete || result.gamesPlayed === 0) {
     return (
       <div className="war-break">
@@ -207,13 +213,19 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
     Math.abs(result.WAR),
   );
 
-  const pad = { top: 24, right: 44, bottom: 34, left: 150 };
+  const pad = compact
+    ? { top: 14, right: 36, bottom: 18, left: 130 }
+    : { top: 24, right: 44, bottom: 34, left: 150 };
   const plotW = width - pad.left - pad.right;
   const zeroX = pad.left + plotW / 2;
   const pxPerWin = plotW / 2 / maxAbs;
-  const rowHeight = 28;
-  const rowGap = 5;
-  const height = pad.top + segments.length * (rowHeight + rowGap) + 54 + pad.bottom;
+  const rowHeight = compact ? 18 : 28;
+  const rowGap = compact ? 2 : 5;
+  // `54` in the non-compact layout reserved space for the "Total WAR"
+  // row + x-axis label. Compact mode drops the x-axis label row, so
+  // the extra only covers the total-WAR row.
+  const extraRows = compact ? 28 : 54;
+  const height = pad.top + segments.length * (rowHeight + rowGap) + extraRows + pad.bottom;
 
   const warClass = result.WAR_per_82 > 1 ? 'pos' : result.WAR_per_82 < 0 ? 'neg' : 'neutral';
 
@@ -284,8 +296,8 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
           const opacity = seg.pending ? 0.25 : (wins === 0 ? 0.35 : 0.85);
           return (
             <g key={seg.key}>
-              <text x={pad.left - 10} y={y + rowHeight / 2 + 4}
-                textAnchor="end" fontSize={12}
+              <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 3 : 4)}
+                textAnchor="end" fontSize={compact ? 10 : 12}
                 fill={dim ? '#64748b' : '#cbd5f5'}>
                 {seg.label}
               </text>
@@ -326,9 +338,9 @@ source: ${seg.sourceLabel}`}
                 const insideX = wins >= 0 ? barX + w - 6 : barX + 6;
                 return (
                   <text x={inside ? insideX : outsideX}
-                    y={y + rowHeight / 2 + 4}
+                    y={y + rowHeight / 2 + (compact ? 3 : 4)}
                     textAnchor={inside ? (wins >= 0 ? 'end' : 'start') : (wins >= 0 ? 'start' : 'end')}
-                    fontSize={12}
+                    fontSize={compact ? 10 : 12}
                     fill={inside ? '#0f172a' : (wins > 0 ? '#34d399' : wins < 0 ? '#f87171' : '#64748b')}
                     fontWeight={600}>
                     {fmt(wins)}
@@ -348,8 +360,8 @@ source: ${seg.sourceLabel}`}
               <line x1={pad.left - 20} x2={pad.left + plotW}
                 y1={y - 4} y2={y - 4}
                 stroke="rgba(148, 163, 184, 0.3)" />
-              <text x={pad.left - 10} y={y + rowHeight / 2 + 4}
-                textAnchor="end" fontSize={13} fill="#f3f4f6" fontWeight={700}>Total WAR</text>
+              <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 3 : 4)}
+                textAnchor="end" fontSize={compact ? 11 : 13} fill="#f3f4f6" fontWeight={700}>Total WAR</text>
               <rect x={totalX} y={y} width={Math.max(totalW, 1)} height={rowHeight}
                 fill={result.WAR >= 0 ? '#10b981' : '#dc2626'} rx={3}>
                 <title>
@@ -357,9 +369,9 @@ source: ${seg.sourceLabel}`}
                 </title>
               </rect>
               <text x={result.WAR >= 0 ? totalX + totalW + 6 : totalX - 6}
-                y={y + rowHeight / 2 + 4}
+                y={y + rowHeight / 2 + (compact ? 3 : 4)}
                 textAnchor={result.WAR >= 0 ? 'start' : 'end'}
-                fontSize={13}
+                fontSize={compact ? 11 : 13}
                 fill={result.WAR >= 0 ? '#34d399' : '#f87171'}
                 fontWeight={700}>
                 {fmt(result.WAR)}
@@ -380,10 +392,12 @@ source: ${seg.sourceLabel}`}
             </g>
           );
         })}
-        <text x={pad.left + plotW / 2} y={height - 4} textAnchor="middle"
-          fontSize={10} fill="#94a3b8">
-          Wins above replacement (each bar = component goals ÷ {gpw.toFixed(2)} goals/win)
-        </text>
+        {!compact && (
+          <text x={pad.left + plotW / 2} y={height - 4} textAnchor="middle"
+            fontSize={10} fill="#94a3b8">
+            Wins above replacement (each bar = component goals ÷ {gpw.toFixed(2)} goals/win)
+          </text>
+        )}
       </svg>
 
       {result.notes.length > 0 && (
