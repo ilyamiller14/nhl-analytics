@@ -255,27 +255,49 @@ export function computeSkaterWAR(
   const teamAbbrev = row.teamAbbrevs?.split(',')?.[0]?.trim();
   const teamTotal = context.teamTotals?.[teamAbbrev || ''] ?? null;
 
+  // Baseline blend: pure team-relative suffers from a "franchise player"
+  // pathology — McDavid's on-ice xGF gets compared to Edmonton-without-
+  // McDavid, but that residual team is still strong (Draisaitl / RNH /
+  // Hyman) so the differential compresses and McDavid ranks in the
+  // middle of the leaderboard. Pure league-median has the opposite
+  // pathology — every Oiler looks elite because their team is above
+  // league-median. We blend 50/50 so neither pathology dominates. A
+  // future RAPM regression would replace this, but for now the blend
+  // is the honest middle ground between the two knowable anchors.
+  //
+  // This is derived, not hardcoded — each side of the blend is itself
+  // computed from real on-ice totals and real league position medians.
+  const BASELINE_BLEND_TEAM = 0.5;
+  const BASELINE_BLEND_LEAGUE = 0.5;
+
   let evOffense = 0;
-  let evOffenseBaselineSource: 'team-relative' | 'league-median' | 'none' = 'none';
   if (
     row.onIceXGF != null && row.onIceTOIAllSec != null && row.onIceTOIAllSec > 0
   ) {
     const playerXGF60 = row.onIceXGF / onIceHours;
+
+    let teamRelDelta: number | null = null;
     if (teamTotal && teamTotal.onIceTOI > row.onIceTOIAllSec) {
       const offIceXGF = teamTotal.xGF - row.onIceXGF;
       const offIceHours = (teamTotal.onIceTOI - row.onIceTOIAllSec) / 3600;
       if (offIceHours > 0) {
-        const offIceXGF60 = offIceXGF / offIceHours;
-        evOffense = (playerXGF60 - offIceXGF60) * onIceHours * SKATER_ON_ICE_SHARE;
-        evOffenseBaselineSource = 'team-relative';
+        teamRelDelta = playerXGF60 - (offIceXGF / offIceHours);
       }
     }
-    if (evOffenseBaselineSource === 'none' && medianXGF60 != null) {
-      evOffense = (playerXGF60 - medianXGF60) * onIceHours * SKATER_ON_ICE_SHARE;
-      evOffenseBaselineSource = 'league-median';
+    const leagueRelDelta = medianXGF60 != null ? playerXGF60 - medianXGF60 : null;
+
+    if (teamRelDelta != null && leagueRelDelta != null) {
+      const blended =
+        BASELINE_BLEND_TEAM * teamRelDelta +
+        BASELINE_BLEND_LEAGUE * leagueRelDelta;
+      evOffense = blended * onIceHours * SKATER_ON_ICE_SHARE;
+    } else if (teamRelDelta != null) {
+      evOffense = teamRelDelta * onIceHours * SKATER_ON_ICE_SHARE;
+      notes.push('EV offense using team-relative only — position median missing.');
+    } else if (leagueRelDelta != null) {
+      evOffense = leagueRelDelta * onIceHours * SKATER_ON_ICE_SHARE;
       notes.push('EV offense falling back to league-median baseline — team totals not yet computed.');
-    }
-    if (evOffenseBaselineSource === 'none') {
+    } else {
       notes.push('EV offense unavailable — no team totals and no league median.');
     }
   } else {
@@ -283,27 +305,34 @@ export function computeSkaterWAR(
   }
 
   let evDefense = 0;
-  let evDefenseBaselineSource: 'team-relative' | 'league-median' | 'none' = 'none';
   if (
     row.onIceXGA != null && row.onIceTOIAllSec != null && row.onIceTOIAllSec > 0
   ) {
     const playerXGA60 = row.onIceXGA / onIceHours;
+
+    // Positive delta = player suppresses xGA below the baseline (good D).
+    let teamRelDelta: number | null = null;
     if (teamTotal && teamTotal.onIceTOI > row.onIceTOIAllSec) {
       const offIceXGA = teamTotal.xGA - row.onIceXGA;
       const offIceHours = (teamTotal.onIceTOI - row.onIceTOIAllSec) / 3600;
       if (offIceHours > 0) {
-        const offIceXGA60 = offIceXGA / offIceHours;
-        // Positive when player suppresses xGA below team rate (good D).
-        evDefense = (offIceXGA60 - playerXGA60) * onIceHours * SKATER_ON_ICE_SHARE;
-        evDefenseBaselineSource = 'team-relative';
+        teamRelDelta = (offIceXGA / offIceHours) - playerXGA60;
       }
     }
-    if (evDefenseBaselineSource === 'none' && medianXGA60 != null) {
-      evDefense = (medianXGA60 - playerXGA60) * onIceHours * SKATER_ON_ICE_SHARE;
-      evDefenseBaselineSource = 'league-median';
+    const leagueRelDelta = medianXGA60 != null ? medianXGA60 - playerXGA60 : null;
+
+    if (teamRelDelta != null && leagueRelDelta != null) {
+      const blended =
+        BASELINE_BLEND_TEAM * teamRelDelta +
+        BASELINE_BLEND_LEAGUE * leagueRelDelta;
+      evDefense = blended * onIceHours * SKATER_ON_ICE_SHARE;
+    } else if (teamRelDelta != null) {
+      evDefense = teamRelDelta * onIceHours * SKATER_ON_ICE_SHARE;
+      notes.push('EV defense using team-relative only — position median missing.');
+    } else if (leagueRelDelta != null) {
+      evDefense = leagueRelDelta * onIceHours * SKATER_ON_ICE_SHARE;
       notes.push('EV defense falling back to league-median baseline — team totals not yet computed.');
-    }
-    if (evDefenseBaselineSource === 'none') {
+    } else {
       notes.push('EV defense unavailable — no team totals and no league median.');
     }
   } else {

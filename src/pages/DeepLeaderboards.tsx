@@ -20,7 +20,7 @@ import './DeepLeaderboards.css';
 type Mode = 'skaters' | 'goalies' | 'teams';
 type PosFilter = 'ALL' | 'F' | 'D' | 'C' | 'L' | 'R';
 type SortKey =
-  | 'WAR' | 'WAR_per_82' | 'GAR' | 'gax' | 'playmaking' | 'penalty'
+  | 'WAR' | 'WAR_per_82' | 'warPerGP' | 'GAR' | 'gax' | 'playmaking' | 'penalty'
   | 'ixG' | 'iG' | 'sog' | 'gp'
   | 'GSAx' | 'saveRate'
   | 'capHit' | 'warPerMillion' | 'surplus'
@@ -42,6 +42,11 @@ interface SkaterRow {
   penaltyDiff: number;
   WAR: number;
   WAR_per_82: number;
+  /** Raw WAR per actual game played — what the user wants to see
+   *  instead of WAR_per_82. Differs from WAR_per_82 in two ways:
+   *  no ×82 projection, and no small-sample shrinkage, so for a
+   *  full-season player this is literally WAR ÷ GP. */
+  warPerGP: number;
   GAR: number;
   percentile: number;
   // v3 component contributions (in goals) — direct from WAR formula
@@ -70,6 +75,7 @@ interface GoalieRow {
   GSAx: number;
   WAR: number;
   WAR_per_82: number;
+  warPerGP: number;
   saveRate: number;
   percentile: number;
   capHit: number | null;
@@ -268,6 +274,7 @@ export default function DeepLeaderboards() {
         penaltyDiff: row.penaltiesDrawn - row.penaltiesTaken,
         WAR: res.WAR,
         WAR_per_82: res.WAR_per_82,
+        warPerGP: row.gamesPlayed > 0 ? res.WAR / row.gamesPlayed : 0,
         GAR: res.components.totalGAR,
         percentile: res.percentile,
         evOffense: res.components.evOffense,
@@ -318,6 +325,7 @@ export default function DeepLeaderboards() {
         GSAx: res.GSAx,
         WAR: res.WAR,
         WAR_per_82: res.WAR_per_82,
+        warPerGP: row.gamesPlayed > 0 ? res.WAR / row.gamesPlayed : 0,
         saveRate: row.shotsFaced > 0 ? (1 - row.goalsAllowed / row.shotsFaced) * 100 : 0,
         percentile: res.percentile,
         capHit,
@@ -421,7 +429,7 @@ export default function DeepLeaderboards() {
     }
 
     const dir = sortDir === 'asc' ? 1 : -1;
-    const effectiveSort = gemsOnly && (sortKey === 'WAR' || sortKey === 'WAR_per_82') ? 'warPerMillion' : sortKey;
+    const effectiveSort = gemsOnly && (sortKey === 'WAR' || sortKey === 'warPerGP') ? 'warPerMillion' : sortKey;
     return filtered.sort((a, b) => {
       const av = (a as any)[effectiveSort] ?? 0;
       const bv = (b as any)[effectiveSort] ?? 0;
@@ -442,7 +450,7 @@ export default function DeepLeaderboards() {
   const sortedTeams = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1;
     const keyMap: Record<string, keyof TeamRow> = {
-      WAR: 'totalWAR', WAR_per_82: 'totalWAR', GAR: 'goalDiff',
+      WAR: 'totalWAR', WAR_per_82: 'totalWAR', warPerGP: 'totalWAR', GAR: 'goalDiff',
       gax: 'gax', ixG: 'xG',
       goals: 'goals' as any, shots: 'shots' as any, gp: 'skaterCount',
     };
@@ -636,7 +644,7 @@ function SkaterTable({ rows, sortKey, sortDir, onSort }: SkaterTableProps) {
           <th>Pos</th><th>Tm</th>
           {headerCell('GP', 'gp', sortKey, sortDir, onSort)}
           {headerCell('WAR', 'WAR', sortKey, sortDir, onSort)}
-          {headerCell('WAR/82', 'WAR_per_82', sortKey, sortDir, onSort)}
+          {headerCell('WAR/GP', 'warPerGP', sortKey, sortDir, onSort)}
           {headerCell('GAR', 'GAR', sortKey, sortDir, onSort)}
           {headerCell('G − xG', 'gax', sortKey, sortDir, onSort)}
           {headerCell('A1', 'playmaking', sortKey, sortDir, onSort)}
@@ -664,7 +672,7 @@ function SkaterTable({ rows, sortKey, sortDir, onSort }: SkaterTableProps) {
             <td>{r.team}</td>
             <td>{r.gp}</td>
             <td className={`deep-num ${r.WAR >= 0 ? 'pos' : 'neg'} deep-primary`}>{r.WAR.toFixed(2)}</td>
-            <td className={`deep-num ${r.WAR_per_82 >= 0 ? 'pos' : 'neg'}`}>{r.WAR_per_82.toFixed(2)}</td>
+            <td className={`deep-num ${r.warPerGP >= 0 ? 'pos' : 'neg'}`}>{r.warPerGP.toFixed(3)}</td>
             <td className={`deep-num ${r.GAR >= 0 ? 'pos' : 'neg'}`}>{r.GAR.toFixed(1)}</td>
             <td className={`deep-num ${r.gax >= 0 ? 'pos' : 'neg'}`}>{r.gax >= 0 ? '+' : ''}{r.gax.toFixed(2)}</td>
             <td>{r.primaryAssists}</td>
@@ -697,7 +705,7 @@ function GoalieTable({ rows, sortKey, sortDir, onSort }: GoalieTableProps) {
           <th>Tm</th>
           {headerCell('GP', 'gp', sortKey, sortDir, onSort)}
           {headerCell('WAR', 'WAR', sortKey, sortDir, onSort)}
-          {headerCell('WAR/82', 'WAR_per_82', sortKey, sortDir, onSort)}
+          {headerCell('WAR/GP', 'warPerGP', sortKey, sortDir, onSort)}
           {headerCell('GSAx', 'GSAx', sortKey, sortDir, onSort)}
           {headerCell('Sv%', 'saveRate', sortKey, sortDir, onSort)}
           <th>SF</th>
@@ -715,7 +723,7 @@ function GoalieTable({ rows, sortKey, sortDir, onSort }: GoalieTableProps) {
             <td>{r.team}</td>
             <td>{r.gp}</td>
             <td className={`deep-num ${r.WAR >= 0 ? 'pos' : 'neg'} deep-primary`}>{r.WAR.toFixed(2)}</td>
-            <td className={`deep-num ${r.WAR_per_82 >= 0 ? 'pos' : 'neg'}`}>{r.WAR_per_82.toFixed(2)}</td>
+            <td className={`deep-num ${r.warPerGP >= 0 ? 'pos' : 'neg'}`}>{r.warPerGP.toFixed(3)}</td>
             <td className={`deep-num ${r.GSAx >= 0 ? 'pos' : 'neg'}`}>{r.GSAx >= 0 ? '+' : ''}{r.GSAx.toFixed(2)}</td>
             <td>{r.saveRate.toFixed(1)}</td>
             <td>{r.shotsFaced}</td>
@@ -737,7 +745,7 @@ function TeamTable({ rows, sortKey, sortDir, onSort }: TeamTableProps) {
           <th className="deep-th-rank">#</th>
           <th className="deep-th-name">Team</th>
           {headerCell('Total WAR', 'WAR', sortKey, sortDir, onSort)}
-          {headerCell('Skater WAR', 'WAR_per_82', sortKey, sortDir, onSort)}
+          {headerCell('Skater WAR', 'warPerGP', sortKey, sortDir, onSort)}
           <th>Goalie WAR</th>
           {headerCell('Goals', 'iG', sortKey, sortDir, onSort)}
           {headerCell('xGF', 'ixG', sortKey, sortDir, onSort)}
