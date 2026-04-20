@@ -475,20 +475,35 @@
    the full 1080px-wide bottom row leaves enough vertical space for
    every segment (EV off/def, PP, PK, faceoffs, turnovers, discipline,
    vs replacement, total WAR) to render without clipping. */
+/* Full-width WAR replaces the 2-column bottom on the share card. The
+   card has a fixed 16:9 aspect (1200×675). Top hero (~160px) + metrics
+   row (~90px) + card-footer (~40px) leaves ~385px for this block, so
+   we force the SVG + headline to fit inside a bounded height. Without
+   this cap the natural SVG size (9 bars × 28px + headers) overflows
+   into the footer area. */
 .bottom-war-full {
   display: flex;
   justify-content: center;
+  align-items: flex-start;
   width: 100%;
   padding: 0 0.5rem;
   flex: 1;
   min-height: 0;
+  max-height: 380px;
+  overflow: hidden;
 }
 .bottom-war-full .share-war-breakdown {
   width: 100%;
   max-width: 1100px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  min-height: 0;
+  flex: 1;
+}
+.bottom-war-full .share-war-breakdown .war-break {
+  flex: 1;
+  min-height: 0;
 }
 
 /* Card-wide WARBreakdown tweaks: hide the "How to read this" explainer
@@ -509,8 +524,9 @@
 .share-war-breakdown .war-label { font-size: 0.6rem; }
 .share-war-breakdown svg {
   max-width: 100%;
-  height: auto;
   width: 100%;
+  height: auto;
+  max-height: 240px;
 }
 
 /* Rolling Section */

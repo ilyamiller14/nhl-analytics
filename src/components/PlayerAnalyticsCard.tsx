@@ -524,7 +524,7 @@ export default function PlayerAnalyticsCard({
               </div>
             )}
           </div>
-          {percentiles && (
+          {percentiles && !warResult && (
             <div className="rate-gauges">
               <MetricGauge
                 label="P/GP"
