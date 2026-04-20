@@ -469,55 +469,49 @@
   justify-content: flex-start;
 }
 
-/* WAR breakdown on the share card — aggressively compacted because the
-   card's 1200×675 canvas + top hero + metrics rows leave only ~360px
-   of vertical space for the right column. The deep-tab breakdown has
-   a tall explainer block and 3-up headline stats that don't fit here.
-   Hide the explainer, shrink the headline, and force the SVG to scale
-   down so every row lands above the card's bottom edge on mobile too. */
-.share-war-breakdown {
+/* Full-width WAR section on the share card — replaces the old
+   two-column bottom when a warResult is available. The deep-tab
+   breakdown is too tall for the card's right column alone; giving it
+   the full 1080px-wide bottom row leaves enough vertical space for
+   every segment (EV off/def, PP, PK, faceoffs, turnovers, discipline,
+   vs replacement, total WAR) to render without clipping. */
+.bottom-war-full {
+  display: flex;
+  justify-content: center;
   width: 100%;
-  max-width: 420px;
-  font-size: 0.68rem;
+  padding: 0 0.5rem;
+  flex: 1;
+  min-height: 0;
+}
+.bottom-war-full .share-war-breakdown {
+  width: 100%;
+  max-width: 1100px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
-.share-war-breakdown .war-break { gap: 4px; }
-.share-war-breakdown .war-title {
-  font-size: 0.78rem;
-  margin: 0;
-}
-/* Explainer + empty-state are noise on the share card — the bars are
-   self-explanatory and the footer URL tells readers where to click
-   for methodology. */
+
+/* Card-wide WARBreakdown tweaks: hide the "How to read this" explainer
+   and sources footer (they add nothing when viewed as a shareable),
+   keep the bar chart legible at the card's render scale. */
+.share-war-breakdown .war-break { gap: 6px; }
+.share-war-breakdown .war-title { font-size: 0.95rem; margin: 0; }
 .share-war-breakdown .war-explainer { display: none; }
-.share-war-breakdown .war-empty { padding: 8px; font-size: 0.7rem; }
-/* Compact the 3-up stats row (WAR | 82-game pace | percentile | games)
-   so it doesn't eat half the column's vertical budget. */
+.share-war-breakdown .war-sources { display: none; }
+.share-war-breakdown .war-empty { padding: 12px; }
 .share-war-breakdown .war-headline {
-  padding: 6px 8px;
-  gap: 8px;
+  padding: 8px 14px;
+  gap: 14px;
 }
-.share-war-breakdown .war-number { padding-right: 8px; }
-.share-war-breakdown .war-value { font-size: 1.55rem; }
-.share-war-breakdown .war-unit { font-size: 0.52rem; }
-.share-war-breakdown .war-meta { gap: 6px; }
-.share-war-breakdown .war-pace { font-size: 0.85rem; }
-.share-war-breakdown .war-pct { font-size: 0.78rem; }
-.share-war-breakdown .war-label { font-size: 0.52rem; }
-/* Cap the SVG height absolutely so it can't push itself past the card
-   bottom when a tall breakdown (e.g. lots of active segments) tries
-   to render at natural size. Consumers scale up/down via
-   preserveAspectRatio="xMidYMid meet" on the SVG. */
+.share-war-breakdown .war-value { font-size: 1.8rem; }
+.share-war-breakdown .war-pace { font-size: 1rem; }
+.share-war-breakdown .war-pct { font-size: 0.9rem; }
+.share-war-breakdown .war-label { font-size: 0.6rem; }
 .share-war-breakdown svg {
   max-width: 100%;
-  max-height: 230px;
   height: auto;
   width: 100%;
 }
-/* Drop the sources footer — same reason as the explainer. */
-.share-war-breakdown .war-sources { display: none; }
 
 /* Rolling Section */
 .rolling-section {

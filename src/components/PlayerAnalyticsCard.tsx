@@ -442,7 +442,13 @@ export default function PlayerAnalyticsCard({
               this scale and was taking up 1/5 of the header. */}
           <div className="hero-stats-row">
             <HeroStat label="PTS" value={points} sub={`${goals}G · ${assists}A`} />
-            <HeroStat label="P/GP" value={ppg.toFixed(2)} sub={`${gamesPlayed} GP`} />
+            {/* P/GP hero removed when WAR breakdown replaces the bottom
+                (it duplicates what WAR already shows via its 82-game
+                pace row and takes room the full-width WAR needs). The
+                old fallback variant still showed it. */}
+            {!warResult && (
+              <HeroStat label="P/GP" value={ppg.toFixed(2)} sub={`${gamesPlayed} GP`} />
+            )}
             {surplus != null ? (
               <HeroStat
                 label={surplus >= 0 ? 'MKT SURPLUS' : 'MKT DEFICIT'}
@@ -538,10 +544,24 @@ export default function PlayerAnalyticsCard({
       </div>
 
       {/* ============================================================
-          BOTTOM 2-COLUMN:
-          Left  = rolling 10-game + individual xG + on-ice xG
-          Right = xG trend chart + shot map
+          BOTTOM SECTION:
+          When warResult is present the bottom collapses to a full-
+          width WAR breakdown (no 2 columns). The rolling-10 stats,
+          on-ice xG gauges, and PPG/GWG/Shots strip add nothing the
+          WAR decomposition doesn't already make visible and were
+          cutting into the vertical budget for WAR.
           ============================================================ */}
+      {warResult ? (
+        <div className="bottom-war-full">
+          <div className="share-war-breakdown">
+            <WARBreakdown
+              result={warResult}
+              title="Wins Above Replacement"
+              width={1080}
+            />
+          </div>
+        </div>
+      ) : (
       <div className="bottom-columns">
         {/* Left Column: rolling + individual xG + on-ice xG */}
         <div className="bottom-col-left">
@@ -698,6 +718,7 @@ export default function PlayerAnalyticsCard({
           )}
         </div>
       </div>
+      )}
 
       {/* Attack DNA radar intentionally removed from the share card.
           The Player DNA radar above already delivers the "what kind of
