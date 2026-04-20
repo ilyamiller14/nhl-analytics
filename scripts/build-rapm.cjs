@@ -892,6 +892,114 @@ function attachShotsToWindows(windows, shots) {
 }
 
 // ============================================================================
+// Special teams accumulation — PP on-ice xGF & PK on-ice xGA
+// ============================================================================
+//
+// Enumerate every shift window (any strength), classify by on-ice skater
+// count, and apportion xG among the on-ice skaters:
+//
+//   homeSkaters > awaySkaters  → home on power play
+//     homeXGF this window → credited 1/homeSkaters to each home player's PP
+//     homeXGF this window → credited 1/awaySkaters to each away player's PK (xGA against)
+//   awaySkaters > homeSkaters  → reversed
+//   equal              → skip (either 5v5, already covered, or 4v4/3v3 OT)
+//
+// Result per player:
+//   ppXGF      sum of team xGF (shifted 1/homeSkaters) during PP shifts they played
+//   pkXGA      sum of opposing xGF (shifted 1/awaySkaters) during PK shifts
+//   ppMinutes  sum of PP shift durations / 60
+//   pkMinutes  sum of PK shift durations / 60
+//
+// Goalies are present in shifts but aren't in the RAPM skater index, so
+// they get credited too — harmless, filtered out when we emit.
+//
+// Skater-count assumption: subtract 1 for goalie. If goalie is pulled
+// (very rare on PP/PK and only with seconds left), count is off by 1 but
+// the window is short enough that the error is negligible.
+function accumulatePPPK(game, shifts, xgLookup, perPlayerPP, perPlayerPK, leagueTotals) {
+  const byPeriod = new Map();
+  for (const s of shifts) {
+    if (!INCLUDED_PERIODS.has(s.period)) continue;
+    if (!byPeriod.has(s.period)) byPeriod.set(s.period, []);
+    byPeriod.get(s.period).push(s);
+  }
+  const shots = extractShots(game, xgLookup);
+  for (const [period, periodShifts] of byPeriod) {
+    const boundaries = new Set();
+    for (const s of periodShifts) {
+      boundaries.add(parseTimeToSeconds(s.startTime));
+      boundaries.add(parseTimeToSeconds(s.endTime));
+    }
+    const sortedB = [...boundaries].sort((a, b) => a - b);
+    for (let i = 0; i < sortedB.length - 1; i++) {
+      const start = sortedB[i];
+      const end = sortedB[i + 1];
+      if (end <= start) continue;
+      const dur = end - start;
+      if (dur < 1) continue;
+      const mid = start + dur / 2;
+      const home = []; const away = [];
+      for (const s of periodShifts) {
+        const sStart = parseTimeToSeconds(s.startTime);
+        const sEnd = parseTimeToSeconds(s.endTime);
+        if (sStart <= start && sEnd >= end && mid >= sStart && mid <= sEnd) {
+          if (s.teamId === game.homeTeamId) home.push(s.playerId);
+          else if (s.teamId === game.awayTeamId) away.push(s.playerId);
+        }
+      }
+      const homeSet = [...new Set(home)];
+      const awaySet = [...new Set(away)];
+      const homeCount = homeSet.length;
+      const awayCount = awaySet.length;
+      if (homeCount === awayCount) continue; // not a ST window (5v5 or 4v4 or 3v3)
+      // Subtract goalie from skater count (assume goalie in net — on PP
+      // / PK without the goalie pulled, which is the common case).
+      const homeSkaters = Math.max(1, homeCount - 1);
+      const awaySkaters = Math.max(1, awayCount - 1);
+      // Skate-count minus 1 leaves skaters only. Determine PP side.
+      const homeIsPP = homeSkaters > awaySkaters;
+      const ppTeam = homeIsPP ? 'home' : 'away';
+      const ppPlayers = homeIsPP ? homeSet : awaySet;
+      const pkPlayers = homeIsPP ? awaySet : homeSet;
+      const ppSkaterShare = 1 / (homeIsPP ? homeSkaters : awaySkaters);
+      const pkSkaterShare = 1 / (homeIsPP ? awaySkaters : homeSkaters);
+      // Accumulate xG for this window — sum all shots that fall in it.
+      let windowPpXgf = 0;
+      for (const s of shots) {
+        if (s.period !== period) continue;
+        if (s.timeSec < start || s.timeSec >= end) continue;
+        // PP xGF = shots by the PP team
+        if (
+          (ppTeam === 'home' && s.teamId === game.homeTeamId) ||
+          (ppTeam === 'away' && s.teamId === game.awayTeamId)
+        ) {
+          windowPpXgf += s.xGoal || 0;
+        }
+      }
+      const minutes = dur / 60;
+      // Update PP players
+      for (const pid of ppPlayers) {
+        const cur = perPlayerPP.get(pid) || { xgf: 0, minutes: 0 };
+        cur.xgf += windowPpXgf * ppSkaterShare;
+        cur.minutes += minutes;
+        perPlayerPP.set(pid, cur);
+      }
+      // Update PK players (they defend against ppXgf)
+      for (const pid of pkPlayers) {
+        const cur = perPlayerPK.get(pid) || { xga: 0, minutes: 0 };
+        cur.xga += windowPpXgf * pkSkaterShare;
+        cur.minutes += minutes;
+        perPlayerPK.set(pid, cur);
+      }
+      // League-level running totals for baseline derivation.
+      leagueTotals.ppXGF += windowPpXgf;
+      leagueTotals.ppTeamMinutes += minutes;
+      leagueTotals.pkTeamMinutes += minutes;
+    }
+  }
+}
+
+// ============================================================================
 // Phase 3 — MIN_TOI qualifier, design matrix assembly
 // ============================================================================
 
@@ -1310,6 +1418,10 @@ async function main() {
   const teamOnIceHours = new Map();  // teamId -> hours
   // Per-player GP tracking
   const playerGames = new Map();     // playerId -> Set<gameId>
+  // Special-teams accumulators (populated in parallel with the 5v5 pass)
+  const perPlayerPP = new Map();   // pid -> { xgf, minutes }
+  const perPlayerPK = new Map();   // pid -> { xga, minutes }
+  const stLeagueTotals = { ppXGF: 0, ppTeamMinutes: 0, pkTeamMinutes: 0 };
 
   const gameIds = [...games.keys()];
   let shiftsFetched = 0;
@@ -1332,6 +1444,8 @@ async function main() {
       const windows = enumerateShiftWindows(game, diskShifts);
       const shots = extractShots(game, xgLookup);
       attachShotsToWindows(windows, shots);
+      // Parallel ST pass (disk-cache path)
+      accumulatePPPK(game, diskShifts, xgLookup, perPlayerPP, perPlayerPK, stLeagueTotals);
       for (const w of windows) {
         const hours = w.durationSec / 3600;
         for (const teamId of [w.homeTeamId, w.awayTeamId]) {
@@ -1494,6 +1608,10 @@ async function main() {
     const shots = extractShots(game, xgLookup);
     attachShotsToWindows(windows, shots);
 
+    // Parallel pass: PP / PK accumulation. Reuses shifts + xG lookup;
+    // no extra network calls. Emits per-player ppXGF / pkXGA / minutes.
+    accumulatePPPK(game, shifts, xgLookup, perPlayerPP, perPlayerPK, stLeagueTotals);
+
     // Track per-team totals
     for (const w of windows) {
       const hours = w.durationSec / 3600;
@@ -1632,9 +1750,35 @@ async function main() {
   }
 
   // -- Output -------------------------------------------------------------
+  // Derive league-wide PP / PK baselines. The per-player ppXGF is
+  // already share-weighted (divided by the PP skater count each window,
+  // typically 1/5), so the baseline rate must be too: sum of every
+  // player's share-weighted ppXGF ÷ sum of player-minutes. This is the
+  // "league-average PP contribution per minute for one PP skater"
+  // — directly comparable to a single player's ppXGF / ppMinutes.
+  let totalPpXgfShare = 0, totalPpPlayerMin = 0;
+  for (const pp of perPlayerPP.values()) {
+    totalPpXgfShare += pp.xgf;
+    totalPpPlayerMin += pp.minutes;
+  }
+  const leaguePpXgfPerMin =
+    totalPpPlayerMin > 0 ? totalPpXgfShare / totalPpPlayerMin : 0;
+  // PK mirror: same league-wide xG events, viewed from the defending
+  // side. Per-player pkXGA is share-weighted by PK skater count
+  // (typically 1/4). Sum and derive the per-PK-skater-minute baseline.
+  let totalPkXgaShare = 0, totalPkPlayerMin = 0;
+  for (const pk of perPlayerPK.values()) {
+    totalPkXgaShare += pk.xga;
+    totalPkPlayerMin += pk.minutes;
+  }
+  const leaguePkXgaPerMin =
+    totalPkPlayerMin > 0 ? totalPkXgaShare / totalPkPlayerMin : 0;
+
   const players = {};
   for (const [pid, idx] of playerIdx.entries()) {
     const gp = (playerGames.get(pid) || new Set()).size;
+    const pp = perPlayerPP.get(pid) || { xgf: 0, minutes: 0 };
+    const pk = perPlayerPK.get(pid) || { xga: 0, minutes: 0 };
     players[String(pid)] = {
       offense: Number(betaOff[idx].toFixed(4)),
       defense: Number(betaDef[idx].toFixed(4)),
@@ -1644,12 +1788,18 @@ async function main() {
       minutes: Number((playerMinutes.get(pid) || 0).toFixed(2)),
       gp,
       lowSample: gp < 40,
+      // Special-teams attribution (computed in the same pass; uses the
+      // actual on-ice skater count for share, not a hardcoded 1/5).
+      ppXGF: Number(pp.xgf.toFixed(4)),
+      ppMinutes: Number(pp.minutes.toFixed(2)),
+      pkXGA: Number(pk.xga.toFixed(4)),
+      pkMinutes: Number(pk.minutes.toFixed(2)),
     };
   }
 
   const output = {
     season: SEASON,
-    schemaVersion: 1,
+    schemaVersion: 2,  // bumped for PP/PK fields
     computedAt: new Date().toISOString(),
     gamesAnalyzed: shiftsFetched,
     shiftsAnalyzed: allWindows.length,
@@ -1664,6 +1814,12 @@ async function main() {
     })),
     leagueBaselineXGF60: Number(leagueBaselineXGF60.toFixed(4)),
     leagueBaselineXGA60: Number(leagueBaselineXGA60.toFixed(4)),
+    // Special-teams league rate (SHARE-WEIGHTED to match the per-player
+    // ppXGF / pkXGA fields). "League-avg PP skater produces ~X xG per
+    // minute of PP ice time." Used directly as a baseline — expected =
+    // leaguePpXgfPerMin × player.ppMinutes.
+    leaguePpXgfPerMin: Number(leaguePpXgfPerMin.toFixed(4)),
+    leaguePkXgaPerMin: Number(leaguePkXgaPerMin.toFixed(4)),
     players,
   };
 

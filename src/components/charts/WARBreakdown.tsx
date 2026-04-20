@@ -74,15 +74,14 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
   const evDefPending = s.medianOnIceXGA60 == null;
   const faceoffPending = s.faceoffValuePerWin == null;
   const turnoverPending = s.takeawayGoalValue == null || s.giveawayGoalValue == null;
-  const microPending = s.hitGoalValue == null || s.blockGoalValue == null;
 
-  const segments: Segment[] = [
+  const rawSegments: Segment[] = [
     {
       key: 'finishing',
       label: 'Finishing (G − xG)',
       value: c.finishing,
       color: SEGMENT_COLORS.finishing,
-      desc: 'Individual goals minus expected from their shots',
+      desc: 'Shooting skill above expected: iG − ixG on shots taken. This credits CONVERSION skill only — taking many shots at league-average rate scores 0 here. Volume scoring shows up under EV Offense via RAPM\'s on-ice xGF coefficient (which includes this player\'s own shot contribution).',
       pending: false,
       sourceLabel: 'from iG / ixG on shots taken',
     },
@@ -118,6 +117,24 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
       sourceLabel: 'league_context.medianOnIceXGA60',
     },
     {
+      key: 'powerPlay',
+      label: 'Power play',
+      value: c.powerPlay,
+      color: SEGMENT_COLORS.faceoffs,
+      desc: 'PP xGF contribution above what a league-average PP skater would produce in the same PP minutes. Share-weighted by actual on-ice skater count during each PP window.',
+      pending: c.powerPlay === 0 && (!result.gamesPlayed || result.gamesPlayed === 0),
+      sourceLabel: 'rapm artifact.ppXGF − leaguePpXgfPerMin × ppMinutes',
+    },
+    {
+      key: 'penaltyKill',
+      label: 'Penalty kill',
+      value: c.penaltyKill,
+      color: SEGMENT_COLORS.evDefense,
+      desc: 'PK defensive value — expected opposing xG at league PK rate minus opposing xG actually allowed while this player defended. Positive = team gave up less than average PK while this skater was on.',
+      pending: c.penaltyKill === 0 && (!result.gamesPlayed || result.gamesPlayed === 0),
+      sourceLabel: 'rapm artifact.pkXGA − leaguePkXgaPerMin × pkMinutes (sign-flipped)',
+    },
+    {
       key: 'faceoffs',
       label: 'Faceoffs',
       value: c.faceoffs,
@@ -139,17 +156,13 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
       pending: turnoverPending,
       sourceLabel: 'league_context.takeaway/giveawayGoalValue',
     },
-    {
-      key: 'micro',
-      label: 'Micro (hits + blocks)',
-      value: c.micro,
-      color: SEGMENT_COLORS.micro,
-      desc: microPending
-        ? 'Pending: hit/block goal values missing from league_context.'
-        : `hits × ${s.hitGoalValue!.toFixed(4)} + blocks × ${s.blockGoalValue!.toFixed(4)} goals`,
-      pending: microPending,
-      sourceLabel: 'league_context.hit/blockGoalValue',
-    },
+    // Hits + blocks excluded from the WAR decomposition — published
+    // research (Evolving-Hockey, Hockey Graphs) finds raw hits correlate
+    // negatively with goal differential after controlling for possession,
+    // and blocks correlate with defensive-zone deployment not quality.
+    // The component stayed at 0 in warService; dropping it from the
+    // visual too since showing a 0-bar misleads readers into thinking
+    // the metric matters.
     {
       key: 'penalties',
       label: 'Discipline',
@@ -169,6 +182,16 @@ export default function WARBreakdown({ result, title, playerName, width = 720 }:
       sourceLabel: `league_context.skaters.${result.position}.replacementGARPerGame`,
     },
   ];
+  // Finishing and Playmaking are individual-skill residuals that also
+  // flow into RAPM's EV Offense coefficient (a player's on-ice xGF
+  // includes their own shots and their line-mates' shots they set up).
+  // Crediting them as separate WAR bars would double-count. The values
+  // stay in WARComponents (individual stats), but the breakdown shows
+  // only RAPM-derived components + discipline/faceoffs/turnovers + ST +
+  // replacement — which is the set that genuinely sums to WAR.
+  const segments: Segment[] = rawSegments.filter(
+    seg => seg.key !== 'finishing' && seg.key !== 'playmaking',
+  );
 
   // Convert every component to wins (component_goals / marginal goals
   // per win). The chart is titled "Wins Above Replacement"; the bars
@@ -289,16 +312,29 @@ source: ${seg.sourceLabel}`}
                     data pending
                   </text>
                 </g>
-              ) : (
-                <text x={wins >= 0 ? barX + w + 6 : barX - 6}
-                  y={y + rowHeight / 2 + 4}
-                  textAnchor={wins >= 0 ? 'start' : 'end'}
-                  fontSize={12}
-                  fill={wins > 0 ? '#34d399' : wins < 0 ? '#f87171' : '#64748b'}
-                  fontWeight={600}>
-                  {fmt(wins)}
-                </text>
-              )}
+              ) : (() => {
+                // Decide whether the numeric label sits OUTSIDE the bar
+                // (short bars) or INSIDE (long bars whose outside-placement
+                // would collide with the row's category label on the left,
+                // or run off the plot on the right). ~40px is enough room
+                // for "-12.34" at fontSize 12.
+                const valueTextWidth = 40;
+                const outsideX = wins >= 0 ? barX + w + 6 : barX - 6;
+                const collidesLeft = wins < 0 && (outsideX - valueTextWidth) < pad.left + 4;
+                const collidesRight = wins > 0 && (outsideX + valueTextWidth) > pad.left + plotW;
+                const inside = collidesLeft || collidesRight;
+                const insideX = wins >= 0 ? barX + w - 6 : barX + 6;
+                return (
+                  <text x={inside ? insideX : outsideX}
+                    y={y + rowHeight / 2 + 4}
+                    textAnchor={inside ? (wins >= 0 ? 'end' : 'start') : (wins >= 0 ? 'start' : 'end')}
+                    fontSize={12}
+                    fill={inside ? '#0f172a' : (wins > 0 ? '#34d399' : wins < 0 ? '#f87171' : '#64748b')}
+                    fontWeight={600}>
+                    {fmt(wins)}
+                  </text>
+                );
+              })()}
             </g>
           );
         })}

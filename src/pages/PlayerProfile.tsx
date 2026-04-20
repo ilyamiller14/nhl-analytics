@@ -31,7 +31,7 @@ import RAPMImpactCard from '../components/charts/RAPMImpactCard';
 import LinemateWithWithout from '../components/charts/LinemateWithWithout';
 import { usePlayerLinemateChemistry } from '../hooks/usePlayerLinemateChemistry';
 import { computeSkaterWAR } from '../services/warService';
-import { loadWARTables, type WARTables } from '../services/warTableService';
+import { loadWARTables, recomputeQuantilesWithRAPM, type WARTables } from '../services/warTableService';
 import { loadRAPM, type RAPMArtifact } from '../services/rapmService';
 import { edgeTrackingService } from '../services/edgeTrackingService';
 import { getSkaterAverages } from '../services/leagueAveragesService';
@@ -79,6 +79,18 @@ function PlayerProfile() {
   const [isSharing, setIsSharing] = useState(false);
   const [warTables, setWarTables] = useState<WARTables | null>(null);
   const [rapm, setRapm] = useState<RAPMArtifact | null>(null);
+  // Context with quantile tables rebuilt from the post-RAPM WAR
+  // distribution. Without this the percentile shown in the breakdown
+  // is compared against PRE-RAPM quantiles (biased — every mid-tier
+  // player looks like top-30% because RAPM pushed most competitors
+  // downward without the quantile table catching up).
+  const rapmAdjustedContext = useMemo(() => {
+    if (!warTables || !rapm) return warTables?.context ?? null;
+    return recomputeQuantilesWithRAPM(warTables, rapm, (row, ctx, r) => {
+      const res = computeSkaterWAR(row, ctx, r);
+      return { WAR_per_82: res.WAR_per_82, position: res.position };
+    });
+  }, [warTables, rapm]);
 
   // Load the WAR tables lazily when the Deep tab is first opened.
   useEffect(() => {
@@ -115,6 +127,16 @@ function PlayerProfile() {
   const { data: player, isLoading, error } = usePlayerStats(
     playerId ? parseInt(playerId, 10) : null
   );
+
+  // Computed WAR result for the current player — used by both the deep-
+  // tab breakdown and the shareable card's right column.
+  const shareWarResult = useMemo(() => {
+    if (!warTables || !player) return undefined;
+    const row = warTables.skaters[player.playerId];
+    if (!row) return undefined;
+    const ctx = rapmAdjustedContext ?? warTables.context;
+    return computeSkaterWAR(row, ctx, rapm);
+  }, [warTables, player, rapm, rapmAdjustedContext]);
 
   // Reset active tab when player changes
   useEffect(() => {
@@ -1203,7 +1225,7 @@ function PlayerProfile() {
                         <WARBreakdown
                           title="Wins Above Replacement"
                           playerName={`${player.firstName.default} ${player.lastName.default}`}
-                          result={computeSkaterWAR(row, warTables.context, rapm)}
+                          result={computeSkaterWAR(row, rapmAdjustedContext ?? warTables.context, rapm)}
                         />
                       </div>
                     );
@@ -1336,6 +1358,7 @@ function PlayerProfile() {
                     capHit={contractData?.contract.capHit ?? surplusData?.capHit}
                     surplus={surplusData?.surplus}
                     surplusPercentile={surplusData?.surplusPercentile}
+                    warResult={shareWarResult}
                   />
                   </div>
                 </div>

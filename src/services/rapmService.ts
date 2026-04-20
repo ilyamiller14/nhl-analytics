@@ -34,11 +34,17 @@ export interface RAPMPlayerEntry {
   minutes: number;
   gp: number;
   lowSample: boolean;  // true when gp < 40
+  // Special-teams attribution (schema v2+). Apportioned by actual
+  // on-ice skater count (1/5 on a 5v4, 1/4 on the 4v5 side, etc).
+  ppXGF?: number;      // sum of team xGF while player on PP (share-weighted)
+  ppMinutes?: number;  // PP minutes played
+  pkXGA?: number;      // sum of opposing xGF while player on PK (share-weighted)
+  pkMinutes?: number;  // PK minutes played
 }
 
 export interface RAPMArtifact {
   season: string;              // "20252026"
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;        // 2 adds PP/PK fields + league PP rate
   computedAt: string;
   gamesAnalyzed: number;
   shiftsAnalyzed: number;
@@ -48,6 +54,8 @@ export interface RAPMArtifact {
   lambdaSelection: 'empirical-bayes' | '5fold-cv';
   leagueBaselineXGF60: number;
   leagueBaselineXGA60: number;
+  leaguePpXgfPerMin?: number;  // schema v2: league PP xG / team-minute of PP
+  leaguePkXgaPerMin?: number;  // schema v2: mirror of leaguePpXgfPerMin
   players: Record<string, RAPMPlayerEntry>;
 }
 

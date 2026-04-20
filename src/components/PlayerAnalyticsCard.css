@@ -469,6 +469,32 @@
   justify-content: flex-start;
 }
 
+/* WAR breakdown on the share card — scale its SVG to fit the right
+   column width without overflowing the 1200x675 canvas. WARBreakdown
+   ships with width=380 by default for the card; we constrain SVG size
+   and shrink internal fonts a touch so every row label fits. */
+.share-war-breakdown {
+  width: 100%;
+  max-width: 420px;
+  font-size: 0.72rem;
+}
+.share-war-breakdown .war-break { gap: 8px; }
+.share-war-breakdown .war-title { font-size: 0.85rem; }
+.share-war-breakdown .war-explainer {
+  font-size: 0.66rem;
+  padding: 6px 8px;
+  line-height: 1.35;
+}
+.share-war-breakdown .war-headline {
+  padding: 8px 10px;
+  gap: 10px;
+}
+.share-war-breakdown .war-value { font-size: 1.9rem; }
+.share-war-breakdown .war-pace { font-size: 0.95rem; }
+.share-war-breakdown .war-pct { font-size: 0.85rem; }
+.share-war-breakdown .war-label { font-size: 0.58rem; }
+.share-war-breakdown svg { max-width: 100%; height: auto; }
+
 /* Rolling Section */
 .rolling-section {
   background: rgba(16, 185, 129, 0.06);

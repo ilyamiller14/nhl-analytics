@@ -42,18 +42,27 @@ export type PositionGroup = 'F' | 'D' | 'G';
 export interface WARComponents {
   finishing: number;          // GAX (iG − ixG)
   playmaking: number;         // primary assists × median ixG (playmaker credit)
-  penalties: number;          // (drawn − taken) × PP-xG-per-minute × 2
-  // v2 additions — each is 0 until the underlying worker data and
-  // LeagueContext baselines are populated. Shape stays stable so
-  // downstream UI keeps rendering.
-  evOffense: number;          // (onIceXGF/60 − league median) × EV TOI hours
-  evDefense: number;          // (league median − onIceXGA/60) × EV TOI hours
+  penalties: number;          // (drawn − taken) × PP-xG-per-minute × 2 (discipline — drawing > taking)
+  evOffense: number;          // (onIceXGF/60 − league median) × EV TOI hours OR RAPM offense
+  evDefense: number;          // (league median − onIceXGA/60) × EV TOI hours OR RAPM defense
   faceoffs: number;           // (FO% − 0.5) × attempts × faceoffValuePerWin (centers)
   turnovers: number;          // takeaways × TA-value − giveaways × GA-value
-  micro: number;              // hits × hitValue + blocks × blockValue
-  replacementAdjust: number;  // +replacement_baseline × GP (since we subtract a negative baseline)
+  micro: number;              // always 0; hits/blocks excluded per literature
+  powerPlay: number;          // PP xGF above league-average PP rate × PP minutes
+  penaltyKill: number;        // PK xGA suppression below league-average PK rate × PK minutes (positive = good)
+  // SPECIAL TEAMS: not currently credited in this formula. Our WAR
+  // tables carry only toiPpSeconds / toiShSeconds (time-on-ice splits),
+  // not per-player PP-xG or PK-xGA-against. Computing isolated PP/PK
+  // impact requires those server-side additions to the worker. Until
+  // then WAR understates value for pure-PP specialists (power-play
+  // quarterbacks) and pure-PK specialists (shutdown forwards on the
+  // kill). The replacementAdjust baseline is 10th-%ile overall GAR, so
+  // a replacement-level skater's WAR lands near zero regardless — the
+  // *spread* of WAR among PP/PK specialists is what this limitation
+  // compresses.
+  replacementAdjust: number;
   totalGAR: number;
-  rawGAR: number;             // GAR before replacement adjustment — "vs average" value
+  rawGAR: number;
 }
 
 export interface WARResult {
@@ -314,9 +323,6 @@ export function computeSkaterWAR(
     // No ×1/5 scaling (see comment above).
     evOffense = rapmEntry.offense * rapm5v5Hours;
     evDefense = rapmEntry.defense * rapm5v5Hours;
-    // RAPM is the principled path, not a data gap. Don't surface as a
-    // ⚠ note — it would fire on every qualified row and make the
-    // warning indicator useless.
   } else {
     // Fallback blend path — only engaged when RAPM unavailable or low-sample.
     if (
@@ -473,9 +479,61 @@ export function computeSkaterWAR(
   const _unusedBlockValue = context.blockGoalValue ?? null;
   void _unusedHitValue; void _unusedBlockValue;
 
+  // --- Special teams (PP / PK) — RAPM artifact (schema v2+) emits
+  // per-player on-ice PP-xGF and PK-xGA share-weighted by actual
+  // on-ice skater count during each ST window. The artifact also
+  // publishes leaguePpXgfPerMin / leaguePkXgaPerMin so we can compute
+  // "above league-average" ST contribution.
+  //
+  // PP value = ppXGF − (expected at league rate for player's PP minutes)
+  //          = player's PP xG contribution above a league-average PP
+  //            player playing the same minutes.
+  //
+  // PK value = (expected opposing xG at league PK rate) − pkXGA
+  //          = a penalty kill that suppresses opponents below the
+  //            league average gets positive credit; one that gives up
+  //            more than average is negative. Flipped sign so
+  //            positive = good for both PP and PK.
+  //
+  // Both are 0 for players who didn't play any ST minutes, which is
+  // the replacement-level default — no credit, no penalty.
+  let powerPlay = 0;
+  let penaltyKill = 0;
+  if (rapmEntry && typeof rapmEntry.ppMinutes === 'number' && rapmEntry.ppMinutes > 0) {
+    const leagueRate = (rapm as any)?.leaguePpXgfPerMin;
+    if (typeof leagueRate === 'number' && leagueRate > 0) {
+      const expectedPpXgf = leagueRate * rapmEntry.ppMinutes;
+      powerPlay = (rapmEntry.ppXGF || 0) - expectedPpXgf;
+    }
+  }
+  if (rapmEntry && typeof rapmEntry.pkMinutes === 'number' && rapmEntry.pkMinutes > 0) {
+    const leagueRate = (rapm as any)?.leaguePkXgaPerMin;
+    if (typeof leagueRate === 'number' && leagueRate > 0) {
+      const expectedPkXga = leagueRate * rapmEntry.pkMinutes;
+      penaltyKill = expectedPkXga - (rapmEntry.pkXGA || 0);
+    }
+  }
+
   // --- Raw GAR (vs average)
-  const rawGAR = finishing + playmaking + evOffense + evDefense
-    + faceoffs + turnovers + micro + penalties;
+  //
+  // NOT included in the sum (but computed + returned as diagnostic fields):
+  //   finishing (iG − ixG)       — a shooter-only conversion residual.
+  //                                  Volume scoring already flows into EV
+  //                                  Offense via the RAPM coefficient
+  //                                  (player's on-ice xGF includes their
+  //                                  own ixG contribution).
+  //   playmaking (A1 × ixG/shot) — overlaps with EV Offense too: a primary
+  //                                  assist leads to a shot whose xG is
+  //                                  already attributed to on-ice xGF in
+  //                                  RAPM. Crediting it separately would
+  //                                  double-count playmakers.
+  //
+  // Keeping these as individual stats (Finishing, A1) on the Stats tab
+  // while leaving them out of the WAR total gives a clean, non-
+  // overlapping decomposition: RAPM EV components + ST + discipline +
+  // faceoffs + turnovers + replacement baseline.
+  const rawGAR = evOffense + evDefense
+    + faceoffs + turnovers + micro + penalties + powerPlay + penaltyKill;
 
   // --- Replacement adjustment.
   // Replacement = 10th-percentile GAR per game among qualified players
@@ -528,6 +586,8 @@ export function computeSkaterWAR(
       turnovers,
       micro,
       penalties,
+      powerPlay,
+      penaltyKill,
       replacementAdjust,
       totalGAR,
       rawGAR,
@@ -565,7 +625,8 @@ function skaterPlaceholder(
       finishing: 0, playmaking: 0,
       evOffense: 0, evDefense: 0,
       faceoffs: 0, turnovers: 0, micro: 0,
-      penalties: 0, replacementAdjust: 0,
+      penalties: 0, powerPlay: 0, penaltyKill: 0,
+      replacementAdjust: 0,
       totalGAR: 0, rawGAR: 0,
     },
     WAR: 0, WAR_per_82: 0, percentile: 50, percentileLabel: 'average',

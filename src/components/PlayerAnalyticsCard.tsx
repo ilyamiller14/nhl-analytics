@@ -15,6 +15,8 @@ import type { SkaterAverages } from '../services/leagueAveragesService';
 import { computePercentile } from '../services/leagueAveragesService';
 import XGTimeSeriesChart from './charts/XGTimeSeriesChart';
 import MiniShotMap from './charts/MiniShotMap';
+import WARBreakdown from './charts/WARBreakdown';
+import type { WARResult } from '../services/warService';
 import { getTeamPrimaryColor } from '../constants/teams';
 import './PlayerAnalyticsCard.css';
 
@@ -64,6 +66,8 @@ interface PlayerAnalyticsCardProps {
   capHit?: number;
   surplus?: number;
   surplusPercentile?: number;
+  // WAR decomposition for the right-side breakdown chart.
+  warResult?: WARResult;
 }
 
 interface MetricGaugeProps {
@@ -307,6 +311,7 @@ export default function PlayerAnalyticsCard({
   capHit,
   surplus,
   surplusPercentile,
+  warResult,
 }: PlayerAnalyticsCardProps) {
   // Get latest rolling metrics
   const latestRolling = rollingMetrics && rollingMetrics.length > 0
@@ -639,45 +644,58 @@ export default function PlayerAnalyticsCard({
           )}
         </div>
 
-        {/* Right Column: xG trend chart + shot map */}
+        {/* Right Column: WAR breakdown replaces xG trend + shot map.
+            When warResult is available, the share card surfaces the
+            principled value decomposition (RAPM + ST + discipline +
+            replacement). If WAR tables haven't loaded, fall back to
+            the previous xG trend + shot map content. */}
         <div className="bottom-col-right">
-          {(() => {
-            const metricsToShow = (rollingMetrics && rollingMetrics.length > 0)
-              ? rollingMetrics
-              : analytics?.rollingMetrics;
-
-            return metricsToShow && metricsToShow.length > 1 ? (
-              <div className="xg-chart-container">
-                <XGTimeSeriesChart
-                  rollingMetrics={metricsToShow}
-                  width={340}
-                  height={120}
-                  showLabels={true}
-                />
+          {warResult ? (
+            <div className="share-war-breakdown">
+              <WARBreakdown
+                result={warResult}
+                title="Wins Above Replacement"
+                width={380}
+              />
+            </div>
+          ) : (
+            <>
+              {(() => {
+                const metricsToShow = (rollingMetrics && rollingMetrics.length > 0)
+                  ? rollingMetrics
+                  : analytics?.rollingMetrics;
+                return metricsToShow && metricsToShow.length > 1 ? (
+                  <div className="xg-chart-container">
+                    <XGTimeSeriesChart
+                      rollingMetrics={metricsToShow}
+                      width={340}
+                      height={120}
+                      showLabels={true}
+                    />
+                  </div>
+                ) : null;
+              })()}
+              <div className="dna-and-shots">
+                {dnaData && (
+                  <PlayerDNARadar axes={dnaData.axes} archetype={dnaData.archetype} />
+                )}
+                {(() => {
+                  const shotsToShow = shotEvents || analytics?.playerShots;
+                  return shotsToShow && shotsToShow.length > 0 ? (
+                    <div className="shot-map-container">
+                      <MiniShotMap
+                        shots={shotsToShow}
+                        width={380}
+                        height={170}
+                        officialGoals={goals}
+                        officialSOG={shots}
+                      />
+                    </div>
+                  ) : null;
+                })()}
               </div>
-            ) : null;
-          })()}
-
-          {/* Player DNA Radar + Shot Map side by side */}
-          <div className="dna-and-shots">
-            {dnaData && (
-              <PlayerDNARadar axes={dnaData.axes} archetype={dnaData.archetype} />
-            )}
-            {(() => {
-              const shotsToShow = shotEvents || analytics?.playerShots;
-              return shotsToShow && shotsToShow.length > 0 ? (
-                <div className="shot-map-container">
-                  <MiniShotMap
-                    shots={shotsToShow}
-                    width={380}
-                    height={170}
-                    officialGoals={goals}
-                    officialSOG={shots}
-                  />
-                </div>
-              ) : null;
-            })()}
-          </div>
+            </>
+          )}
         </div>
       </div>
 

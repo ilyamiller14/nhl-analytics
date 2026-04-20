@@ -277,4 +277,77 @@ export async function loadWARTables(): Promise<WARTables | null> {
 
 export function getWARTablesSync(): WARTables | null { return loaded; }
 
+/**
+ * Rebuild per-position `garPer82Quantiles` from the post-RAPM WAR
+ * distribution. The worker's quantile table is derived from the
+ * pre-RAPM formula, so applying RAPM to numerator but querying
+ * against pre-RAPM quantiles produces biased percentiles (mid-tier
+ * players often show as "top-15%" because RAPM pulled most of the
+ * reference cohort's WAR downward without the quantile table catching
+ * up).
+ *
+ * This walks all skaters, computes their WAR with RAPM, bins by
+ * positionCode into F / D / C / LW / RW buckets, then derives fresh
+ * quantiles. Returns a new LeagueContext with the quantile tables
+ * swapped — callers should use this in place of `tables.context` when
+ * they also pass RAPM into computeSkaterWAR.
+ */
+export function recomputeQuantilesWithRAPM(
+  tables: WARTables,
+  rapm: unknown | null,
+  computeSkaterWAR: (
+    row: WARSkaterRow,
+    ctx: LeagueContext,
+    rapm: any,
+  ) => { WAR_per_82: number; position: 'F' | 'D' | 'G' },
+  minGP: number = 10,
+): LeagueContext {
+  if (!rapm) return tables.context;
+  const buckets: Record<string, number[]> = {
+    F: [], D: [], C: [], LW: [], RW: [],
+  };
+  const mgw = tables.context.marginalGoalsPerWin || 6.25;
+  for (const row of Object.values(tables.skaters)) {
+    if (row.gamesPlayed < minGP) continue;
+    if (row.positionCode === 'G') continue;
+    const r = computeSkaterWAR(row, tables.context, rapm);
+    const garPer82 = r.WAR_per_82 * mgw;
+    if (row.positionCode === 'D') { buckets.D.push(garPer82); continue; }
+    buckets.F.push(garPer82);
+    if (row.positionCode === 'C') buckets.C.push(garPer82);
+    else if (row.positionCode === 'L') buckets.LW.push(garPer82);
+    else if (row.positionCode === 'R') buckets.RW.push(garPer82);
+  }
+  const percentiles = [5, 10, 25, 50, 75, 90, 95, 99];
+  const quantilesFrom = (arr: number[]) => {
+    if (arr.length < 5) return null;
+    const sorted = arr.slice().sort((a, b) => a - b);
+    return percentiles.map(p => ({
+      p,
+      value: sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * (sorted.length - 1)))],
+    }));
+  };
+  const patch = (key: keyof LeagueContext['skaters']) => {
+    const q = quantilesFrom(buckets[key as string]);
+    const existing = tables.context.skaters[key];
+    if (q && existing) {
+      (tables.context.skaters[key] as any) = { ...existing, garPer82Quantiles: q };
+    }
+  };
+  // Don't mutate — shallow-clone context + skaters.
+  const next: LeagueContext = {
+    ...tables.context,
+    skaters: { ...tables.context.skaters },
+  };
+  for (const key of ['F', 'D', 'C', 'LW', 'RW'] as const) {
+    const q = quantilesFrom(buckets[key]);
+    const existing = next.skaters[key];
+    if (q && existing) {
+      next.skaters[key] = { ...existing, garPer82Quantiles: q };
+    }
+  }
+  void patch;
+  return next;
+}
+
 export function isWARTablesLoaded(): boolean { return loaded !== null; }
