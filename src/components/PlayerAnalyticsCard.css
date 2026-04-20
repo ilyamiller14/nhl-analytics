@@ -506,22 +506,20 @@
   min-height: 0;
 }
 
-/* Card-wide WARBreakdown tweaks: hide the "How to read this" explainer
-   and sources footer (they add nothing when viewed as a shareable),
-   keep the bar chart legible at the card's render scale. */
-.share-war-breakdown .war-break { gap: 6px; }
-.share-war-breakdown .war-title { font-size: 0.95rem; margin: 0; }
+/* Card-wide WARBreakdown tweaks — aggressive hide list because
+   html-to-image captures at the natural DOM size, not the CSS-clipped
+   size. On mobile Safari in particular, any content overflowing the
+   card's 675px height gets included in the PNG, making the share
+   image taller than the visible card on-site.
+   - Title hidden (the hero label is enough context in a shareable)
+   - Headline stats row hidden (hero already surfaces WAR)
+   - Explainer + sources footer hidden (no room + no need) */
+.share-war-breakdown .war-break { gap: 4px; }
+.share-war-breakdown .war-title { display: none; }
 .share-war-breakdown .war-explainer { display: none; }
 .share-war-breakdown .war-sources { display: none; }
+.share-war-breakdown .war-headline { display: none; }
 .share-war-breakdown .war-empty { padding: 12px; }
-.share-war-breakdown .war-headline {
-  padding: 8px 14px;
-  gap: 14px;
-}
-.share-war-breakdown .war-value { font-size: 1.8rem; }
-.share-war-breakdown .war-pace { font-size: 1rem; }
-.share-war-breakdown .war-pct { font-size: 0.9rem; }
-.share-war-breakdown .war-label { font-size: 0.6rem; }
 .share-war-breakdown svg {
   max-width: 100%;
   width: 100%;
