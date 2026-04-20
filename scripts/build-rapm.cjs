@@ -1038,27 +1038,91 @@ async function main() {
   let shiftsFetched = 0;
   let shiftsMissing = 0;
   let processed = 0;
+  // Per-reason miss counters for diagnostics.
+  const missByReason = { not404: 0, http404: 0, nonArray: 0, emptyArray: 0 };
   for (const gameId of gameIds) {
     processed++;
     if (processed % 50 === 0 || processed === gameIds.length) {
       console.log(`[rapm]   ${processed}/${gameIds.length} games processed (shifts ok=${shiftsFetched}, missing=${shiftsMissing}, windows so far=${allWindows.length})`);
     }
     const game = games.get(gameId);
-    let shifts;
+    let raw;
     try {
-      shifts = await fetchJSON(`${WORKER_BASE}/cached/shifts/${gameId}`, { retries: 1, timeoutMs: 15000 });
+      raw = await fetchJSON(`${WORKER_BASE}/cached/shifts/${gameId}`, { retries: 3, timeoutMs: 30000 });
     } catch (err) {
       if (err.status === 404) {
-        console.log(`[rapm] WARN: missing shifts for game ${gameId}, skipping`);
+        console.log(`[rapm] WARN: shifts 404 for game ${gameId}, skipping`);
+        missByReason.http404++;
       } else {
         console.log(`[rapm] WARN: shifts fetch error for ${gameId}: ${err.message}`);
+        missByReason.not404++;
       }
+      shiftsMissing++;
+      // Brief back-off after any network error to avoid hammering the worker.
+      await sleep(200);
+      continue;
+    }
+
+    // Normalise response shape.  The KV cache may contain either:
+    //   (a) a plain array  [{ playerId, teamId, period, startTime, endTime }, …]
+    //       — written by the current fetchAndCacheGameShifts in the worker, or
+    //   (b) an object      { data: […], total: N, … }
+    //       — written by an older version of the worker that stored the raw
+    //         NHL shiftcharts API response before the .map() step was added.
+    // We handle both so stale KV entries don't silently drop ~37% of games.
+    let shifts;
+    if (Array.isArray(raw)) {
+      shifts = raw;
+    } else if (raw && Array.isArray(raw.data)) {
+      console.log(`[rapm] INFO: shifts for ${gameId} in legacy {data:[]} envelope — unwrapping (${raw.data.length} records)`);
+      shifts = raw.data;
+    } else {
+      console.log(`[rapm] WARN: shifts for ${gameId} unexpected shape (${JSON.stringify(raw).slice(0, 80)}), skipping`);
+      missByReason.nonArray++;
       shiftsMissing++;
       continue;
     }
-    if (!Array.isArray(shifts) || shifts.length === 0) {
-      shiftsMissing++;
-      continue;
+
+    if (shifts.length === 0) {
+      // The worker cached an empty response at some point (likely the
+      // NHL API was slow to populate right after the game ended) and
+      // it's stuck there for 200 days. Bypass the cache and try NHL
+      // directly before giving up — recovers the ~500 games whose real
+      // shift data exists upstream but whose worker-cached entry is
+      // a stale empty array.
+      try {
+        const nhlRaw = await fetchJSON(
+          `https://api.nhle.com/stats/rest/en/shiftcharts?cayenneExp=gameId=${gameId}`,
+          { retries: 2, timeoutMs: 20000 }
+        );
+        const nhlShifts = Array.isArray(nhlRaw?.data)
+          ? nhlRaw.data.map(s => ({
+              playerId: s.playerId,
+              teamId: s.teamId,
+              period: s.period,
+              startTime: s.startTime,
+              endTime: s.endTime,
+            }))
+          : [];
+        if (nhlShifts.length > 0) {
+          shifts = nhlShifts;
+          console.log(`[rapm] INFO: worker cache empty for ${gameId}; direct-fetched ${nhlShifts.length} shifts from NHL`);
+        } else {
+          // Genuinely empty upstream too — accept the skip.
+          console.log(`[rapm] WARN: shifts for ${gameId} empty in both worker cache and NHL upstream, skipping`);
+          missByReason.emptyArray++;
+          shiftsMissing++;
+          continue;
+        }
+      } catch (err) {
+        console.log(`[rapm] WARN: shifts empty in worker cache and NHL fetch failed for ${gameId}: ${err.message}`);
+        missByReason.emptyArray++;
+        shiftsMissing++;
+        continue;
+      }
+      // Polite back-off before next iteration when we've just hit the
+      // NHL API directly — avoids rate-limiting across many calls.
+      await sleep(100);
     }
     shiftsFetched++;
 
@@ -1096,6 +1160,16 @@ async function main() {
 
   const coverage = shiftsFetched / games.size;
   console.log(`[rapm] Shift coverage: ${shiftsFetched}/${games.size} = ${(coverage * 100).toFixed(1)}% (${shiftsMissing} missing)`);
+  if (shiftsMissing > 0) {
+    console.log(
+      `[rapm]   Miss breakdown — http404=${missByReason.http404}` +
+      ` net-error=${missByReason.not404}` +
+      ` non-array=${missByReason.nonArray}` +
+      ` empty-array=${missByReason.emptyArray}` +
+      ` (sum=${missByReason.http404 + missByReason.not404 + missByReason.nonArray + missByReason.emptyArray}` +
+      `, total-missing=${shiftsMissing})`
+    );
+  }
   if (coverage < 0.5) {
     console.error(`[rapm] FATAL: shift coverage ${(coverage * 100).toFixed(1)}% < 50%; RAPM not defensible at this coverage`);
     process.exit(1);

@@ -386,8 +386,11 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   const shiftsMatch = url.pathname.match(/^\/cached\/shifts\/(\d+)$/);
   if (shiftsMatch) {
     const gameId = shiftsMatch[1];
-    const cached = await env.NHL_CACHE.get(`game_shifts_${gameId}`, 'json');
-    if (cached) {
+    const cached = await env.NHL_CACHE.get(`game_shifts_${gameId}`, 'json') as any;
+    // Treat empty-array cached entries as NOT HIT so the consumer can
+    // fall back to a direct NHL API fetch (stale-empty entries from
+    // earlier builds would otherwise silently drop ~37% of games).
+    if (cached && Array.isArray(cached) && cached.length > 0) {
       return new Response(JSON.stringify(cached), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'HIT' },
       });
@@ -1111,7 +1114,12 @@ async function fetchAndCacheGamePBP(gameId: number, env: Env): Promise<any | nul
 async function fetchAndCacheGameShifts(gameId: number, env: Env): Promise<any[] | null> {
   const cacheKey = `game_shifts_${gameId}`;
   const cached = await env.NHL_CACHE.get(cacheKey, 'json') as any[] | null;
-  if (cached) return cached;
+  // Only treat cached as a hit if it has real shift data. Earlier worker
+  // builds wrote empty arrays when NHL's API was slow to populate after
+  // a game ended; that emptiness then stuck for 200 days. Now we treat
+  // an empty cached array as a miss and re-fetch — giving the NHL API
+  // a chance to serve real data on a later call.
+  if (cached && Array.isArray(cached) && cached.length > 0) return cached;
   try {
     const res = await fetch(
       `https://api.nhle.com/stats/rest/en/shiftcharts?cayenneExp=gameId=${gameId}`,
@@ -1131,6 +1139,14 @@ async function fetchAndCacheGameShifts(gameId: number, env: Env): Promise<any[] 
       startTime: s.startTime,
       endTime: s.endTime,
     }));
+    if (shifts.length === 0) {
+      // Don't persist an empty response. Either NHL genuinely has no
+      // shift data for this game (cancelled / forfeit) or the API was
+      // transiently slow. Caching empties would make the next read
+      // blind to whichever case is true. Leave KV unset → a later call
+      // retries cheaply.
+      return [];
+    }
     await env.NHL_CACHE.put(cacheKey, JSON.stringify(shifts), {
       expirationTtl: 200 * 24 * 60 * 60,
     });
