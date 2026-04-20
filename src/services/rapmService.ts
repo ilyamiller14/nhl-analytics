@@ -106,7 +106,7 @@ function isValidArtifact(obj: unknown): obj is RAPMArtifact {
   const a = obj as Partial<RAPMArtifact>;
   return (
     typeof a.season === 'string' &&
-    a.schemaVersion === 1 &&
+    (a.schemaVersion === 1 || a.schemaVersion === 2) &&
     typeof a.players === 'object' &&
     a.players !== null
   );
