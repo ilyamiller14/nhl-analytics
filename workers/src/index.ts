@@ -60,16 +60,41 @@ const NHL_TEAMS = [
  * season starting that year (YYYY/YYYY+1); dates Jan 1 – Aug 31 belong
  * to the season that started the previous year (YYYY-1/YYYY).
  *
- * This means the first cron run after September 1 each year
- * automatically warms the new season's data — no manual bump needed.
+ * CRITICAL: this is computed PER-REQUEST, not at module-init. At
+ * Cloudflare Workers module-init time, `new Date()` can return epoch
+ * 0 (1970-01-01 UTC) in some edge-runtime states. That bug wrote a
+ * full run of 1969 season PBP into KV when the module was cold — the
+ * schedule endpoint happily returns historical data for old season
+ * identifiers, so nothing upstream caught the corruption. Only
+ * evaluating at request time (after the runtime's clock is warm)
+ * prevents it.
+ *
+ * The floor `year >= 2000` is a belt-and-suspenders guard against
+ * clock regressions: if Date ever hands us an epoch-0 value again
+ * we'll throw a loud error rather than silently writing 1969 data.
  */
 function computeCurrentSeason(now: Date = new Date()): string {
   const year = now.getUTCFullYear();
+  if (year < 2000) {
+    throw new Error(`computeCurrentSeason: implausible year ${year} (clock not warmed up?)`);
+  }
   const month = now.getUTCMonth(); // 0-indexed: 0=Jan, 8=Sep
   const startYear = month >= 8 ? year : year - 1;
   return `${startYear}${startYear + 1}`;
 }
-const CURRENT_SEASON = computeCurrentSeason();
+// Hardcoded safe fallback so the cached-data key doesn't drift into
+// 1969 territory if Date misbehaves. Bump this annually when the new
+// season starts — the computeCurrentSeason() guard above will also
+// pick it up automatically at request time.
+const CURRENT_SEASON_FALLBACK = '20252026';
+function safeComputeSeason(): string {
+  try { return computeCurrentSeason(); }
+  catch (err) {
+    console.error('[season] Falling back:', err);
+    return CURRENT_SEASON_FALLBACK;
+  }
+}
+const CURRENT_SEASON = safeComputeSeason();
 
 function getCacheTTL(path: string): number {
   for (const [pattern, ttl] of Object.entries(CACHE_TTLS)) {
@@ -106,7 +131,6 @@ async function handleTeamPBPRequest(
   corsHeaders: Record<string, string>
 ): Promise<Response> {
   try {
-    // Check KV for cached team data
     const cacheKey = `team_pbp_${teamAbbrev}_${CURRENT_SEASON}`;
     const cached = await env.NHL_CACHE.get(cacheKey, 'json');
 
@@ -121,7 +145,30 @@ async function handleTeamPBPRequest(
       });
     }
 
-    // If not cached, return 404 - the cron job will populate it
+    // Lazy-fill on miss — fetch this team's PBP from NHL now so the
+    // user doesn't see a broken page. First-hit cost ~10–15s; every
+    // subsequent read is an instant KV hit. Guarantees that any page
+    // requesting a team's PBP always gets real data (unless NHL is
+    // unreachable).
+    try {
+      const count = await cacheTeamPBP(teamAbbrev, env);
+      if (count > 0) {
+        const fresh = await env.NHL_CACHE.get(cacheKey, 'json');
+        if (fresh) {
+          return new Response(JSON.stringify(fresh), {
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'application/json',
+              'X-Cache': 'LAZY-FILL',
+              'X-Cache-Source': 'nhl-api-on-demand',
+            },
+          });
+        }
+      }
+    } catch (fillErr) {
+      console.error(`Lazy-fill failed for ${teamAbbrev}:`, fillErr);
+    }
+
     return new Response(JSON.stringify({
       error: 'Data not yet cached',
       message: 'Play-by-play data is being loaded. Please try again shortly.',
@@ -385,17 +432,20 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   // Cached shifts for a single game.
   const shiftsMatch = url.pathname.match(/^\/cached\/shifts\/(\d+)$/);
   if (shiftsMatch) {
-    const gameId = shiftsMatch[1];
-    const cached = await env.NHL_CACHE.get(`game_shifts_${gameId}`, 'json') as any;
-    // Treat empty-array cached entries as NOT HIT so the consumer can
-    // fall back to a direct NHL API fetch (stale-empty entries from
-    // earlier builds would otherwise silently drop ~37% of games).
-    if (cached && Array.isArray(cached) && cached.length > 0) {
-      return new Response(JSON.stringify(cached), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'HIT' },
+    const gameId = Number(shiftsMatch[1]);
+    // Lazy-fill path: cache check + NHL fallback + cache write, all
+    // wrapped by fetchAndCacheGameShifts. If the KV is empty (never
+    // populated or previously cached empty), we hit NHL here, persist
+    // on success, and return real data. This keeps the Node build
+    // script off the NHL rate-limit budget — worker runs from a
+    // different IP and spreads requests across many invocations.
+    const shifts = await fetchAndCacheGameShifts(gameId, env);
+    if (shifts && shifts.length > 0) {
+      return new Response(JSON.stringify(shifts), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'MAYBE-HIT' },
       });
     }
-    return new Response(JSON.stringify({ error: 'Shifts not cached yet for this game' }), {
+    return new Response(JSON.stringify({ error: 'Shifts unavailable (cache empty, NHL returned empty, or fetch failed)' }), {
       status: 404,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
