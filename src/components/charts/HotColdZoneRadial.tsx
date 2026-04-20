@@ -29,16 +29,20 @@ interface Props {
   minShotsPerCell?: number;
 }
 
-// Angular bins: 7 slices spanning -90° to +90° around the net
-// (-90° = left boards, 0° = straight on, +90° = right boards).
+// Angular bins — each slice is a DIRECTIONAL cone from the net
+// (−90° = along the goal line left, 0° = straight-on, +90° =
+// along the goal line right). The label names describe angle only,
+// NOT hockey zones, because a slice extends all the way from the
+// goal mouth to the blue line — calling the middle cone "slot"
+// (as we used to) is wrong at 55+ ft where the slot doesn't exist.
 const ANGLE_BINS = [
-  { lo: -90, hi: -60, label: 'far L' },
-  { lo: -60, hi: -35, label: 'L' },
-  { lo: -35, hi: -12, label: 'slot L' },
-  { lo: -12, hi: 12, label: 'slot' },
-  { lo: 12, hi: 35, label: 'slot R' },
-  { lo: 35, hi: 60, label: 'R' },
-  { lo: 60, hi: 90, label: 'far R' },
+  { lo: -90, hi: -60, label: 'L boards' },
+  { lo: -60, hi: -35, label: 'wide L' },
+  { lo: -35, hi: -12, label: 'mid L' },
+  { lo: -12, hi: 12, label: 'center' },
+  { lo: 12, hi: 35, label: 'mid R' },
+  { lo: 35, hi: 60, label: 'wide R' },
+  { lo: 60, hi: 90, label: 'R boards' },
 ];
 
 // Radial bins: rings by distance from net (ft).
@@ -163,14 +167,20 @@ export default function HotColdZoneRadial({ shots, title, size = 420, minShotsPe
     const y10 = cy - r0 * Math.sin(a1);
     const x11 = cx + r1 * Math.cos(a1);
     const y11 = cy - r1 * Math.sin(a1);
-    // Arc sweep flag = 0 since lo < hi → counter-clockwise in screen coords
-    // (because y is inverted); but angleToRadian flips that — we want the
-    // short arc. Use large-arc=0 always; sweep=0 for outer, 1 for inner.
+    // SVG sweep flags — a "ring wedge" draws its outer edge along the
+    // outer circle bulging AWAY from center, and closes along the inner
+    // circle bulging TOWARD center. In SVG's y-down user space:
+    //   * outer arc from (x01,y01) at lo to (x11,y11) at hi → sweep=1
+    //     so the curve arcs over the top of the cell (convex rim).
+    //   * inner arc from (x10,y10) back to (x00,y00) → sweep=0 so it
+    //     curves along the smaller circle the same visual direction.
+    // The previous code had these inverted, producing cells whose outer
+    // edges dipped toward the net (concave) instead of bulging outward.
     return `M ${x00.toFixed(2)} ${y00.toFixed(2)}
             L ${x01.toFixed(2)} ${y01.toFixed(2)}
-            A ${r1} ${r1} 0 0 0 ${x11.toFixed(2)} ${y11.toFixed(2)}
+            A ${r1} ${r1} 0 0 1 ${x11.toFixed(2)} ${y11.toFixed(2)}
             L ${x10.toFixed(2)} ${y10.toFixed(2)}
-            A ${r0} ${r0} 0 0 1 ${x00.toFixed(2)} ${y00.toFixed(2)}
+            A ${r0} ${r0} 0 0 0 ${x00.toFixed(2)} ${y00.toFixed(2)}
             Z`;
   };
 
