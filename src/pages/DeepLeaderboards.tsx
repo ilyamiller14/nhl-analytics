@@ -13,11 +13,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { computeSkaterWAR, computeGoalieWAR } from '../services/warService';
 import { loadWARTables, type WARTables } from '../services/warTableService';
+import { loadRAPM, type RAPMArtifact } from '../services/rapmService';
 import { loadContracts } from '../services/contractService';
 import { getNhlStatsUrl } from '../config/api';
+import RAPMScatter from '../components/charts/RAPMScatter';
 import './DeepLeaderboards.css';
 
-type Mode = 'skaters' | 'goalies' | 'teams';
+type Mode = 'skaters' | 'goalies' | 'teams' | 'rapm';
 type PosFilter = 'ALL' | 'F' | 'D' | 'C' | 'L' | 'R';
 type SortKey =
   | 'WAR' | 'WAR_per_82' | 'warPerGP' | 'GAR' | 'gax' | 'playmaking' | 'penalty'
@@ -62,6 +64,11 @@ interface SkaterRow {
   capHit: number | null;      // dollars
   warPerMillion: number | null; // WAR per $M of cap hit
   surplus: number | null;       // WAR × $/win − capHit
+  /** Diagnostic notes emitted by computeSkaterWAR when an input was
+   *  missing (e.g. league_context hadn't published takeawayGoalValue)
+   *  and a component silently zeroed out. Surfaced as a warning icon
+   *  on the row so viewers can see where the math has gaps. */
+  notes: string[];
 }
 
 interface GoalieRow {
@@ -111,13 +118,19 @@ interface TeamRow {
 
 export default function DeepLeaderboards() {
   const [tables, setTables] = useState<WARTables | null>(null);
+  const [rapm, setRapm] = useState<RAPMArtifact | null>(null);
   const [loadingErr, setLoadingErr] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>('skaters');
   // When switching tabs, reset sort to a sensible default for that tab
   // (Skaters/Goalies → WAR, Teams → Total WAR via the same WAR key).
   useEffect(() => { setSortKey('WAR'); setSortDir('desc'); }, [mode]);
   const [posFilter, setPosFilter] = useState<PosFilter>('ALL');
-  const [minGP, setMinGP] = useState(10);
+  // Default minGP=40. Below ~40 GP the WAR blended baseline carries too
+  // much small-sample noise (especially at elite on-ice rates), which is
+  // what let 5–10 GP call-ups top the board in earlier builds. Users
+  // who specifically want to see part-season data can drop it.
+  const [minGP, setMinGP] = useState(40);
+  const [showMethodology, setShowMethodology] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('WAR');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [search, setSearch] = useState('');
@@ -138,6 +151,12 @@ export default function DeepLeaderboards() {
         setTables(t);
       })
       .catch(e => setLoadingErr(String(e)));
+  }, []);
+
+  // Load RAPM coefficients in parallel — if they're available,
+  // computeSkaterWAR uses them instead of the blended baseline.
+  useEffect(() => {
+    loadRAPM().then(setRapm);
   }, []);
 
   // Load contract data — static fallback ships with 1500+ players.
@@ -244,7 +263,7 @@ export default function DeepLeaderboards() {
     for (const row of Object.values(tables.skaters)) {
       if (row.gamesPlayed < minGP) continue;
       if (row.positionCode === 'G') continue;
-      const res = computeSkaterWAR(row, context);
+      const res = computeSkaterWAR(row, context, rapm);
       const name = playerNames.get(row.playerId) || '';
       const normName = name.toLowerCase().replace(/[^a-z]/g, '');
       const capHit = capIndex?.byId.get(row.playerId)
@@ -287,6 +306,7 @@ export default function DeepLeaderboards() {
         capHit,
         warPerMillion,
         surplus,
+        notes: res.notes,
       });
     }
 
@@ -299,7 +319,7 @@ export default function DeepLeaderboards() {
       }
     }
     return out;
-  }, [tables, minGP, playerNames, capIndex, leagueDollarsPerWin]);
+  }, [tables, minGP, playerNames, capIndex, leagueDollarsPerWin, rapm]);
 
   const goalieRows = useMemo<GoalieRow[]>(() => {
     if (!tables) return [];
@@ -447,6 +467,33 @@ export default function DeepLeaderboards() {
     });
   }, [goalieRows, search, sortKey, sortDir]);
 
+  // Lookup maps for the RAPM scatter — sourced straight from the WAR
+  // skater table so the chart gets the same position + team labels as
+  // every other surface in the app. Built once per tables load.
+  const posByPlayerId = useMemo<Map<number, string>>(() => {
+    const m = new Map<number, string>();
+    if (!tables) return m;
+    for (const r of Object.values(tables.skaters)) m.set(r.playerId, r.positionCode);
+    return m;
+  }, [tables]);
+  const teamByPlayerId = useMemo<Map<number, string>>(() => {
+    const m = new Map<number, string>();
+    if (!tables) return m;
+    for (const r of Object.values(tables.skaters)) {
+      const first = (r.teamAbbrevs || '').split(',')[0].trim();
+      if (first) m.set(r.playerId, first);
+    }
+    return m;
+  }, [tables]);
+  // RAPM's scatter only cares about All/F/D — narrow the page's wider
+  // PosFilter ('C'/'L'/'R' collapse to 'F'). This keeps the existing
+  // state single-sourced without forking a second filter.
+  const rapmPosFilter: 'ALL' | 'F' | 'D' = posFilter === 'ALL'
+    ? 'ALL'
+    : posFilter === 'D'
+      ? 'D'
+      : 'F';
+
   const sortedTeams = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1;
     const keyMap: Record<string, keyof TeamRow> = {
@@ -492,6 +539,68 @@ export default function DeepLeaderboards() {
         </p>
       </div>
 
+      <div className="deep-methodology">
+        <button
+          type="button"
+          className="deep-methodology-toggle"
+          aria-expanded={showMethodology}
+          onClick={() => setShowMethodology(s => !s)}
+        >
+          {showMethodology ? '▼' : '▶'} How WAR is computed on this page
+        </button>
+        {showMethodology && (
+          <div className="deep-methodology-body">
+            <p>
+              <strong>On-ice offense / defense baseline:</strong> blended 50/50 between
+              <em> team-relative</em> (player's on-ice xGF/60 minus their team's off-ice rate)
+              and <em>league-median</em> for their position. Pure team-relative compresses
+              elite players on strong teams (the team-without-McDavid is still Draisaitl &amp;
+              RNH); pure league-median inflates everyone on a good team. The blend is an
+              honest middle ground between two knowable anchors, not a principled
+              isolation of individual signal.
+            </p>
+            {rapm != null ? (
+              <>
+                <p>
+                  <strong>RAPM coefficients published</strong> ({rapm.playersAnalyzed} players,
+                  {' '}λ={rapm.lambda.toFixed(3)}, computed{' '}
+                  {new Date(rapm.computedAt).toLocaleDateString()}) — used directly for
+                  on-ice offense/defense instead of the blend. Ridge regression over
+                  shift-level data with line-mates and opponents regressed out. No
+                  ×1/5 scaling applied: the coefficient is already the individual's
+                  per-60 signal, not the 5-skater line's. Low-sample players
+                  (gp &lt; 40 in the regression) still fall back to the blend.
+                </p>
+                <p className="deep-methodology-meta">
+                  <em>
+                    Based on {rapm.gamesAnalyzed.toLocaleString()} games,{' '}
+                    {rapm.shiftsAnalyzed.toLocaleString()} shifts · computed{' '}
+                    {new Date(rapm.computedAt).toLocaleString()}
+                  </em>
+                </p>
+              </>
+            ) : (
+              <p>
+                <strong>Principled fix (pending):</strong> a RAPM regression over shift-level
+                on-ice data would replace this blend with per-player coefficients that
+                control for line-mates. Infrastructure scoped; coefficients not yet
+                published. When present, this page will read them directly.
+              </p>
+            )}
+            <p>
+              <strong>Minimum games:</strong> default 40. Below that, the on-ice sample is
+              small enough that the blend's noise dominates the ranking. You can drop
+              the filter to see part-season players, but trust their rank less.
+            </p>
+            <p>
+              <strong>⚠ warning icon</strong> on a row means at least one WAR component
+              silently zeroed because its league_context input wasn't populated by the
+              worker. Hover for the specific notes.
+            </p>
+          </div>
+        )}
+      </div>
+
       <div className="deep-context-bar">
         <div>
           <span className="deep-ctx-label">Marginal goals / win</span>
@@ -521,11 +630,11 @@ export default function DeepLeaderboards() {
       </div>
 
       <div className="deep-tabs">
-        {(['skaters', 'goalies', 'teams'] as Mode[]).map(m => (
+        {(['skaters', 'goalies', 'teams', 'rapm'] as Mode[]).map(m => (
           <button key={m}
             className={`deep-tab ${mode === m ? 'active' : ''}`}
             onClick={() => setMode(m)}
-          >{m.charAt(0).toUpperCase() + m.slice(1)}</button>
+          >{m === 'rapm' ? 'Two-Way' : m.charAt(0).toUpperCase() + m.slice(1)}</button>
         ))}
       </div>
 
@@ -536,23 +645,25 @@ export default function DeepLeaderboards() {
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
+        {(mode === 'skaters' || mode === 'rapm') && (
+          <label className="deep-filter-label">
+            Position:
+            <select
+              className="deep-select"
+              value={posFilter}
+              onChange={e => setPosFilter(e.target.value as PosFilter)}
+            >
+              <option value="ALL">All</option>
+              <option value="F">Forwards</option>
+              <option value="D">Defensemen</option>
+              {mode === 'skaters' && <option value="C">Centers</option>}
+              {mode === 'skaters' && <option value="L">Left Wings</option>}
+              {mode === 'skaters' && <option value="R">Right Wings</option>}
+            </select>
+          </label>
+        )}
         {mode === 'skaters' && (
           <>
-            <label className="deep-filter-label">
-              Position:
-              <select
-                className="deep-select"
-                value={posFilter}
-                onChange={e => setPosFilter(e.target.value as PosFilter)}
-              >
-                <option value="ALL">All</option>
-                <option value="F">Forwards</option>
-                <option value="D">Defensemen</option>
-                <option value="C">Centers</option>
-                <option value="L">Left Wings</option>
-                <option value="R">Right Wings</option>
-              </select>
-            </label>
             <label className="deep-filter-label">
               Min GP:
               <input
@@ -584,32 +695,62 @@ export default function DeepLeaderboards() {
         </div>
       )}
 
-      <div className="deep-table-wrap">
-        {mode === 'skaters' && (
-          <SkaterTable
-            rows={sortedSkaters}
-            sortKey={sortKey}
-            sortDir={sortDir}
-            onSort={toggleSort}
-          />
-        )}
-        {mode === 'goalies' && (
-          <GoalieTable
-            rows={sortedGoalies}
-            sortKey={sortKey}
-            sortDir={sortDir}
-            onSort={toggleSort}
-          />
-        )}
-        {mode === 'teams' && (
-          <TeamTable
-            rows={sortedTeams}
-            sortKey={sortKey}
-            sortDir={sortDir}
-            onSort={toggleSort}
-          />
-        )}
-      </div>
+      {mode === 'rapm' ? (
+        rapm === null ? (
+          <div className="rapm-empty">
+            <strong>RAPM pending.</strong> We build shift-level
+            ridge-regression coefficients nightly; once the next artifact
+            lands you'll see every skater plotted by their isolated offense
+            vs defense impact. Returns here tomorrow.
+          </div>
+        ) : (
+          <>
+            <RAPMScatter
+              artifact={rapm}
+              playerNames={playerNames}
+              posFilter={rapmPosFilter}
+              posByPlayerId={posByPlayerId}
+              teamByPlayerId={teamByPlayerId}
+              minMinutes={150}
+            />
+            <p className="rapm-scatter-note">
+              Each dot is one skater's 5v5 isolated offense (xGF/60 above
+              RAPM baseline) vs defense (xGA/60 suppression). Dot size =
+              5v5 minutes. Line-mate and opponent effects are regressed
+              out, so a point in the upper-right really is a two-way
+              driver (not just a guy on a good line). Low-sample players
+              (&lt;40 GP) are dimmed.
+            </p>
+          </>
+        )
+      ) : (
+        <div className="deep-table-wrap">
+          {mode === 'skaters' && (
+            <SkaterTable
+              rows={sortedSkaters}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={toggleSort}
+            />
+          )}
+          {mode === 'goalies' && (
+            <GoalieTable
+              rows={sortedGoalies}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={toggleSort}
+            />
+          )}
+          {mode === 'teams' && (
+            <TeamTable
+              rows={sortedTeams}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={toggleSort}
+            />
+          )}
+        </div>
+      )}
 
       <p className="deep-footer">
         Context computed {new Date(ctx.computedAt).toLocaleString()} · season {ctx.season} ·
@@ -645,13 +786,13 @@ function SkaterTable({ rows, sortKey, sortDir, onSort }: SkaterTableProps) {
           {headerCell('GP', 'gp', sortKey, sortDir, onSort)}
           {headerCell('WAR', 'WAR', sortKey, sortDir, onSort)}
           {headerCell('WAR/GP', 'warPerGP', sortKey, sortDir, onSort)}
-          {headerCell('GAR', 'GAR', sortKey, sortDir, onSort)}
-          {headerCell('G − xG', 'gax', sortKey, sortDir, onSort)}
+          {headerCell('GAR (G)', 'GAR', sortKey, sortDir, onSort)}
+          {headerCell('Finishing (G)', 'gax', sortKey, sortDir, onSort)}
           {headerCell('A1', 'playmaking', sortKey, sortDir, onSort)}
           {headerCell('Pen±', 'penalty', sortKey, sortDir, onSort)}
-          {headerCell('EV Off', 'evOffense', sortKey, sortDir, onSort)}
-          {headerCell('EV Def', 'evDefense', sortKey, sortDir, onSort)}
-          {headerCell('TOver', 'turnovers', sortKey, sortDir, onSort)}
+          {headerCell('EV Off (G)', 'evOffense', sortKey, sortDir, onSort)}
+          {headerCell('EV Def (G)', 'evDefense', sortKey, sortDir, onSort)}
+          {headerCell('TOver (G)', 'turnovers', sortKey, sortDir, onSort)}
           {headerCell('onIce xGF', 'onIceXGF', sortKey, sortDir, onSort)}
           {headerCell('onIce xGA', 'onIceXGA', sortKey, sortDir, onSort)}
           {headerCell('Cap hit', 'capHit', sortKey, sortDir, onSort)}
@@ -667,6 +808,13 @@ function SkaterTable({ rows, sortKey, sortDir, onSort }: SkaterTableProps) {
             <td className="deep-rank">{i + 1}</td>
             <td className="deep-name">
               <Link to={`/player/${r.playerId}`}>{r.name}</Link>
+              {r.notes.length > 0 && (
+                <span
+                  className="deep-row-warn"
+                  title={r.notes.join('\n')}
+                  aria-label={`${r.notes.length} data gap${r.notes.length === 1 ? '' : 's'}`}
+                >⚠</span>
+              )}
             </td>
             <td>{r.positionCode}</td>
             <td>{r.team}</td>

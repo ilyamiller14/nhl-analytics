@@ -24,14 +24,15 @@ import ShotVelocityChart from '../components/charts/ShotVelocityChart';
 import DistanceFatigueChart from '../components/charts/DistanceFatigueChart';
 // Deep Analytics (April 2026)
 import GoalsAboveExpectedCard from '../components/charts/GoalsAboveExpectedCard';
-import ShotTimelineRibbon from '../components/charts/ShotTimelineRibbon';
 import HotColdZoneRadial from '../components/charts/HotColdZoneRadial';
 import RollingFinishingTrajectory from '../components/charts/RollingFinishingTrajectory';
 import WARBreakdown from '../components/charts/WARBreakdown';
+import RAPMImpactCard from '../components/charts/RAPMImpactCard';
 import LinemateWithWithout from '../components/charts/LinemateWithWithout';
 import { usePlayerLinemateChemistry } from '../hooks/usePlayerLinemateChemistry';
 import { computeSkaterWAR } from '../services/warService';
 import { loadWARTables, type WARTables } from '../services/warTableService';
+import { loadRAPM, type RAPMArtifact } from '../services/rapmService';
 import { edgeTrackingService } from '../services/edgeTrackingService';
 import { getSkaterAverages } from '../services/leagueAveragesService';
 import { EDGE_CACHE, ANALYTICS_CACHE } from '../utils/cacheUtils';
@@ -77,6 +78,7 @@ function PlayerProfile() {
   const [activeTab, setActiveTab] = useState<'stats' | 'charts' | 'analytics' | 'advanced' | 'edge' | 'deep' | 'card'>('stats');
   const [isSharing, setIsSharing] = useState(false);
   const [warTables, setWarTables] = useState<WARTables | null>(null);
+  const [rapm, setRapm] = useState<RAPMArtifact | null>(null);
 
   // Load the WAR tables lazily when the Deep tab is first opened.
   useEffect(() => {
@@ -84,6 +86,13 @@ function PlayerProfile() {
       loadWARTables().then(setWarTables);
     }
   }, [activeTab, warTables]);
+
+  // Load RAPM coefficients once on mount — cached in the service and
+  // consumed by the RAPM Impact card. The component renders an empty
+  // state while this is pending or if the artifact is unavailable.
+  useEffect(() => {
+    loadRAPM().then(setRapm);
+  }, []);
   const cardRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const [cardZoom, setCardZoom] = useState(1);
@@ -1201,15 +1210,17 @@ function PlayerProfile() {
                   })()}
 
                   <div className="deep-panel">
-                    <GoalsAboveExpectedCard
-                      title="Finishing summary"
-                      shots={advancedAnalytics.playerShots}
+                    <RAPMImpactCard
+                      playerId={player.playerId}
+                      playerName={`${player.firstName.default} ${player.lastName.default}`}
+                      position={player.position}
+                      rapm={rapm}
                     />
                   </div>
 
                   <div className="deep-panel">
-                    <ShotTimelineRibbon
-                      title="Shot Timeline — season"
+                    <GoalsAboveExpectedCard
+                      title="Finishing summary"
                       shots={advancedAnalytics.playerShots}
                     />
                   </div>

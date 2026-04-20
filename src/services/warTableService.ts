@@ -134,6 +134,18 @@ export interface LeagueContext {
   // When present, WAR uses (onIce − offIce) instead of (onIce − league
   // median), which cancels team quality bias.
   teamTotals?: Record<string, { xGF: number; xGA: number; onIceTOI: number }>;
+  /** League-wide expected-goals per shot. Derived client-side at load
+   *  time from Σ(ixG) / Σ(iShotsFenwick) across all skaters in the
+   *  war-skaters table. Used by warService.ts to credit primary assists
+   *  at the correct per-shot rate (~0.07 goals) instead of the
+   *  dimensionally-wrong per-minute rate the previous code used. */
+  leagueIxGPerShot?: number;
+  /** Optimal inverse-variance weight for the team-relative baseline in
+   *  the fallback EV offense/defense blend. Derived at load time from
+   *  the variances of the two estimators (team-rel delta vs league-
+   *  median delta) across every skater. Replaces the earlier hardcoded
+   *  50/50 split. Weight on league-median = 1 − this value. */
+  baselineBlendTeamWeight?: number;
 }
 
 export interface WARTables {
@@ -185,10 +197,74 @@ export async function loadWARTables(): Promise<WARTables | null> {
       return null;
     }
 
+    // Derive league-wide xG-per-shot from the real skater distribution.
+    // This is the correct per-primary-assist credit (an assist leads to
+    // a shot, and the league-average shot is worth this much xG).
+    let totIxG = 0, totShots = 0;
+    for (const s of Object.values(skPayload.players)) {
+      totIxG += s.ixG || 0;
+      totShots += s.iShotsFenwick || 0;
+    }
+    const leagueIxGPerShot = totShots > 0 ? totIxG / totShots : 0;
+
+    // Derive the optimal blend weight between team-relative and league-
+    // median baselines for the fallback EV offense/defense path. Under
+    // an unbiased-combiner assumption, the minimum-MSE weight on
+    // estimator i is proportional to 1 / Var(estimator_i). We estimate
+    // those variances by computing each player's team-rel and league-
+    // median deltas and measuring cross-player spread.
+    let nPlayers = 0;
+    let sumTR = 0, sumLM = 0;
+    const trDeltas: number[] = [];
+    const lmDeltas: number[] = [];
+    const teamTotals = ctx.teamTotals || {};
+    const medianOnIceXGF60F = ctx.skaters.F?.medianOnIceXGF60;
+    const medianOnIceXGF60D = ctx.skaters.D?.medianOnIceXGF60;
+    for (const s of Object.values(skPayload.players)) {
+      if (!s.onIceTOIAllSec || s.onIceTOIAllSec <= 0) continue;
+      if (s.onIceXGF == null) continue;
+      const hours = s.onIceTOIAllSec / 3600;
+      const playerXGF60 = s.onIceXGF / hours;
+      const teamAbbrev = s.teamAbbrevs?.split(',')?.[0]?.trim();
+      const tot = teamTotals[teamAbbrev || ''];
+      let tr: number | null = null;
+      if (tot && tot.onIceTOI > s.onIceTOIAllSec) {
+        const offIceHours = (tot.onIceTOI - s.onIceTOIAllSec) / 3600;
+        if (offIceHours > 0) tr = playerXGF60 - (tot.xGF - s.onIceXGF) / offIceHours;
+      }
+      const medXGF = s.positionCode === 'D' ? medianOnIceXGF60D : medianOnIceXGF60F;
+      const lm = medXGF != null ? playerXGF60 - medXGF : null;
+      if (tr != null && lm != null) {
+        trDeltas.push(tr);
+        lmDeltas.push(lm);
+        sumTR += tr;
+        sumLM += lm;
+        nPlayers++;
+      }
+    }
+    let baselineBlendTeamWeight = 0.5; // fall back to parity if we can't derive
+    if (nPlayers > 20) {
+      const mTR = sumTR / nPlayers;
+      const mLM = sumLM / nPlayers;
+      let varTR = 0, varLM = 0;
+      for (let i = 0; i < nPlayers; i++) {
+        varTR += (trDeltas[i] - mTR) ** 2;
+        varLM += (lmDeltas[i] - mLM) ** 2;
+      }
+      varTR /= (nPlayers - 1);
+      varLM /= (nPlayers - 1);
+      // Inverse-variance weight: the estimator with lower variance
+      // (more precise) gets more weight. Guard against degenerate
+      // variances (0 or NaN).
+      if (varTR > 0 && varLM > 0) {
+        baselineBlendTeamWeight = varLM / (varTR + varLM);
+      }
+    }
+
     const tables: WARTables = {
       skaters: skPayload.players,
       goalies: goPayload.players,
-      context: ctx,
+      context: { ...ctx, leagueIxGPerShot, baselineBlendTeamWeight },
       loadedAt: Date.now(),
     };
     CacheManager.set(CACHE_KEY, tables, CACHE_DURATION.ONE_DAY);

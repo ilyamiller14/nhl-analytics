@@ -548,15 +548,6 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.individual-xg {
-  background: rgba(139, 92, 246, 0.08);
-  border: 1px solid rgba(139, 92, 246, 0.15);
-}
-
-.individual-xg .xg-section-header {
-  color: #c4b5fd;
-}
-
 .on-ice-xg {
   background: rgba(59, 130, 246, 0.08);
   border: 1px solid rgba(59, 130, 246, 0.15);
@@ -636,10 +627,6 @@
   justify-content: center;
   gap: 1rem;
   margin-top: 0.4rem;
-}
-
-.individual-xg .xg-summary {
-  margin-top: 0;
 }
 
 .on-ice-xg .xg-summary {
@@ -768,35 +755,6 @@
   color: rgba(255, 255, 255, 0.45);
   margin-top: 0.1rem;
   font-weight: 600;
-}
-
-/* ============================================================
-   ATTACK DNA MINI-RADAR (league percentile, share card)
-   ============================================================ */
-.attack-dna-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.35rem;
-  margin-top: 0.6rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.attack-dna-header {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-
-.attack-dna-sub {
-  font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.5);
-  font-style: italic;
-}
-
-.attack-dna-radar {
-  display: block;
 }
 
 /* ============================================================

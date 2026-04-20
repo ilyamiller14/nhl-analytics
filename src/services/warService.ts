@@ -31,6 +31,7 @@ import type {
   WARGoalieRow,
   WARSkaterRow,
 } from './warTableService';
+import { getRAPMForPlayer, type RAPMArtifact } from './rapmService';
 
 // ============================================================================
 // Types
@@ -133,7 +134,13 @@ function percentileFromQuantiles(
   const sorted = quantiles.slice().sort((a, b) => a.value - b.value);
   if (value <= sorted[0].value) {
     // Linear extrapolation below the lowest quantile toward 0.
-    const gap = Math.max(0.1, sorted[0].value - (sorted[1]?.value ?? sorted[0].value));
+    // Gap is the spacing between the two lowest quantiles; must be
+    // positive (upper − lower), symmetric with the top-end block.
+    // Earlier the subtraction was reversed (`sorted[0].value - sorted[1].value`)
+    // producing a negative gap that clamped to 0.1 and made every
+    // below-lowest-quantile player collapse to 0.
+    const next = sorted[1]?.value ?? sorted[0].value;
+    const gap = Math.max(0.1, next - sorted[0].value);
     const pct = Math.max(0, sorted[0].p - (sorted[0].value - value) / gap * sorted[0].p);
     return pct;
   }
@@ -161,15 +168,27 @@ function percentileFromQuantiles(
 // ============================================================================
 
 function medianIxGPerPrimary(context: LeagueContext, pos: 'F' | 'D'): number {
-  // A primary assist's value is proxied as the median-position
-  // player's ixG per 60 of EV ice time. This is the "expected xG value
-  // of a typical set-up shot" — empirical, derived from league data.
-  return context.skaters[pos].medianIxGPer60 / 60; // per minute
+  // A primary assist leads to one shot. The defensible credit is the
+  // league-average expected-goals VALUE of a shot — Σ(ixG) / Σ(shots)
+  // across the league, derived client-side at load time in
+  // warTableService.loadWARTables (`context.leagueIxGPerShot`, ~0.07).
+  //
+  // If that field is missing we return 0 and let the caller emit a
+  // note. The previous fallback used `medianIxGPer60 / 60`, a per-
+  // MINUTE rate multiplied by an assist count — dimensionally wrong,
+  // quietly wrong, and biased down by ~5×. Zero is more honest than
+  // silently broken math.
+  void pos;
+  if (typeof context.leagueIxGPerShot === 'number' && context.leagueIxGPerShot > 0) {
+    return context.leagueIxGPerShot;
+  }
+  return 0;
 }
 
 export function computeSkaterWAR(
   row: WARSkaterRow,
-  context: LeagueContext
+  context: LeagueContext,
+  rapm?: RAPMArtifact | null,
 ): WARResult {
   const pos = positionGroup(row.positionCode);
   const season = context.season;
@@ -222,121 +241,154 @@ export function computeSkaterWAR(
   };
   const posStats = resolvePosStats();
 
-  // --- Component 4: EV Offense / Defense — TEAM-RELATIVE (xGF%/xGA% Rel)
-  // Raw on-ice rates penalize players on bad teams (their teammates
-  // generate fewer chances regardless of individual skill) and reward
-  // players on good teams. The industry-standard fix is to compare the
-  // player's on-ice rate against their OWN team's rate when the player
-  // is OFF the ice — cancels out team quality, isolates individual
-  // contribution.
+  // --- Component 4: EV Offense / Defense
   //
-  //   offIceXGF60 = (team_total_xGF − player_onIce_xGF)
-  //               / ((team_total_onIceTOI − player_onIce_TOI)/3600)
-  //   relative_xGF60 = player_onIce_xGF60 − offIceXGF60
-  //   evOffense_line_goals = relative_xGF60 × player_onIce_hours
-  //   evOffense_player_goals = evOffense_line_goals × SKATER_ON_ICE_SHARE
+  // Preferred path: RAPM coefficients (ridge regression over shift-level
+  // data, line-mates and opponents regressed out). RAPM delivers the
+  // individual's per-60 delta directly; multiplying by on-ice hours
+  // converts rate → total goal value.
   //
-  // CRITICAL: scale by 1/5. Five skaters share the ice; the on-ice xG
-  // differential is the LINE's contribution, not a single player's.
-  // Without a RAPM regression to isolate individual signal, equal-share
-  // attribution is the standard quick fix (Evolving-Hockey, Hockey
-  // Graphs documented). Without this, top-pair D and 1C grade out as
-  // 50+ GAR — physically impossible for a single skater.
+  // CRITICAL: no ×SKATER_ON_ICE_SHARE (1/5) scaling on the RAPM path.
+  // RAPM already isolates individual contribution — the coefficient IS
+  // the single-skater signal, not the 5-skater line's. Dividing by 5
+  // would double-compensate for the sharing that the regression has
+  // already controlled for. (The ×1/5 in the fallback blend exists
+  // precisely because line-mates aren't controlled for there.)
   //
-  // If team totals aren't present in the LeagueContext yet, we fall
-  // back to the older league-median baseline and note it.
+  // Fallback path: team-relative / league-median blend. Pure team-
+  // relative compresses franchise players (McDavid vs Edmonton-without-
+  // McDavid which is still strong); pure league-median inflates every
+  // skater on a good team. Blending 50/50 is an honest middle ground,
+  // scaled by 1/5 to approximate individual attribution on a shared
+  // 5-skater shift.
+  //
+  // The fallback triggers when RAPM is absent OR the player was flagged
+  // lowSample (gp < 40 in the artifact's regression). In that case the
+  // RAPM coefficient is too noisy to trust over the blended baseline.
   const SKATER_ON_ICE_SHARE = 0.2;
-  const onIceHours =
+  // All-strength on-ice hours — used by the fallback blend, whose
+  // baselines (team off-ice rate, league median) are also all-strength
+  // so the numerator and denominator are on the same basis.
+  const onIceHoursAllStrength =
     row.onIceTOIAllSec && row.onIceTOIAllSec > 0
       ? row.onIceTOIAllSec / 3600
       : 0;
+  // 5v5-only hours for the RAPM path. RAPM coefficients are computed at
+  // 5v5 (strength === '1551'); multiplying a 5v5 rate by all-strength
+  // hours silently inflates magnitudes by ~20–30% for high-PP players.
+  // Prefer the artifact's own `minutes` field (exact shifts used in the
+  // regression). Fall back to even-strength TOI if the artifact entry
+  // is missing a minutes field, and to all-strength as a last resort.
+  const rapmEntry = getRAPMForPlayer(rapm ?? null, row.playerId);
+  const rapm5v5Hours =
+    rapmEntry?.minutes != null && rapmEntry.minutes > 0
+      ? rapmEntry.minutes / 60
+      : row.toiEvSeconds && row.toiEvSeconds > 0
+        ? row.toiEvSeconds / 3600
+        : onIceHoursAllStrength;
+
   const medianXGF60 = posStats.medianOnIceXGF60 ?? null;
   const medianXGA60 = posStats.medianOnIceXGA60 ?? null;
   const teamAbbrev = row.teamAbbrevs?.split(',')?.[0]?.trim();
   const teamTotal = context.teamTotals?.[teamAbbrev || ''] ?? null;
 
-  // Baseline blend: pure team-relative suffers from a "franchise player"
-  // pathology — McDavid's on-ice xGF gets compared to Edmonton-without-
-  // McDavid, but that residual team is still strong (Draisaitl / RNH /
-  // Hyman) so the differential compresses and McDavid ranks in the
-  // middle of the leaderboard. Pure league-median has the opposite
-  // pathology — every Oiler looks elite because their team is above
-  // league-median. We blend 50/50 so neither pathology dominates. A
-  // future RAPM regression would replace this, but for now the blend
-  // is the honest middle ground between the two knowable anchors.
-  //
-  // This is derived, not hardcoded — each side of the blend is itself
-  // computed from real on-ice totals and real league position medians.
-  const BASELINE_BLEND_TEAM = 0.5;
-  const BASELINE_BLEND_LEAGUE = 0.5;
+  // Inverse-variance blend weights, derived at load time from the
+  // cross-player distributions of team-relative and league-median
+  // deltas (see warTableService.loadWARTables). Fall back to 50/50 if
+  // the context didn't populate the field (e.g., old cache).
+  const BASELINE_BLEND_TEAM =
+    typeof context.baselineBlendTeamWeight === 'number'
+      ? context.baselineBlendTeamWeight
+      : 0.5;
+  const BASELINE_BLEND_LEAGUE = 1 - BASELINE_BLEND_TEAM;
 
   let evOffense = 0;
-  if (
-    row.onIceXGF != null && row.onIceTOIAllSec != null && row.onIceTOIAllSec > 0
-  ) {
-    const playerXGF60 = row.onIceXGF / onIceHours;
-
-    let teamRelDelta: number | null = null;
-    if (teamTotal && teamTotal.onIceTOI > row.onIceTOIAllSec) {
-      const offIceXGF = teamTotal.xGF - row.onIceXGF;
-      const offIceHours = (teamTotal.onIceTOI - row.onIceTOIAllSec) / 3600;
-      if (offIceHours > 0) {
-        teamRelDelta = playerXGF60 - (offIceXGF / offIceHours);
-      }
-    }
-    const leagueRelDelta = medianXGF60 != null ? playerXGF60 - medianXGF60 : null;
-
-    if (teamRelDelta != null && leagueRelDelta != null) {
-      const blended =
-        BASELINE_BLEND_TEAM * teamRelDelta +
-        BASELINE_BLEND_LEAGUE * leagueRelDelta;
-      evOffense = blended * onIceHours * SKATER_ON_ICE_SHARE;
-    } else if (teamRelDelta != null) {
-      evOffense = teamRelDelta * onIceHours * SKATER_ON_ICE_SHARE;
-      notes.push('EV offense using team-relative only — position median missing.');
-    } else if (leagueRelDelta != null) {
-      evOffense = leagueRelDelta * onIceHours * SKATER_ON_ICE_SHARE;
-      notes.push('EV offense falling back to league-median baseline — team totals not yet computed.');
-    } else {
-      notes.push('EV offense unavailable — no team totals and no league median.');
-    }
-  } else {
-    notes.push('EV offense unavailable — worker must populate onIceXGF and onIceTOIAllSec.');
-  }
-
   let evDefense = 0;
-  if (
-    row.onIceXGA != null && row.onIceTOIAllSec != null && row.onIceTOIAllSec > 0
-  ) {
-    const playerXGA60 = row.onIceXGA / onIceHours;
 
-    // Positive delta = player suppresses xGA below the baseline (good D).
-    let teamRelDelta: number | null = null;
-    if (teamTotal && teamTotal.onIceTOI > row.onIceTOIAllSec) {
-      const offIceXGA = teamTotal.xGA - row.onIceXGA;
-      const offIceHours = (teamTotal.onIceTOI - row.onIceTOIAllSec) / 3600;
-      if (offIceHours > 0) {
-        teamRelDelta = (offIceXGA / offIceHours) - playerXGA60;
-      }
-    }
-    const leagueRelDelta = medianXGA60 != null ? medianXGA60 - playerXGA60 : null;
+  const useRAPM = rapmEntry != null && !rapmEntry.lowSample && rapm5v5Hours > 0;
 
-    if (teamRelDelta != null && leagueRelDelta != null) {
-      const blended =
-        BASELINE_BLEND_TEAM * teamRelDelta +
-        BASELINE_BLEND_LEAGUE * leagueRelDelta;
-      evDefense = blended * onIceHours * SKATER_ON_ICE_SHARE;
-    } else if (teamRelDelta != null) {
-      evDefense = teamRelDelta * onIceHours * SKATER_ON_ICE_SHARE;
-      notes.push('EV defense using team-relative only — position median missing.');
-    } else if (leagueRelDelta != null) {
-      evDefense = leagueRelDelta * onIceHours * SKATER_ON_ICE_SHARE;
-      notes.push('EV defense falling back to league-median baseline — team totals not yet computed.');
-    } else {
-      notes.push('EV defense unavailable — no team totals and no league median.');
-    }
+  if (useRAPM && rapmEntry) {
+    // RAPM path — coefficients are already per-individual xG/60 deltas.
+    // Convert to total goal value by multiplying by the player's 5v5
+    // on-ice hours (NOT all-strength — RAPM doesn't model PP/PK).
+    // No ×1/5 scaling (see comment above).
+    evOffense = rapmEntry.offense * rapm5v5Hours;
+    evDefense = rapmEntry.defense * rapm5v5Hours;
+    // RAPM is the principled path, not a data gap. Don't surface as a
+    // ⚠ note — it would fire on every qualified row and make the
+    // warning indicator useless.
   } else {
-    notes.push('EV defense unavailable — worker must populate onIceXGA and onIceTOIAllSec.');
+    // Fallback blend path — only engaged when RAPM unavailable or low-sample.
+    if (
+      row.onIceXGF != null && row.onIceTOIAllSec != null && row.onIceTOIAllSec > 0
+    ) {
+      const playerXGF60 = row.onIceXGF / onIceHoursAllStrength;
+
+      let teamRelDelta: number | null = null;
+      if (teamTotal && teamTotal.onIceTOI > row.onIceTOIAllSec) {
+        const offIceXGF = teamTotal.xGF - row.onIceXGF;
+        const offIceHours = (teamTotal.onIceTOI - row.onIceTOIAllSec) / 3600;
+        if (offIceHours > 0) {
+          teamRelDelta = playerXGF60 - (offIceXGF / offIceHours);
+        }
+      }
+      const leagueRelDelta = medianXGF60 != null ? playerXGF60 - medianXGF60 : null;
+
+      if (teamRelDelta != null && leagueRelDelta != null) {
+        const blended =
+          BASELINE_BLEND_TEAM * teamRelDelta +
+          BASELINE_BLEND_LEAGUE * leagueRelDelta;
+        evOffense = blended * onIceHoursAllStrength * SKATER_ON_ICE_SHARE;
+      } else if (teamRelDelta != null) {
+        evOffense = teamRelDelta * onIceHoursAllStrength * SKATER_ON_ICE_SHARE;
+        notes.push('EV offense using team-relative only — position median missing.');
+      } else if (leagueRelDelta != null) {
+        evOffense = leagueRelDelta * onIceHoursAllStrength * SKATER_ON_ICE_SHARE;
+        notes.push('EV offense falling back to league-median baseline — team totals not yet computed.');
+      } else {
+        notes.push('EV offense unavailable — no team totals and no league median.');
+      }
+    } else {
+      notes.push('EV offense unavailable — worker must populate onIceXGF and onIceTOIAllSec.');
+    }
+
+    if (
+      row.onIceXGA != null && row.onIceTOIAllSec != null && row.onIceTOIAllSec > 0
+    ) {
+      const playerXGA60 = row.onIceXGA / onIceHoursAllStrength;
+
+      // Positive delta = player suppresses xGA below the baseline (good D).
+      let teamRelDelta: number | null = null;
+      if (teamTotal && teamTotal.onIceTOI > row.onIceTOIAllSec) {
+        const offIceXGA = teamTotal.xGA - row.onIceXGA;
+        const offIceHours = (teamTotal.onIceTOI - row.onIceTOIAllSec) / 3600;
+        if (offIceHours > 0) {
+          teamRelDelta = (offIceXGA / offIceHours) - playerXGA60;
+        }
+      }
+      const leagueRelDelta = medianXGA60 != null ? medianXGA60 - playerXGA60 : null;
+
+      if (teamRelDelta != null && leagueRelDelta != null) {
+        const blended =
+          BASELINE_BLEND_TEAM * teamRelDelta +
+          BASELINE_BLEND_LEAGUE * leagueRelDelta;
+        evDefense = blended * onIceHoursAllStrength * SKATER_ON_ICE_SHARE;
+      } else if (teamRelDelta != null) {
+        evDefense = teamRelDelta * onIceHoursAllStrength * SKATER_ON_ICE_SHARE;
+        notes.push('EV defense using team-relative only — position median missing.');
+      } else if (leagueRelDelta != null) {
+        evDefense = leagueRelDelta * onIceHoursAllStrength * SKATER_ON_ICE_SHARE;
+        notes.push('EV defense falling back to league-median baseline — team totals not yet computed.');
+      } else {
+        notes.push('EV defense unavailable — no team totals and no league median.');
+      }
+    } else {
+      notes.push('EV defense unavailable — worker must populate onIceXGA and onIceTOIAllSec.');
+    }
+
+    if (rapmEntry?.lowSample) {
+      notes.push('RAPM available but flagged low-sample — using blended baseline instead.');
+    }
   }
 
   // --- Component 5: Faceoffs — centers only. NHL positionCode "C"
@@ -411,11 +463,11 @@ export function computeSkaterWAR(
   // kept as display columns on the row but contribute 0 to WAR until a
   // RAPM-style regression can isolate their real signal.
   const micro = 0;
-  if ((row.hits && row.hits > 0) || (row.blocks && row.blocks > 0)) {
-    notes.push(
-      'Hits and blocks are shown as raw counts but weighted 0 in WAR — literature finds they are noise after controlling for possession. Upgrade path: RAPM regression with shift-level on-ice controls.'
-    );
-  }
+  // Hits/blocks weighted 0 is a deliberate methodology choice, not a
+  // data gap. Previously this pushed a note for every skater who had
+  // recorded any hit/block (essentially everyone), which made the
+  // leaderboard's ⚠ indicator meaningless. Methodology notes belong in
+  // the collapsible explainer, not in per-row diagnostics.
   // Preserve the named fields so consumers can still display them.
   const _unusedHitValue = context.hitGoalValue ?? null;
   const _unusedBlockValue = context.blockGoalValue ?? null;
@@ -434,23 +486,29 @@ export function computeSkaterWAR(
 
   const WAR = totalGAR / context.marginalGoalsPerWin;
 
-  // WAR per 82 with Bayesian shrinkage toward 0 (replacement level).
+  // WAR per 82 — honest pace projection above 20 GP.
   //
-  // A raw projection — `(WAR / gp) * 82` — explodes under small samples:
-  // a 5-GP call-up who put up +1 WAR pace-projects to +16.4 WAR over
-  // 82, which is nonsense. Season-level shot/result metrics stabilize
-  // around GP ≈ 25–30. We shrink toward 0 with an empirical Bayes
-  // prior of K = 25 phantom replacement games:
+  // Raw projection `(WAR / gp) × 82` is trustworthy once a player has
+  // passed the small-sample zone (~20 GP). Above that, shrinking still
+  // would penalize a 76-GP veteran's pace by ~25% against replacement
+  // level even though he has almost a full season of evidence — which
+  // is not what "82-game pace" means to a reader. The leaderboard's
+  // min-GP filter already protects against small-sample call-ups
+  // dominating the ranks.
   //
-  //   shrunk = raw × gp / (gp + K)
+  // Below 20 GP we shrink toward replacement with a *continuous* ramp
+  // so there's no discontinuity at the stabilization threshold. The old
+  // formulation `gp / (gp + K_GP_SHRINKAGE)` jumped from 0.43 at GP=19
+  // to 1.0 at GP=20 (a 57% pace jump for one extra game). The smooth
+  // ramp interpolates linearly from 0 at GP=0 to 1 at GP=STABILIZATION_GP,
+  // then holds at 1.
   //
-  // At GP=82 this barely changes the value (≈ 76.6%); at GP=10 it
-  // brings the projection down to 10/35 ≈ 28% of the raw pace — a
-  // conservative anchor that reflects how little a 10-game stretch
-  // really tells us.
-  const K_GP_SHRINKAGE = 25;
+  // At GP=10 this gives 0.5× — conservative enough that a 10-game
+  // call-up pace-projecting to +16 WAR gets trimmed to +8. At GP=20+
+  // we trust the data and don't shrink at all.
+  const STABILIZATION_GP = 20;
   const rawWARPer82 = row.gamesPlayed > 0 ? (WAR / row.gamesPlayed) * 82 : 0;
-  const shrinkageFactor = row.gamesPlayed / (row.gamesPlayed + K_GP_SHRINKAGE);
+  const shrinkageFactor = Math.min(1, row.gamesPlayed / STABILIZATION_GP);
   const WAR_per_82 = rawWARPer82 * shrinkageFactor;
 
   const percentile = percentileFromQuantiles(

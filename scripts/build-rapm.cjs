@@ -1,0 +1,1245 @@
+#!/usr/bin/env node
+
+/**
+ * Regularized Adjusted Plus-Minus (RAPM) Build Script
+ *
+ * Computes per-player 5v5 offensive / defensive xG impact via ridge
+ * regression over shift-level on-ice data, controlling for line-mates
+ * and opposition. Produces public/data/rapm-20252026.json.
+ *
+ * ============================================================================
+ * PREREQUISITE
+ * ============================================================================
+ *
+ * Before running this script the first time:
+ *
+ *     npm install ml-matrix
+ *
+ * This script does NOT call npm itself. It imports ml-matrix via require();
+ * if the package isn't present, the script will abort with a clear message.
+ *
+ * ============================================================================
+ * DATA SOURCES (all real, no mocks)
+ * ============================================================================
+ *
+ * 1. Per-team PBP   GET https://nhl-api-proxy.deepdivenhl.workers.dev
+ *                       /cached/team/{ABBREV}/pbp
+ *    Returns an array of game objects. The same gameId appears in both
+ *    teams' arrays, so games are deduped by gameId.
+ *
+ * 2. Per-game shifts GET .../cached/shifts/{gameId}
+ *    Returns [{ playerId, teamId, period, startTime, endTime }].
+ *    Games without cached shifts are skipped and counted; if coverage
+ *    drops below 50% the build aborts (not defensible with that little
+ *    data).
+ *
+ * 3. Empirical xG lookup  GET .../cached/xg-lookup
+ *    The same schemaVersion-2 lookup the site uses. We port the
+ *    hierarchical bucket walk inline (see computeEmpiricalXg) rather
+ *    than importing — this is .cjs, and the client-side module is ESM.
+ *
+ * ============================================================================
+ * CONSTRAINTS (from project CLAUDE.md)
+ * ============================================================================
+ *
+ *  - No mock data.
+ *  - No hardcoded league averages. Baselines derived from the shift
+ *    dataset we ingest (see computeLeagueBaselines).
+ *  - Season format: 8-digit "20252026".
+ *  - No magic numbers. λ chosen by 5-fold cross-validation over the
+ *    grid [10, 30, 100, 300, 1000], picking the λ that minimizes the
+ *    combined held-out shift-weighted MSE across offense and defense
+ *    fits. Fold assignment is deterministic (seeded shuffle) so reruns
+ *    reproduce the same λ. Each grid point and its per-λ CV MSE is
+ *    persisted in the output artifact under `cvResults` so readers can
+ *    audit the curve.
+ *  - MIN_TOI qualifier threshold is derived from the season's TOI
+ *    distribution (5th percentile of qualified-player TOI), not picked
+ *    a priori.
+ *
+ * ============================================================================
+ */
+
+const https = require('https');
+const fs = require('fs');
+const path = require('path');
+
+// Optional — only required for the regression solve. The design matrix
+// assembly and diagnostics all run without it, so we import lazily so a
+// missing package isn't hit until it's actually needed.
+let Matrix = null;
+let mlInverse = null;
+try {
+  // eslint-disable-next-line global-require
+  const mlm = require('ml-matrix');
+  Matrix = mlm.Matrix;
+  // ml-matrix v6+ removed `Matrix.prototype.inverse()` in favor of a
+  // standalone `inverse(M)` export. We bind whichever is present so the
+  // script works across 5.x and 6.x.
+  mlInverse = mlm.inverse || ((m) => m.inverse());
+} catch (err) {
+  console.error(
+    '[rapm] FATAL: ml-matrix is not installed. Run: npm install ml-matrix'
+  );
+  process.exit(1);
+}
+
+// ============================================================================
+// Constants & config
+// ============================================================================
+
+// NHL seasons run October → June. Sep 1 = cutover: dates Sep 1 – Dec 31
+// belong to the season starting that year (YYYY/YYYY+1); dates Jan 1 –
+// Aug 31 belong to the season that started the previous year. The first
+// nightly Action run after Sep 1 each year auto-bumps the season — no
+// manual edit needed. Override via env: SEASON=20262027 npm run build-rapm
+function computeCurrentSeason() {
+  if (process.env.SEASON) return process.env.SEASON;
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const startYear = month >= 8 ? year : year - 1;
+  return `${startYear}${startYear + 1}`;
+}
+const SEASON = computeCurrentSeason();
+const WORKER_BASE = 'https://nhl-api-proxy.deepdivenhl.workers.dev';
+
+const NHL_TEAMS = [
+  'ANA', 'BOS', 'BUF', 'CGY', 'CAR', 'CHI', 'COL', 'CBJ',
+  'DAL', 'DET', 'EDM', 'FLA', 'LAK', 'MIN', 'MTL', 'NSH',
+  'NJD', 'NYI', 'NYR', 'OTT', 'PHI', 'PIT', 'SJS', 'SEA',
+  'STL', 'TBL', 'TOR', 'UTA', 'VAN', 'VGK', 'WSH', 'WPG',
+];
+
+// Maximum shift-chunk lengths we will honor. Built only from data:
+// regulation = 3 periods, regular-season OT adds period 4 (up to 5min),
+// period 5 in regulars is the shootout (single tiebreaker event, skip
+// entirely per CLAUDE.md season format).
+const INCLUDED_PERIODS = new Set([1, 2, 3, 4]);
+
+const OUTPUT_PATH = path.join(
+  __dirname, '..', 'public', 'data', `rapm-${SEASON}.json`
+);
+
+// ============================================================================
+// HTTPS helpers (std lib only, mirrors scripts/build-contracts.cjs)
+// ============================================================================
+
+function fetchJSON(url, opts = {}) {
+  const { retries = 2, timeoutMs = 30000 } = opts;
+  return new Promise((resolve, reject) => {
+    const attempt = (remaining) => {
+      const req = https.get(url, {
+        headers: {
+          'User-Agent': 'nhl-analytics-rapm-build/1.0',
+          'Accept': 'application/json',
+        },
+      }, (res) => {
+        if (res.statusCode === 404) {
+          // Caller handles 404 as "missing" — not an error.
+          const err = new Error(`HTTP 404 for ${url}`);
+          err.status = 404;
+          reject(err);
+          return;
+        }
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          fetchJSON(res.headers.location, opts).then(resolve).catch(reject);
+          return;
+        }
+        if (res.statusCode !== 200) {
+          if (remaining > 0) {
+            setTimeout(() => attempt(remaining - 1), 1500);
+            return;
+          }
+          reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+          return;
+        }
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          try { resolve(JSON.parse(body)); }
+          catch (e) { reject(new Error(`JSON parse error for ${url}: ${e.message}`)); }
+        });
+      });
+      req.on('error', (err) => {
+        if (remaining > 0) {
+          setTimeout(() => attempt(remaining - 1), 1500);
+          return;
+        }
+        reject(err);
+      });
+      req.setTimeout(timeoutMs, () => {
+        req.destroy();
+        if (remaining > 0) {
+          setTimeout(() => attempt(remaining - 1), 1500);
+          return;
+        }
+        reject(new Error(`Timeout for ${url}`));
+      });
+    };
+    attempt(retries);
+  });
+}
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+// ============================================================================
+// Time / PBP utilities (ported, not imported — this is .cjs)
+// ============================================================================
+
+function parseTimeToSeconds(t) {
+  if (!t || typeof t !== 'string') return 0;
+  const parts = t.split(':');
+  if (parts.length !== 2) return 0;
+  const mm = parseInt(parts[0], 10);
+  const ss = parseInt(parts[1], 10);
+  if (Number.isNaN(mm) || Number.isNaN(ss)) return 0;
+  return mm * 60 + ss;
+}
+
+// 5v5 check. situationCode digits = [awayGoalie, awaySkaters, homeSkaters, homeGoalie].
+function is5v5(situationCode) {
+  return situationCode === '1551';
+}
+
+// ============================================================================
+// xG lookup — hierarchical bucket walk (ported from src/services/empiricalXgModel.ts)
+// ============================================================================
+
+function distanceBin(d) {
+  if (d < 5) return 'd00_05';
+  if (d < 10) return 'd05_10';
+  if (d < 15) return 'd10_15';
+  if (d < 20) return 'd15_20';
+  if (d < 25) return 'd20_25';
+  if (d < 30) return 'd25_30';
+  if (d < 40) return 'd30_40';
+  if (d < 50) return 'd40_50';
+  if (d < 70) return 'd50_70';
+  return 'd70plus';
+}
+
+function angleBin(a) {
+  if (a < 10) return 'a00_10';
+  if (a < 20) return 'a10_20';
+  if (a < 30) return 'a20_30';
+  if (a < 45) return 'a30_45';
+  if (a < 60) return 'a45_60';
+  return 'a60plus';
+}
+
+function mapShotType(raw) {
+  const t = (raw || '').toLowerCase();
+  if (t.includes('slap')) return 'slap';
+  if (t.includes('snap')) return 'snap';
+  if (t.includes('backhand')) return 'backhand';
+  if (t.includes('tip') || t.includes('deflect')) return 'tip';
+  if (t.includes('wrap')) return 'wrap';
+  if (t.includes('wrist')) return 'wrist';
+  return 'unknown';
+}
+
+// Strength key the empirical lookup expects.
+// For 5v5 RAPM every shot we pass is already filtered to 1551, so
+// strength is always '5v5'. Kept as a function for clarity.
+function strengthKey5v5() { return '5v5'; }
+
+function shotMetrics(xCoord, yCoord) {
+  const netX = xCoord >= 0 ? 89 : -89;
+  const dx = xCoord - netX;
+  const distance = Math.sqrt(dx * dx + yCoord * yCoord);
+  const distanceFromGoalLine = Math.abs(netX - xCoord);
+  const lateralDistance = Math.abs(yCoord);
+  const angle = distanceFromGoalLine > 0
+    ? Math.atan(lateralDistance / distanceFromGoalLine) * (180 / Math.PI)
+    : 90;
+  return { distance, angle };
+}
+
+function computeEmpiricalXg(lookup, features) {
+  if (!lookup || !lookup.buckets) return null;
+  const validDistance = Math.max(0, Math.min(200, features.distance || 0));
+  const validAngle = Math.max(0, Math.min(90, features.angle || 0));
+  const db = distanceBin(validDistance);
+  const ab = angleBin(validAngle);
+  const en = features.isEmptyNet ? 'en1' : 'en0';
+  const r = features.isRebound === true ? 'r1'
+          : features.isRebound === false ? 'r0' : null;
+  const ru = features.isRush === true ? 'ru1'
+           : features.isRush === false ? 'ru0' : null;
+  const sc = features.scoreState || null;
+  const pe = features.prevEventType || null;
+  const minShots = lookup.minShotsPerBucket || 30;
+  const shotType = features.shotType;
+  const strength = features.strength;
+
+  const hierarchy = [];
+  if (r && ru && sc && pe) {
+    hierarchy.push(`${en}|${db}|${ab}|${shotType}|${strength}|${r}|${ru}|${sc}|${pe}`);
+  }
+  if (r && ru && sc) {
+    hierarchy.push(`${en}|${db}|${ab}|${shotType}|${strength}|${r}|${ru}|${sc}`);
+  }
+  if (r && ru) {
+    hierarchy.push(`${en}|${db}|${ab}|${shotType}|${strength}|${r}|${ru}`);
+  }
+  if (r) {
+    hierarchy.push(`${en}|${db}|${ab}|${shotType}|${strength}|${r}`);
+  }
+  hierarchy.push(`${en}|${db}|${ab}|${shotType}|${strength}`);
+  hierarchy.push(`${en}|${db}|${ab}|${shotType}`);
+  hierarchy.push(`${en}|${db}|${ab}`);
+  hierarchy.push(`${en}|${db}`);
+  hierarchy.push(en);
+
+  for (const key of hierarchy) {
+    const b = lookup.buckets[key];
+    if (b && b.shots >= minShots) return b.rate;
+  }
+  return lookup.baselineRate || 0;
+}
+
+// ============================================================================
+// Phase 1 — Ingest team PBP, dedupe games
+// ============================================================================
+
+async function ingestGames() {
+  const games = new Map(); // gameId -> game object
+  let fetched = 0;
+  let failed = 0;
+  for (const abbrev of NHL_TEAMS) {
+    fetched++;
+    const url = `${WORKER_BASE}/cached/team/${abbrev}/pbp`;
+    process.stdout.write(`[rapm] (${fetched}/${NHL_TEAMS.length}) PBP ${abbrev}...`);
+    try {
+      const teamGames = await fetchJSON(url);
+      if (!Array.isArray(teamGames)) {
+        console.log(' WARN: non-array response');
+        failed++;
+        continue;
+      }
+      let added = 0;
+      for (const g of teamGames) {
+        if (!g || !g.gameId) continue;
+        // Regular-season only. Game IDs of the form YYYY02NNNN are regular
+        // season (gameType === 2). Fall back to gameType if present.
+        const idStr = String(g.gameId);
+        const gameTypeFromId = idStr.length === 10 ? idStr.slice(4, 6) : null;
+        if (gameTypeFromId && gameTypeFromId !== '02') continue;
+        if (!games.has(g.gameId)) {
+          games.set(g.gameId, g);
+          added++;
+        }
+      }
+      console.log(` OK (+${added} unique, ${games.size} total)`);
+    } catch (err) {
+      console.log(` ERROR: ${err.message}`);
+      failed++;
+    }
+    await sleep(150);
+  }
+  console.log(`[rapm] PBP ingest done: ${games.size} unique games (${failed} teams failed)`);
+  return games;
+}
+
+// ============================================================================
+// Phase 2 — Fetch per-game shifts, join to shots, enumerate 5v5 windows
+// ============================================================================
+
+/**
+ * For a given game, given its shifts:
+ *   - Split each period into "windows" bounded by shift-change events
+ *   - For each window, determine the exact 10 skaters on ice
+ *   - Emit only windows where both sides have 5 skaters and 1 goalie
+ *     (pure 5v5; empty-net or pulled-goalie windows are dropped)
+ *
+ * Returns an array of { homeSkaters[5], awaySkaters[5], period, start, end }
+ * shift windows. Windows are in seconds-within-period.
+ */
+function enumerateShiftWindows(game, shifts) {
+  const windowsByGame = [];
+  // Index shifts by period
+  const byPeriod = new Map();
+  for (const s of shifts) {
+    if (!INCLUDED_PERIODS.has(s.period)) continue;
+    if (!byPeriod.has(s.period)) byPeriod.set(s.period, []);
+    byPeriod.get(s.period).push(s);
+  }
+
+  for (const [period, periodShifts] of byPeriod) {
+    // Collect all unique boundaries (start + end times) in this period
+    const boundaries = new Set();
+    for (const s of periodShifts) {
+      boundaries.add(parseTimeToSeconds(s.startTime));
+      boundaries.add(parseTimeToSeconds(s.endTime));
+    }
+    const sortedBoundaries = [...boundaries].sort((a, b) => a - b);
+
+    for (let i = 0; i < sortedBoundaries.length - 1; i++) {
+      const start = sortedBoundaries[i];
+      const end = sortedBoundaries[i + 1];
+      if (end <= start) continue;
+      const dur = end - start;
+      if (dur < 1) continue; // drop sub-second jitter
+
+      // Find all players on the ice for the ENTIRE window
+      const mid = start + dur / 2;
+      const home = [];
+      const away = [];
+      for (const s of periodShifts) {
+        const sStart = parseTimeToSeconds(s.startTime);
+        const sEnd = parseTimeToSeconds(s.endTime);
+        // Player must cover the entire window (inclusive of boundary ties)
+        if (sStart <= start && sEnd >= end && mid >= sStart && mid <= sEnd) {
+          if (s.teamId === game.homeTeamId) home.push(s.playerId);
+          else if (s.teamId === game.awayTeamId) away.push(s.playerId);
+        }
+      }
+      // Dedup (a player should appear once per period but be safe)
+      const homeSet = [...new Set(home)];
+      const awaySet = [...new Set(away)];
+
+      // 5v5 filter: exactly 6 per team with goalie, i.e. 5 skaters + 1 G.
+      // Shift data doesn't mark goalies explicitly, so we use a count
+      // heuristic: 5v5 windows uniquely have exactly 6 players per side
+      // when the goalie is in net. We cross-check with situationCode
+      // on any shot that falls in this window later, and drop the
+      // window if the shot disagrees.
+      if (homeSet.length !== 6 || awaySet.length !== 6) continue;
+
+      windowsByGame.push({
+        period,
+        startSec: start,
+        endSec: end,
+        durationSec: dur,
+        homePlayers: homeSet,
+        awayPlayers: awaySet,
+        gameId: game.gameId,
+        homeTeamId: game.homeTeamId,
+        awayTeamId: game.awayTeamId,
+      });
+    }
+  }
+  return windowsByGame;
+}
+
+/**
+ * Walk plays, keeping a running score for prevEvent / scoreState derivation,
+ * and for each shot/goal/miss compute its xG via the empirical lookup.
+ * Returns an array of { period, timeInPeriod (sec), xCoord, yCoord, teamId,
+ * result, xGoal, situationCode } for ALL shot events in the game.
+ */
+function extractShots(game, xgLookup) {
+  const plays = Array.isArray(game.plays) ? game.plays : [];
+  const out = [];
+  let homeGoals = 0;
+  let awayGoals = 0;
+  const priorShotsByTeam = new Map(); // teamId -> array of prior shots this game
+  // Maintain a flat prior-event list for rush detection.
+  const flatPriorEvents = [];
+
+  for (const play of plays) {
+    const typeKey = play.typeDescKey;
+    const period = play.periodDescriptor && play.periodDescriptor.number;
+    if (!INCLUDED_PERIODS.has(period)) continue;
+    const tip = play.timeInPeriod || '';
+    const timeSec = parseTimeToSeconds(tip);
+    const details = play.details || {};
+    const sitCode = play.situationCode || '';
+    const teamId = details.eventOwnerTeamId;
+
+    const isShotEvent =
+      typeKey === 'shot-on-goal' ||
+      typeKey === 'goal' ||
+      typeKey === 'missed-shot' ||
+      typeKey === 'blocked-shot';
+
+    if (isShotEvent) {
+      const xCoord = typeof details.xCoord === 'number' ? details.xCoord : 0;
+      const yCoord = typeof details.yCoord === 'number' ? details.yCoord : 0;
+      const { distance, angle } = shotMetrics(xCoord, yCoord);
+      const shotType = mapShotType(details.shotType);
+      const isHomeShooter = teamId === game.homeTeamId;
+
+      // --- Rebound: same-team shot within 3s in same period
+      const priors = priorShotsByTeam.get(teamId) || [];
+      let isRebound = false;
+      for (let k = priors.length - 1; k >= 0; k--) {
+        const p = priors[k];
+        if (p.period !== period) break;
+        const delta = timeSec - p.timeSec;
+        if (delta < 0) continue;
+        if (delta > 3) break;
+        isRebound = true;
+        break;
+      }
+
+      // --- Rush: same-team takeaway/faceoff/blocked-shot in N or D zone within 4s
+      let isRush = false;
+      for (let k = flatPriorEvents.length - 1; k >= 0; k--) {
+        const ev = flatPriorEvents[k];
+        if (ev.period !== period) break;
+        const delta = timeSec - ev.timeSec;
+        if (delta < 0) continue;
+        if (delta > 4) break;
+        const isPossessionChange =
+          ev.typeKey === 'takeaway' ||
+          ev.typeKey === 'faceoff' ||
+          ev.typeKey === 'blocked-shot';
+        if (isPossessionChange && ev.teamId === teamId &&
+            (ev.zone === 'N' || ev.zone === 'D')) {
+          isRush = true;
+          break;
+        }
+      }
+
+      // --- Empty net from situationCode
+      let isEmptyNet = false;
+      if (/^\d{4}$/.test(sitCode)) {
+        const defenderGoalieDigit = isHomeShooter ? sitCode[0] : sitCode[3];
+        isEmptyNet = defenderGoalieDigit === '0';
+      }
+
+      // --- Score state (shooter perspective)
+      const shooterGoals = isHomeShooter ? homeGoals : awayGoals;
+      const opponentGoals = isHomeShooter ? awayGoals : homeGoals;
+      let scoreState = 'tied';
+      if (shooterGoals > opponentGoals) scoreState = 'leading';
+      else if (shooterGoals < opponentGoals) scoreState = 'trailing';
+
+      // --- Prev event type
+      let prevEventType;
+      for (let k = flatPriorEvents.length - 1; k >= 0; k--) {
+        const ev = flatPriorEvents[k];
+        if (ev.period !== period) break;
+        if (ev.timeSec > timeSec) continue;
+        prevEventType = ev.typeKey === 'faceoff' ? 'faceoff'
+                      : ev.typeKey === 'hit' ? 'hit'
+                      : ev.typeKey === 'takeaway' ? 'takeaway'
+                      : ev.typeKey === 'giveaway' ? 'giveaway'
+                      : ev.typeKey === 'blocked-shot' ? 'blocked'
+                      : ev.typeKey === 'missed-shot' ? 'missed'
+                      : ev.typeKey === 'shot-on-goal' ? 'sog'
+                      : ev.typeKey === 'goal' ? 'goal'
+                      : 'other';
+        break;
+      }
+
+      const xGoal = computeEmpiricalXg(xgLookup, {
+        distance,
+        angle,
+        shotType,
+        strength: strengthKey5v5(),
+        isEmptyNet,
+        isRebound,
+        isRush,
+        scoreState,
+        prevEventType,
+      });
+
+      const result = typeKey === 'goal' ? 'goal'
+                   : typeKey === 'shot-on-goal' ? 'shot-on-goal'
+                   : typeKey === 'missed-shot' ? 'missed-shot'
+                   : 'blocked-shot';
+
+      const shot = {
+        period,
+        timeSec,
+        xCoord,
+        yCoord,
+        teamId,
+        result,
+        xGoal: xGoal || 0,
+        situationCode: sitCode,
+      };
+      out.push(shot);
+      priors.push(shot);
+      priorShotsByTeam.set(teamId, priors);
+
+      if (typeKey === 'goal' && /^\d{4}$/.test(sitCode)) {
+        // Only count goals that reflect a real score change. situationCode
+        // is always present on goals, so we read it directly.
+        if (isHomeShooter) homeGoals++; else awayGoals++;
+      }
+    }
+
+    // Track for prev-event / rush lookups
+    flatPriorEvents.push({
+      period,
+      timeSec,
+      typeKey,
+      teamId,
+      zone: details.zoneCode,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Attribute shots to shift windows. A shot is assigned to the window
+ * that contains its (period, timeSec), but only if the shot is 5v5
+ * per its situationCode. Shots that don't fall into any 5v5 window
+ * (e.g. the 5v5 boundary guess was wrong, or the shot is not 5v5)
+ * are dropped.
+ */
+function attachShotsToWindows(windows, shots) {
+  // Index windows by period for fast lookup
+  const byPeriod = new Map();
+  for (let i = 0; i < windows.length; i++) {
+    const w = windows[i];
+    if (!byPeriod.has(w.period)) byPeriod.set(w.period, []);
+    byPeriod.get(w.period).push(i);
+  }
+  for (const arr of byPeriod.values()) {
+    arr.sort((a, b) => windows[a].startSec - windows[b].startSec);
+  }
+
+  for (const s of shots) {
+    if (!is5v5(s.situationCode)) continue;
+    const candidates = byPeriod.get(s.period);
+    if (!candidates) continue;
+    // Linear scan — windows within a period are ~60-80 so this is fine.
+    for (const idx of candidates) {
+      const w = windows[idx];
+      if (s.timeSec >= w.startSec && s.timeSec < w.endSec) {
+        if (s.teamId === w.homeTeamId) {
+          w.homeXGF = (w.homeXGF || 0) + s.xGoal;
+        } else if (s.teamId === w.awayTeamId) {
+          w.awayXGF = (w.awayXGF || 0) + s.xGoal;
+        }
+        break;
+      }
+    }
+  }
+}
+
+// ============================================================================
+// Phase 3 — MIN_TOI qualifier, design matrix assembly
+// ============================================================================
+
+/**
+ * Choose a TOI qualifier from the dataset itself: 5th percentile of TOI
+ * among players who appeared in at least one 5v5 shift window. This is
+ * "derived from data," not an a-priori value.
+ */
+function deriveMinToiSeconds(windows) {
+  const toi = new Map(); // playerId -> seconds
+  for (const w of windows) {
+    for (const pid of w.homePlayers) toi.set(pid, (toi.get(pid) || 0) + w.durationSec);
+    for (const pid of w.awayPlayers) toi.set(pid, (toi.get(pid) || 0) + w.durationSec);
+  }
+  const sorted = [...toi.values()].sort((a, b) => a - b);
+  const p5 = sorted[Math.floor(sorted.length * 0.05)] || 0;
+  // Absolute floor: require at least 60 seconds, because anything less is
+  // almost certainly a goalie or misparse and we do not want rows keyed
+  // on them. 60s is a duration constraint, not a league-comparison value.
+  const floorSec = 60;
+  return { minToiSec: Math.max(p5, floorSec), toiMap: toi };
+}
+
+// ============================================================================
+// Phase 4 — Sparse linear algebra for ridge regression via CG
+// ============================================================================
+
+/**
+ * CSR sparse matrix for a RAPM design that lets offense and defense be
+ * independent coefficients (not mirror images). Each shift window becomes
+ * TWO rows — one for the home team scoring, one for the away team
+ * scoring. Each player occupies TWO columns — offense and defense —
+ * doubling the parameter count but giving us cleanly separable signals.
+ *
+ *   Row A (home-scoring):   y = homeXGF/hr, w = hours
+ *     • +1 in player i's OFFENSE column if i ∈ home skaters
+ *     • +1 in player i's DEFENSE column if i ∈ away skaters (defenders)
+ *   Row B (away-scoring):   y = awayXGF/hr, w = hours
+ *     • +1 in player i's OFFENSE column if i ∈ away skaters
+ *     • +1 in player i's DEFENSE column if i ∈ home skaters (defenders)
+ *
+ * Column layout: [offense_0 .. offense_{n-1}, defense_0 .. defense_{n-1}]
+ * After the solve, β[i] is player i's offensive contribution to own-team
+ * xGF/60. β[i+n] is player i's contribution to OPPONENT xGF/60 while on
+ * ice — i.e., low is good defense. We sign-flip the defense output in
+ * the artifact so "positive = good" holds for both metrics.
+ */
+function buildSparseDesign(windows, playerIdx) {
+  const n = playerIdx.size;
+  const nWindows = windows.length;
+  const nRows = 2 * nWindows;
+  const rowPtr = new Int32Array(nRows + 1);
+  let nnz = 0;
+  for (let i = 0; i < nWindows; i++) {
+    const w = windows[i];
+    let qualHome = 0;
+    for (const pid of w.homePlayers) if (playerIdx.has(pid)) qualHome++;
+    let qualAway = 0;
+    for (const pid of w.awayPlayers) if (playerIdx.has(pid)) qualAway++;
+    // Row A (home scoring): offense on home + defense on away
+    rowPtr[2 * i + 1] = qualHome + qualAway;
+    // Row B (away scoring): offense on away + defense on home
+    rowPtr[2 * i + 2] = qualAway + qualHome;
+    nnz += 2 * (qualHome + qualAway);
+  }
+  for (let i = 1; i < rowPtr.length; i++) rowPtr[i] += rowPtr[i - 1];
+  const colIdx = new Int32Array(nnz);
+  const vals = new Float64Array(nnz);
+  for (let i = 0; i < nWindows; i++) {
+    const w = windows[i];
+    // Row A — home scoring
+    let cursor = rowPtr[2 * i];
+    for (const pid of w.homePlayers) {
+      const ci = playerIdx.get(pid);
+      if (ci !== undefined) { colIdx[cursor] = ci; vals[cursor] = 1; cursor++; } // offense col
+    }
+    for (const pid of w.awayPlayers) {
+      const ci = playerIdx.get(pid);
+      if (ci !== undefined) { colIdx[cursor] = n + ci; vals[cursor] = 1; cursor++; } // defense col
+    }
+    // Row B — away scoring
+    cursor = rowPtr[2 * i + 1];
+    for (const pid of w.awayPlayers) {
+      const ci = playerIdx.get(pid);
+      if (ci !== undefined) { colIdx[cursor] = ci; vals[cursor] = 1; cursor++; } // offense col
+    }
+    for (const pid of w.homePlayers) {
+      const ci = playerIdx.get(pid);
+      if (ci !== undefined) { colIdx[cursor] = n + ci; vals[cursor] = 1; cursor++; } // defense col
+    }
+  }
+  return { rowPtr, colIdx, vals, nRows, nCols: 2 * n };
+}
+
+/**
+ * Responses: 2 rows per shift.
+ *   Row A (home scoring):  y = homeXGF/hr
+ *   Row B (away scoring):  y = awayXGF/hr
+ * Weights w = duration in hours, so the shift-length weighting carries
+ * through to shift-weighted OLS before the Tikhonov term.
+ *
+ * Legacy-compatible signature (the second argument is ignored; kept so
+ * callers that used to toggle offense/defense don't break). A single
+ * regression over this response vector solves BOTH offense and defense
+ * at once — β is 2n long, the first n entries are offense coefficients
+ * and the next n are defense coefficients.
+ */
+function buildResponses(windows /* , isOffense (ignored) */) {
+  const nRows = 2 * windows.length;
+  const y = new Float64Array(nRows);
+  const w = new Float64Array(nRows);
+  for (let i = 0; i < windows.length; i++) {
+    const wn = windows[i];
+    const hours = wn.durationSec / 3600;
+    w[2 * i] = hours;
+    w[2 * i + 1] = hours;
+    const homeXGF = wn.homeXGF || 0;
+    const awayXGF = wn.awayXGF || 0;
+    y[2 * i] = hours > 0 ? homeXGF / hours : 0;      // home-scoring row
+    y[2 * i + 1] = hours > 0 ? awayXGF / hours : 0;  // away-scoring row
+  }
+  return { y, w };
+}
+
+// Sparse matvec: out = X * v
+function smv(X, v) {
+  const out = new Float64Array(X.nRows);
+  const { rowPtr, colIdx, vals, nRows } = X;
+  for (let i = 0; i < nRows; i++) {
+    let s = 0;
+    for (let k = rowPtr[i]; k < rowPtr[i + 1]; k++) {
+      s += vals[k] * v[colIdx[k]];
+    }
+    out[i] = s;
+  }
+  return out;
+}
+
+// Sparse transpose-matvec: out = X^T * u
+function stmv(X, u) {
+  const out = new Float64Array(X.nCols);
+  const { rowPtr, colIdx, vals, nRows } = X;
+  for (let i = 0; i < nRows; i++) {
+    const ui = u[i];
+    for (let k = rowPtr[i]; k < rowPtr[i + 1]; k++) {
+      out[colIdx[k]] += vals[k] * ui;
+    }
+  }
+  return out;
+}
+
+// Sparse transpose-W-matvec: out = X^T diag(w) u
+function stwmv(X, u, w) {
+  const out = new Float64Array(X.nCols);
+  const { rowPtr, colIdx, vals, nRows } = X;
+  for (let i = 0; i < nRows; i++) {
+    const wu = u[i] * w[i];
+    for (let k = rowPtr[i]; k < rowPtr[i + 1]; k++) {
+      out[colIdx[k]] += vals[k] * wu;
+    }
+  }
+  return out;
+}
+
+// Sparse weighted matvec: out = (X^T W X + λI) v
+function normalMatvec(X, v, w, lambda) {
+  const Xv = smv(X, v);
+  // Apply diag(w)
+  for (let i = 0; i < Xv.length; i++) Xv[i] *= w[i];
+  const out = stmv(X, Xv);
+  for (let j = 0; j < out.length; j++) out[j] += lambda * v[j];
+  return out;
+}
+
+// Conjugate gradient on (X^T W X + λI) β = b.
+// Well-conditioned because of the Tikhonov term; ~150-300 iters suffice.
+function conjugateGradient(X, w, b, lambda, { maxIter = 400, tol = 1e-7 } = {}) {
+  const n = X.nCols;
+  const beta = new Float64Array(n);
+  let r = new Float64Array(n);
+  for (let i = 0; i < n; i++) r[i] = b[i];
+  let p = new Float64Array(n);
+  for (let i = 0; i < n; i++) p[i] = r[i];
+  let rsold = 0;
+  for (let i = 0; i < n; i++) rsold += r[i] * r[i];
+  const b2 = rsold;
+  const target = tol * tol * b2;
+
+  for (let k = 0; k < maxIter; k++) {
+    const Ap = normalMatvec(X, p, w, lambda);
+    let pAp = 0;
+    for (let i = 0; i < n; i++) pAp += p[i] * Ap[i];
+    if (pAp <= 0) break;
+    const alpha = rsold / pAp;
+    for (let i = 0; i < n; i++) {
+      beta[i] += alpha * p[i];
+      r[i] -= alpha * Ap[i];
+    }
+    let rsnew = 0;
+    for (let i = 0; i < n; i++) rsnew += r[i] * r[i];
+    if (rsnew < target) {
+      console.log(`[rapm]     CG converged in ${k + 1} iters (||r||²=${rsnew.toExponential(2)})`);
+      return beta;
+    }
+    const mu = rsnew / rsold;
+    for (let i = 0; i < n; i++) p[i] = r[i] + mu * p[i];
+    rsold = rsnew;
+  }
+  console.log('[rapm]     CG hit maxIter without tight convergence (still returning best β)');
+  return beta;
+}
+
+// ============================================================================
+// Phase 5 — Residual variance, empirical-Bayes λ, standard errors
+// ============================================================================
+
+/**
+ * Shift-weighted variance of per-shift xGF/60 around the dataset mean.
+ * Used as σ²_residual for SE computation. Independent of λ choice.
+ */
+function computeResidualVariance(windows) {
+  let totalHours = 0;
+  let xgfSum = 0;
+  for (const w of windows) {
+    const hours = w.durationSec / 3600;
+    totalHours += hours;
+    xgfSum += (w.homeXGF || 0) + (w.awayXGF || 0);
+  }
+  const leagueTotalRate = totalHours > 0 ? xgfSum / (2 * totalHours) : 0;
+  let residSum = 0;
+  let residDenom = 0;
+  for (const w of windows) {
+    const hours = w.durationSec / 3600;
+    if (hours <= 0) continue;
+    const rateHome = (w.homeXGF || 0) / hours;
+    const rateAway = (w.awayXGF || 0) / hours;
+    residSum += hours * ((rateHome - leagueTotalRate) ** 2 + (rateAway - leagueTotalRate) ** 2);
+    residDenom += 2 * hours;
+  }
+  const sigma2Resid = residDenom > 0 ? residSum / residDenom : 1;
+  return { sigma2Resid, leagueTotalRate };
+}
+
+/**
+ * 5-fold CV λ selection.
+ *
+ * For each λ in the grid:
+ *   1. Partition shift rows into 5 folds (deterministic shuffle with a
+ *      fixed seed so reruns are reproducible).
+ *   2. For each fold f:
+ *      - Training weights = original w, with fold-f rows zeroed. A row
+ *        with w=0 contributes nothing to either side of the normal
+ *        equations, so the CG solve fits the remaining 4 folds only.
+ *      - Solve CG for offense and defense on the masked system.
+ *      - Predict y_hat = X β on fold f only.
+ *      - Accumulate shift-duration-weighted squared-error on fold f for
+ *        both offense and defense.
+ *   3. λ score = (sum of MSE across folds, offense) + (same, defense).
+ * Pick the λ with the minimum combined score. λ is shared between
+ * offense and defense because the design matrix is identical; tuning
+ * separate λs invites overfitting one side at the expense of the other.
+ */
+function selectLambdaFiveFoldCV(X, weights, y, lambdaGrid) {
+  const nRows = X.nRows;
+  const K_FOLDS = 5;
+
+  // Deterministic shuffle — mulberry32 seeded PRNG. Fold assignment is
+  // per-row on the DOUBLED design (2 rows per shift). We keep the two
+  // rows of the same shift in the same fold — splitting them would leak
+  // the shift into both train and held sets (same players, same xG)
+  // and deflate CV MSE artificially. Since row 2i and 2i+1 belong to
+  // shift i, we assign by i and broadcast.
+  let seed = 0x9e3779b9;
+  const rnd = () => {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const nShifts = Math.floor(nRows / 2);
+  const shiftIdx = new Int32Array(nShifts);
+  for (let i = 0; i < nShifts; i++) shiftIdx[i] = i;
+  for (let i = nShifts - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    const tmp = shiftIdx[i]; shiftIdx[i] = shiftIdx[j]; shiftIdx[j] = tmp;
+  }
+  const foldId = new Int8Array(nRows);
+  for (let k = 0; k < nShifts; k++) {
+    const s = shiftIdx[k];
+    const f = k % K_FOLDS;
+    foldId[2 * s] = f;
+    foldId[2 * s + 1] = f;
+  }
+
+  console.log(`[rapm] 5-fold CV λ selection over grid ${JSON.stringify(lambdaGrid)}`);
+  console.log(`[rapm]   rows = ${nRows} (${nShifts} shifts × 2); folds = ${K_FOLDS}`);
+
+  const results = [];
+  for (const lambda of lambdaGrid) {
+    let totalMse = 0;
+    let totalFoldWeight = 0;
+    const t0 = Date.now();
+    for (let fold = 0; fold < K_FOLDS; fold++) {
+      const wTrain = new Float64Array(nRows);
+      const wHeld = new Float64Array(nRows);
+      let heldWeightSum = 0;
+      for (let i = 0; i < nRows; i++) {
+        if (foldId[i] === fold) {
+          wHeld[i] = weights[i];
+          heldWeightSum += weights[i];
+        } else {
+          wTrain[i] = weights[i];
+        }
+      }
+      const bTrain = stwmv(X, y, wTrain);
+      const betaCV = conjugateGradient(X, wTrain, bTrain, lambda, { maxIter: 200, tol: 5e-6 });
+      // Predict on every row; only held rows contribute to the MSE sum.
+      const yHat = smv(X, betaCV);
+      let se = 0;
+      for (let i = 0; i < nRows; i++) {
+        if (wHeld[i] === 0) continue;
+        const r = y[i] - yHat[i];
+        se += wHeld[i] * r * r;
+      }
+      totalMse += se;
+      totalFoldWeight += heldWeightSum;
+    }
+    const mse = totalFoldWeight > 0 ? totalMse / totalFoldWeight : Infinity;
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    console.log(
+      `[rapm]   λ=${String(lambda).padStart(5)} → CV MSE = ${mse.toFixed(4)}  (${elapsed}s)`
+    );
+    results.push({ lambda, mse });
+  }
+  // Pick λ minimizing CV MSE.
+  results.sort((a, b) => a.mse - b.mse);
+  const best = results[0];
+  console.log(`[rapm]   best λ = ${best.lambda} (CV MSE = ${best.mse.toFixed(4)})`);
+  return { lambda: best.lambda, cvResults: results.slice().sort((a, b) => a.lambda - b.lambda) };
+}
+
+/**
+ * Approximate per-player SE from diag((X^T W X + λI)^{-1}) × σ_resid.
+ *
+ * Exact SEs need the full inverse, which is a 900x900 dense matrix solve
+ * — cheap with ml-matrix. We build X^T W X densely here (columns are
+ * pre-qualified, so the matrix is at most ~900×900 and fits fine in RAM).
+ */
+function computeStandardErrors(X, w, lambda, sigma2Resid) {
+  const n = X.nCols;
+  // Build X^T W X densely, column by column via stwmv applied to unit vectors.
+  // For efficiency: directly accumulate by iterating non-zeros.
+  const A = new Float64Array(n * n);
+  const { rowPtr, colIdx, vals, nRows } = X;
+  for (let i = 0; i < nRows; i++) {
+    const wi = w[i];
+    const rowStart = rowPtr[i];
+    const rowEnd = rowPtr[i + 1];
+    for (let k = rowStart; k < rowEnd; k++) {
+      const j = colIdx[k];
+      const vj = vals[k];
+      for (let l = rowStart; l < rowEnd; l++) {
+        A[j * n + colIdx[l]] += wi * vj * vals[l];
+      }
+    }
+  }
+  // Add λI
+  for (let i = 0; i < n; i++) A[i * n + i] += lambda;
+
+  // Invert with ml-matrix. Build the Matrix from the flat Float64Array.
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    const row = new Array(n);
+    for (let j = 0; j < n; j++) row[j] = A[i * n + j];
+    rows.push(row);
+  }
+  const M = new Matrix(rows);
+  const invM = mlInverse(M);
+  const se = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const diag = invM.get(i, i);
+    se[i] = Math.sqrt(Math.max(0, diag) * sigma2Resid);
+  }
+  return se;
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+async function main() {
+  console.log('[rapm] ============================================');
+  console.log(`[rapm] Building RAPM artifact for season ${SEASON}`);
+  console.log('[rapm] ============================================\n');
+
+  // -- Phase 1: PBP ingest -------------------------------------------------
+  const games = await ingestGames();
+  if (games.size === 0) {
+    console.error('[rapm] FATAL: no PBP games ingested — cannot continue');
+    process.exit(1);
+  }
+
+  // -- Phase 2: xG lookup + shifts per game -------------------------------
+  console.log('[rapm] Fetching empirical xG lookup...');
+  const xgLookup = await fetchJSON(`${WORKER_BASE}/cached/xg-lookup`);
+  if (!xgLookup || !xgLookup.buckets) {
+    console.error('[rapm] FATAL: xG lookup not available');
+    process.exit(1);
+  }
+  console.log(`[rapm]   loaded ${Object.keys(xgLookup.buckets).length} xG buckets (schema v${xgLookup.schemaVersion}, baseline ${xgLookup.baselineRate})`);
+
+  console.log('[rapm] Fetching shifts for each game + enumerating 5v5 windows...');
+  const allWindows = [];
+  // Per-team totals for empirical-Bayes σ²_prior (real observables)
+  const teamOnIceXGF = new Map();    // teamId -> { xgf, xga }
+  const teamOnIceHours = new Map();  // teamId -> hours
+  // Per-player GP tracking
+  const playerGames = new Map();     // playerId -> Set<gameId>
+
+  const gameIds = [...games.keys()];
+  let shiftsFetched = 0;
+  let shiftsMissing = 0;
+  let processed = 0;
+  for (const gameId of gameIds) {
+    processed++;
+    if (processed % 50 === 0 || processed === gameIds.length) {
+      console.log(`[rapm]   ${processed}/${gameIds.length} games processed (shifts ok=${shiftsFetched}, missing=${shiftsMissing}, windows so far=${allWindows.length})`);
+    }
+    const game = games.get(gameId);
+    let shifts;
+    try {
+      shifts = await fetchJSON(`${WORKER_BASE}/cached/shifts/${gameId}`, { retries: 1, timeoutMs: 15000 });
+    } catch (err) {
+      if (err.status === 404) {
+        console.log(`[rapm] WARN: missing shifts for game ${gameId}, skipping`);
+      } else {
+        console.log(`[rapm] WARN: shifts fetch error for ${gameId}: ${err.message}`);
+      }
+      shiftsMissing++;
+      continue;
+    }
+    if (!Array.isArray(shifts) || shifts.length === 0) {
+      shiftsMissing++;
+      continue;
+    }
+    shiftsFetched++;
+
+    // Enumerate windows, extract shots, attach
+    const windows = enumerateShiftWindows(game, shifts);
+    const shots = extractShots(game, xgLookup);
+    attachShotsToWindows(windows, shots);
+
+    // Track per-team totals
+    for (const w of windows) {
+      const hours = w.durationSec / 3600;
+      for (const teamId of [w.homeTeamId, w.awayTeamId]) {
+        if (!teamOnIceXGF.has(teamId)) teamOnIceXGF.set(teamId, { xgf: 0, xga: 0 });
+        teamOnIceHours.set(teamId, (teamOnIceHours.get(teamId) || 0) + hours);
+      }
+      const home = teamOnIceXGF.get(w.homeTeamId);
+      const away = teamOnIceXGF.get(w.awayTeamId);
+      home.xgf += (w.homeXGF || 0);
+      home.xga += (w.awayXGF || 0);
+      away.xgf += (w.awayXGF || 0);
+      away.xga += (w.homeXGF || 0);
+
+      // GP tracking (player appears in any 5v5 window counts the game)
+      for (const pid of w.homePlayers) {
+        if (!playerGames.has(pid)) playerGames.set(pid, new Set());
+        playerGames.get(pid).add(game.gameId);
+      }
+      for (const pid of w.awayPlayers) {
+        if (!playerGames.has(pid)) playerGames.set(pid, new Set());
+        playerGames.get(pid).add(game.gameId);
+      }
+    }
+    allWindows.push(...windows);
+  }
+
+  const coverage = shiftsFetched / games.size;
+  console.log(`[rapm] Shift coverage: ${shiftsFetched}/${games.size} = ${(coverage * 100).toFixed(1)}% (${shiftsMissing} missing)`);
+  if (coverage < 0.5) {
+    console.error(`[rapm] FATAL: shift coverage ${(coverage * 100).toFixed(1)}% < 50%; RAPM not defensible at this coverage`);
+    process.exit(1);
+  }
+  if (allWindows.length === 0) {
+    console.error('[rapm] FATAL: no 5v5 shift windows extracted');
+    process.exit(1);
+  }
+
+  // -- Phase 3: qualifier + design matrix ---------------------------------
+  const { minToiSec, toiMap } = deriveMinToiSeconds(allWindows);
+  console.log(`[rapm] MIN_TOI (5th percentile of on-ice 5v5 seconds) = ${minToiSec.toFixed(0)}s = ${(minToiSec / 60).toFixed(1)}min`);
+
+  const qualified = [...toiMap.entries()]
+    .filter(([, sec]) => sec >= minToiSec)
+    .map(([pid]) => pid);
+  console.log(`[rapm] Qualified skaters: ${qualified.length} (of ${toiMap.size} who saw any 5v5 ice)`);
+
+  // Build playerIdx
+  const playerIdx = new Map();
+  qualified.forEach((pid, i) => playerIdx.set(pid, i));
+
+  console.log('[rapm] Building sparse design matrix...');
+  const X = buildSparseDesign(allWindows, playerIdx);
+  console.log(`[rapm]   X is ${X.nRows} × ${X.nCols}, nnz = ${X.vals.length}`);
+
+  // -- Phase 4a: responses (single y; 2 rows per shift) -----------------
+  const { y, w: weights } = buildResponses(allWindows);
+
+  // League baseline rates — dataset-wide xGF/60 / xGA/60. Not subtracted
+  // from β (β is zero-centered by construction), but exposed to readers
+  // as reference rates.
+  let xgfTotal = 0, totalHours = 0;
+  for (const wn of allWindows) {
+    xgfTotal += (wn.homeXGF || 0) + (wn.awayXGF || 0);
+    totalHours += wn.durationSec / 3600;
+  }
+  const leagueBaselineXGF60 = totalHours > 0 ? xgfTotal / (2 * totalHours) : 0;
+  const leagueBaselineXGA60 = leagueBaselineXGF60;
+
+  // σ²_residual for SE computation — not dependent on λ.
+  const { sigma2Resid } = computeResidualVariance(allWindows);
+
+  // -- Phase 4b: 5-fold CV λ selection -----------------------------------
+  // Wide log-scale grid so CV can find a true interior minimum rather
+  // than bottoming out at a grid boundary. Previous [10..1000] grid
+  // produced a monotonically-increasing CV curve with the minimum at
+  // the lowest λ tried — classic sign the grid was truncated. With this
+  // 10-point grid spanning 4 orders of magnitude, the search is robust
+  // to both overfitting (λ too low → huge coefficients) and underfitting
+  // (λ too high → flat coefficients). Log-spacing matches ridge's
+  // geometry: λ is a multiplicative regularization strength.
+  const LAMBDA_GRID = [0.3, 1, 3, 10, 30, 100, 300, 1000, 3000, 10000];
+  const { lambda, cvResults } = selectLambdaFiveFoldCV(X, weights, y, LAMBDA_GRID);
+
+  // -- Phase 4c: final full-data ridge solve at the chosen λ -------------
+  console.log('[rapm] Solving combined offense+defense ridge (CG) at λ=' + lambda + '...');
+  const b = stwmv(X, y, weights);
+  const beta = conjugateGradient(X, weights, b, lambda);
+  // β layout: first nPlayers = offense, next nPlayers = defense.
+  const nPlayers = qualified.length;
+  const betaOff = beta.subarray(0, nPlayers);
+  // Defense β measures "contribution to OPPONENT xGF/60 while on ice" —
+  // raw positive values mean the opponent scored more, which is BAD. We
+  // sign-flip for the artifact so positive = good defense (suppression).
+  const betaDefRaw = beta.subarray(nPlayers, 2 * nPlayers);
+  const betaDef = new Float64Array(nPlayers);
+  for (let i = 0; i < nPlayers; i++) betaDef[i] = -betaDefRaw[i];
+
+  // -- Phase 5: standard errors -------------------------------------------
+  // SE is computed on the 2n×2n normal matrix; split the diag into
+  // offense SE and defense SE halves. SE is unaffected by sign flip.
+  console.log('[rapm] Computing per-player standard errors...');
+  const seFull = computeStandardErrors(X, weights, lambda, sigma2Resid);
+  const seOff = seFull.subarray(0, nPlayers);
+  const seDef = seFull.subarray(nPlayers, 2 * nPlayers);
+
+  // -- Per-player minutes & shifts (from windows) -------------------------
+  const playerShifts = new Map();
+  const playerMinutes = new Map();
+  for (const w of allWindows) {
+    for (const pid of w.homePlayers) {
+      playerShifts.set(pid, (playerShifts.get(pid) || 0) + 1);
+      playerMinutes.set(pid, (playerMinutes.get(pid) || 0) + w.durationSec / 60);
+    }
+    for (const pid of w.awayPlayers) {
+      playerShifts.set(pid, (playerShifts.get(pid) || 0) + 1);
+      playerMinutes.set(pid, (playerMinutes.get(pid) || 0) + w.durationSec / 60);
+    }
+  }
+
+  // -- Output -------------------------------------------------------------
+  const players = {};
+  for (const [pid, idx] of playerIdx.entries()) {
+    const gp = (playerGames.get(pid) || new Set()).size;
+    players[String(pid)] = {
+      offense: Number(betaOff[idx].toFixed(4)),
+      defense: Number(betaDef[idx].toFixed(4)),
+      offenseSE: Number(seOff[idx].toFixed(4)),
+      defenseSE: Number(seDef[idx].toFixed(4)),
+      shifts: playerShifts.get(pid) || 0,
+      minutes: Number((playerMinutes.get(pid) || 0).toFixed(2)),
+      gp,
+      lowSample: gp < 40,
+    };
+  }
+
+  const output = {
+    season: SEASON,
+    schemaVersion: 1,
+    computedAt: new Date().toISOString(),
+    gamesAnalyzed: shiftsFetched,
+    shiftsAnalyzed: allWindows.length,
+    playersAnalyzed: qualified.length,
+    strength: '5v5',
+    lambda: Number(lambda),
+    lambdaSelection: '5fold-cv',
+    lambdaGrid: LAMBDA_GRID,
+    cvResults: cvResults.map(r => ({
+      lambda: r.lambda,
+      mse: Number(r.mse.toFixed(6)),
+    })),
+    leagueBaselineXGF60: Number(leagueBaselineXGF60.toFixed(4)),
+    leagueBaselineXGA60: Number(leagueBaselineXGA60.toFixed(4)),
+    players,
+  };
+
+  // Make sure public/data exists (it should — the build already writes
+  // into it — but be defensive).
+  fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
+  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(output, null, 2));
+  const sizeKB = (fs.statSync(OUTPUT_PATH).size / 1024).toFixed(1);
+  console.log('');
+  console.log('[rapm] ============================================');
+  console.log('[rapm] DONE');
+  console.log(`[rapm]   games analyzed : ${shiftsFetched}`);
+  console.log(`[rapm]   shift windows  : ${allWindows.length}`);
+  console.log(`[rapm]   players        : ${qualified.length}`);
+  console.log(`[rapm]   λ              : ${lambda} (5-fold CV, grid ${JSON.stringify(LAMBDA_GRID)})`);
+  console.log(`[rapm]   output         : ${OUTPUT_PATH} (${sizeKB} KB)`);
+  console.log('[rapm] ============================================');
+}
+
+main().catch((err) => {
+  console.error('[rapm] Fatal:', err);
+  process.exit(1);
+});

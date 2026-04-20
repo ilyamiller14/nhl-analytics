@@ -1,0 +1,168 @@
+/**
+ * RAPM Impact Card — isolated xG/60 offense + defense coefficients
+ * surfaced on the player profile. Visual hierarchy mirrors the WAR
+ * headline tile (two big numbers, muted meta row below).
+ */
+
+.rapm-card {
+  color: var(--chart-text);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.rapm-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rapm-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--chart-title);
+}
+
+.rapm-card-subtitle {
+  font-size: 0.78rem;
+  color: var(--chart-muted);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.rapm-card-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+}
+
+.rapm-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-md) var(--space-lg);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.7), rgba(30, 41, 59, 0.5));
+  border: 1px solid var(--chart-border);
+  border-radius: var(--radius-md);
+}
+
+.rapm-metric-label {
+  font-size: 0.7rem;
+  color: var(--chart-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.rapm-metric-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--chart-value);
+}
+
+.rapm-metric-value.pos { color: var(--chart-positive); }
+.rapm-metric-value.neg { color: var(--chart-negative); }
+
+.rapm-metric-se {
+  font-size: 0.85rem;
+  color: var(--chart-muted);
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+  font-weight: 500;
+}
+
+.rapm-metric-unit {
+  font-size: 0.72rem;
+  color: var(--chart-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rapm-metric-rank {
+  font-size: 0.78rem;
+  color: var(--chart-value);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+.rapm-twoway {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--chart-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+}
+
+.rapm-twoway-label {
+  color: var(--chart-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.rapm-twoway-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--chart-value);
+}
+
+.rapm-twoway-value.pos { color: var(--chart-positive); }
+.rapm-twoway-value.neg { color: var(--chart-negative); }
+
+.rapm-twoway-rank {
+  color: var(--chart-value);
+  font-variant-numeric: tabular-nums;
+}
+
+.rapm-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  align-items: center;
+  font-size: 0.72rem;
+  color: var(--chart-muted);
+  font-variant-numeric: tabular-nums;
+  border-top: 1px solid var(--chart-border);
+  padding-top: var(--space-sm);
+}
+
+.rapm-card-footer .rapm-low-sample {
+  color: var(--chart-muted);
+  font-style: italic;
+}
+
+.rapm-card-footer a {
+  color: var(--chart-blue);
+  text-decoration: none;
+}
+
+.rapm-card-footer a:hover {
+  text-decoration: underline;
+}
+
+.rapm-card-empty {
+  padding: var(--space-lg);
+  border: 1px dashed var(--gray-700);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--gray-400);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 600px) {
+  .rapm-card-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .rapm-metric-value {
+    font-size: 1.9rem;
+  }
+}

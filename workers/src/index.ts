@@ -52,7 +52,24 @@ const NHL_TEAMS = [
   'SJS', 'STL', 'TBL', 'TOR', 'UTA', 'VAN', 'VGK', 'WPG', 'WSH',
 ];
 
-const CURRENT_SEASON = '20252026';
+/**
+ * Current NHL season, 8-digit format (e.g. "20252026").
+ *
+ * NHL seasons run October → June of the following year. We treat
+ * September 1 as the cutover: dates Sep 1 – Dec 31 belong to the
+ * season starting that year (YYYY/YYYY+1); dates Jan 1 – Aug 31 belong
+ * to the season that started the previous year (YYYY-1/YYYY).
+ *
+ * This means the first cron run after September 1 each year
+ * automatically warms the new season's data — no manual bump needed.
+ */
+function computeCurrentSeason(now: Date = new Date()): string {
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth(); // 0-indexed: 0=Jan, 8=Sep
+  const startYear = month >= 8 ? year : year - 1;
+  return `${startYear}${startYear + 1}`;
+}
+const CURRENT_SEASON = computeCurrentSeason();
 
 function getCacheTTL(path: string): number {
   for (const [pattern, ttl] of Object.entries(CACHE_TTLS)) {
@@ -365,6 +382,38 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
+  // Cached shifts for a single game.
+  const shiftsMatch = url.pathname.match(/^\/cached\/shifts\/(\d+)$/);
+  if (shiftsMatch) {
+    const gameId = shiftsMatch[1];
+    const cached = await env.NHL_CACHE.get(`game_shifts_${gameId}`, 'json');
+    if (cached) {
+      return new Response(JSON.stringify(cached), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'HIT' },
+      });
+    }
+    return new Response(JSON.stringify({ error: 'Shifts not cached yet for this game' }), {
+      status: 404,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // RAPM artifact passthrough — proxies the Pages-hosted JSON file.
+  if (url.pathname === '/cached/rapm') {
+    const rapmUrl = 'https://nhl-analytics.pages.dev/data/rapm-20252026.json';
+    const rapmResp = await fetch(rapmUrl, { cf: { cacheTtl: 3600 } } as RequestInit);
+    if (!rapmResp.ok) {
+      return new Response(JSON.stringify({ error: 'RAPM artifact not yet built' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const rapmBody = await rapmResp.text();
+    return new Response(rapmBody, {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   if (url.pathname === '/cached/build-war') {
     ctx.waitUntil(buildWAR(env));
     return new Response(JSON.stringify({
@@ -425,6 +474,27 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+  }
+
+  // Warm shift data for all 32 teams — runs in the background so the HTTP
+  // response returns immediately. Mirrors /cached/warm-all for PBP.
+  if (url.pathname === '/cached/warm-shifts-all') {
+    ctx.waitUntil((async () => {
+      for (const team of NHL_TEAMS) {
+        try {
+          await cacheTeamShifts(team, env);
+          console.log(`warm-shifts-all: ${team} done`);
+        } catch (err) {
+          console.error(`warm-shifts-all: ${team} failed:`, err);
+        }
+      }
+      console.log('warm-shifts-all: all 32 teams complete');
+    })());
+    return new Response(JSON.stringify({
+      message: 'Shift warming started for 32 teams; runs in background.',
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   if (url.pathname === '/cached/war-finalize') {
@@ -1162,13 +1232,16 @@ async function cacheTeamPBP(teamAbbrev: string, env: Env): Promise<number> {
     lastUpdated: new Date().toISOString(),
     gameCount: allGames.length,
   }), {
-    expirationTtl: 24 * 60 * 60, // 24 hours
+    expirationTtl: 7 * 24 * 60 * 60, // 7 days — completed-game PBP never changes
   });
 
-  // Also store the full team data for fast retrieval
+  // Also store the full team data for fast retrieval. 7-day TTL lets the
+  // nightly cron rotate through all 32 teams across several runs even
+  // when a single cron tick times out after ~8 teams (CPU budget). With
+  // 24h TTL that rotation never converged; with 7d it does.
   const cacheKey = `team_pbp_${teamAbbrev}_${CURRENT_SEASON}`;
   await env.NHL_CACHE.put(cacheKey, JSON.stringify(allGames), {
-    expirationTtl: 24 * 60 * 60,
+    expirationTtl: 7 * 24 * 60 * 60,
   });
 
   console.log(`Cached ${allGames.length} games for ${teamAbbrev}`);
@@ -3535,6 +3608,29 @@ async function handleScheduled(event: ScheduledEvent, env: Env, ctx: ExecutionCo
   } catch (error) {
     console.error('WAR pipeline failed:', error);
   }
+
+  // Phase 8: Shift data for all 32 teams — required for on-ice shift × shot
+  // aggregation in the WAR pipeline. Must run after PBP (Phase 1) so that
+  // completed-game shift charts are fully available in KV before the next
+  // WAR build consumes them.
+  console.log('Phase 8: Shift data for all teams...');
+  const shiftsStart = Date.now();
+  let shiftsTeamsProcessed = 0;
+  let totalShifts = 0;
+
+  for (const team of NHL_TEAMS) {
+    try {
+      const count = await cacheTeamShifts(team, env);
+      shiftsTeamsProcessed++;
+      totalShifts += count;
+      console.log(`Shifts ${team}: ${count} games (${shiftsTeamsProcessed}/${NHL_TEAMS.length} teams done)`);
+    } catch (error) {
+      console.error(`Error caching shifts for ${team}:`, error);
+    }
+  }
+
+  const shiftsDuration = Math.round((Date.now() - shiftsStart) / 1000);
+  console.log(`Shifts complete: ${shiftsTeamsProcessed} teams, ${totalShifts} total games in ${shiftsDuration}s`);
 
   const totalDuration = Math.round((Date.now() - startTime) / 1000);
   console.log(`Daily update complete in ${totalDuration}s`);
