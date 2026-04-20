@@ -28,9 +28,21 @@ jobs:
       - name: Build
         run: npm run build
 
+      # CF_API_TOKEN in GitHub Secrets must include these permissions
+      # (create a new token at https://dash.cloudflare.com/profile/api-tokens
+      # with the "Edit Cloudflare Pages" template, which grants):
+      #   * Account → Cloudflare Pages → Edit
+      #   * Account → Account Settings → Read
+      #   * User → User Details → Read
+      # Without Account Settings + User Details the upload-token call
+      # fails with "Authentication error [code: 10000]" even though the
+      # account id is passed explicitly. The local `wrangler` CLI uses
+      # OAuth and bypasses this, which is why local deploys succeed
+      # while CI fails.
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=nhl-analytics --branch=production
+          wranglerVersion: "4.63.0"
+          command: pages deploy dist --project-name=nhl-analytics --branch=production --commit-dirty=true
