@@ -92,12 +92,14 @@ function PlayerProfile() {
     });
   }, [warTables, rapm]);
 
-  // Load the WAR tables lazily when the Deep tab is first opened.
+  // Load the WAR tables on mount — used by BOTH the Deep tab's
+  // WARBreakdown AND the shareable card's full-width WAR section. If
+  // we wait until the Deep tab is clicked, the share card on the
+  // Stats tab silently falls back to the old xG-trend/shot-map layout
+  // because warTables is still null.
   useEffect(() => {
-    if (activeTab === 'deep' && !warTables) {
-      loadWARTables().then(setWarTables);
-    }
-  }, [activeTab, warTables]);
+    if (!warTables) loadWARTables().then(setWarTables);
+  }, [warTables]);
 
   // Load RAPM coefficients once on mount — cached in the service and
   // consumed by the RAPM Impact card. The component renders an empty
