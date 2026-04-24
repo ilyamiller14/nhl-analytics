@@ -112,7 +112,9 @@ export default function AdvancedAnalyticsDashboard({
             <div className="metric-label">Shots Allowed</div>
             <div className="metric-value">{defensiveAnalytics.totalShotsAllowed}</div>
             <div className="metric-sublabel">
-              {(defensiveAnalytics.totalShotsAllowed / totalGames).toFixed(1)}/game
+              {totalGames > 0
+                ? `${(defensiveAnalytics.totalShotsAllowed / totalGames).toFixed(1)}/game`
+                : '—'}
             </div>
           </div>
           <div className="metric-card">

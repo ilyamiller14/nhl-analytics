@@ -8,6 +8,8 @@
  * - Period-by-period flow
  */
 
+import { calculateXG } from './xgModel';
+
 export interface MomentumEvent {
   eventId: number;
   period: number;
@@ -78,11 +80,30 @@ export function parseEventsForMomentum(allEvents: any[]): MomentumEvent[] {
       event.timeInPeriod || '00:00'
     );
 
-    // Calculate xG for shots
+    // Calculate xG for shots via the empirical model. Coordinates of 0
+    // are valid (center ice); only skip when the field is missing.
     let xGoal: number | undefined;
     if (eventType === 'shot' || eventType === 'goal') {
-      if (event.details.xCoord && event.details.yCoord) {
-        xGoal = calculateQuickXG(event.details.xCoord, event.details.yCoord);
+      const xCoord = event.details.xCoord;
+      const yCoord = event.details.yCoord;
+      if (xCoord !== undefined && yCoord !== undefined) {
+        const netX = xCoord >= 0 ? 89 : -89;
+        const distance = Math.sqrt((xCoord - netX) ** 2 + yCoord ** 2);
+        const distanceFromGoalLine = Math.abs(netX - xCoord);
+        const lateralDistance = Math.abs(yCoord);
+        const angle = distanceFromGoalLine > 0
+          ? Math.atan(lateralDistance / distanceFromGoalLine) * (180 / Math.PI)
+          : 90;
+        const lowerType = (event.details.shotType || '').toLowerCase();
+        const shotType: 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap' | 'unknown' =
+          !lowerType ? 'unknown' :
+          lowerType.includes('wrist') ? 'wrist' :
+          lowerType.includes('slap') ? 'slap' :
+          lowerType.includes('snap') ? 'snap' :
+          lowerType.includes('backhand') ? 'backhand' :
+          lowerType.includes('tip') || lowerType.includes('deflect') ? 'tip' :
+          lowerType.includes('wrap') ? 'wrap' : 'unknown';
+        xGoal = calculateXG({ distance, angle, shotType, strength: '5v5' }).xGoal;
       }
     }
 
@@ -118,24 +139,6 @@ function classifyMomentumEvent(
   if (typeDescKey === 'takeaway') return 'takeaway';
   if (typeDescKey === 'giveaway') return 'giveaway';
   return null;
-}
-
-/**
- * Calculate quick xG estimate using corrected angle formula
- */
-function calculateQuickXG(xCoord: number, yCoord: number): number {
-  const netX = xCoord >= 0 ? 89 : -89;
-  const distance = Math.sqrt(Math.pow(xCoord - netX, 2) + Math.pow(yCoord, 2));
-
-  // Correct angle: 0 = center, higher = more to the side
-  const distanceFromGoalLine = Math.abs(netX - xCoord);
-  const lateralDistance = Math.abs(yCoord);
-  const angle = distanceFromGoalLine > 0
-    ? Math.atan(lateralDistance / distanceFromGoalLine) * (180 / Math.PI)
-    : 90;
-
-  const logit = -0.5 - 0.045 * distance - 0.025 * angle;
-  return Math.max(0.005, Math.min(0.60, 1 / (1 + Math.exp(-logit))));
 }
 
 /**

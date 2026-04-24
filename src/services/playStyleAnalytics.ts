@@ -9,8 +9,8 @@
  * - Fingerprint metrics for radar chart
  */
 
-import type { GamePlayByPlay } from './playByPlayService';
-import { isHighDangerByCoord } from './xgModel';
+import type { GamePlayByPlay, ShotEvent } from './playByPlayService';
+import { isHighDangerByCoord, calculateShotEventXG } from './xgModel';
 import type {
   AttackSequence,
   AttackWaypoint,
@@ -399,7 +399,9 @@ export function buildAttackSequences(
     // Check for rebound
     const isRebound = isReboundShot(allEvents, shotIndex, teamId, endTime);
 
-    // Build outcome
+    // Build outcome — xG computed from the empirical model with
+    // rebound / rush / score-state / prev-event context derived from
+    // the full game event stream.
     const outcome: AttackOutcome = {
       type: 'shot',
       shotResult: shot.result === 'goal'
@@ -411,7 +413,10 @@ export function buildAttackSequences(
             : 'block',
       xCoord: shot.xCoord,
       yCoord: shot.yCoord,
-      xG: undefined, // Will be calculated separately if needed
+      xG: calculateShotEventXG(shot, {
+        priorShots: teamShots,
+        priorEvents: allEvents,
+      }),
     };
 
     // Classify archetype
@@ -1041,7 +1046,7 @@ export function extractShotLocations(
   const shots: ShotLocation[] = [];
 
   games.forEach((game) => {
-    const gameShots = game.shots.filter((shot) => {
+    const gameShots: ShotEvent[] = game.shots.filter((shot) => {
       if (shot.teamId !== teamId) return false;
       if (playerId && shot.shootingPlayerId !== playerId) return false;
       return shot.xCoord !== undefined && shot.yCoord !== undefined;
@@ -1062,7 +1067,10 @@ export function extractShotLocations(
             : shot.result === 'missed-shot'
               ? 'miss'
               : 'block',
-        xG: undefined,
+        xG: calculateShotEventXG(shot, {
+          priorShots: gameShots,
+          priorEvents: game.allEvents,
+        }),
         shotType: shot.shotType,
         playerId: shot.shootingPlayerId,
         gameId: game.gameId,

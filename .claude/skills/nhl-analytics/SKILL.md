@@ -60,7 +60,8 @@ Worker FIRST, then trigger build-xg, then verify schemaVersion, THEN client. If 
 | `src/services/playByPlayService.ts` | PBP fetch + parse. Extracts `ShotEvent[]`, `PassEvent[]`, `shifts[]`. |
 | `src/services/chemistryAnalytics.ts` | Player-pair shift overlap + shot-share math. |
 | `src/services/lineComboAnalytics.ts` | Recurring forward trios / D-pairs with CF%/xG%. |
-| `src/services/contractService.ts` + `surplusValueService.ts` | CapWages-derived salary data, joined with skater P/GP for surplus. |
+| `src/services/contractService.ts` + `surplusValueService.ts` | CapWages-derived salary data, joined with skater **WAR_per_82** for surplus (v4: previously P/GP — see WAR section for why). |
+| `src/services/warService.ts` + `warTableService.ts` + `rapmService.ts` | WAR model. `computeSkaterWAR(row, context, rapm)` returns `{WAR, WAR_per_82, components, percentile, ...}`. |
 | `src/config/api.ts` | API endpoint config. In prod all requests proxy through the worker. |
 
 ---
@@ -97,6 +98,65 @@ Worker FIRST, then trigger build-xg, then verify schemaVersion, THEN client. If 
 | Contract data (NMC/NTC, cap hit, years) | `contractService.getTeamContracts(teamAbbrev)` |
 | Line combos (forward trios, D-pairs) | `lineComboAnalytics.identifyLineCombos(shots)` |
 | Pair chemistry | `chemistryAnalytics.calculatePairChemistry(games, playerA, playerB, minOverlapSec)` |
+| Player WAR breakdown (cumulative + 82-game pace) | `computeSkaterWAR(row, context, rapm)` from `warService.ts` after `loadWARTables()` |
+| Goalie WAR (GSAx-based) | `computeGoalieWAR(row, context)` from `warService.ts` |
+| Market surplus / deficit | `computePlayerSurplus(playerId, name, WAR_per_82, position, gamesPlayed)` — takes **WAR/82**, not points (v4) |
+
+---
+
+## WAR model specifics (post-April 2026 v4 rebuild)
+
+WAR pipeline: worker aggregates per-player PBP into `war_skaters` / `war_goalies` / `league_context` artifacts (daily 5 UTC cron, or manual `/cached/build-war`), client loads via `loadWARTables()`, `computeSkaterWAR` produces per-player `{WAR, WAR_per_82, components, percentile}`.
+
+### Components summed into WAR total
+- **EV offense / defense** — RAPM coefficients when available (`rapmEntry.offense/defense × 5v5 hours`). Fallback blend: `(team-relative + league-relative) × EV hours × 1/5` when RAPM absent or low-sample.
+- **Power play** — `rapm.ppXGF − (leaguePpXgfPerMin × ppMinutes)` (above-average PP value).
+- **Penalty kill** — `(leaguePkXgaPerMin × pkMinutes) − rapm.pkXGA` (suppression credit).
+- **Faceoffs** (centers only, v4 zone-aware) — per-zone win rate × `ozGoalRatePerWin` / `dzGoalRateAgainstPerWin`, each × 50% possession discount (the other 50% is downstream RAPM credit), shrunk with 50 phantom attempts per zone. Fallback to flat `faceoffValuePerWin` when zone counts/rates absent.
+- **Turnovers** — rate-normalized takeaway/giveaway per-60 vs position median × total hours × goal values.
+- **Discipline** (v4 severity-weighted) — `(penaltyMinutesDrawn − penaltyMinutesTaken) × ppXGPerMinute`. A 5-min major counts 2.5× a 2-min minor. Fallback to `(drawn − taken) × 2min × rate` when minutes absent.
+- **Zone-start deployment adjust** (v4, fallback blend only, centers only) — compares `ozShare = OZ/(OZ+DZ)` vs neutral 0.5; scales linearly at 1.0 xGF/60 per 100% skew; subtracts from BOTH evOffense and evDefense (the skew inflates both). Gated at ≥100 O/D faceoffs.
+- **Replacement adjust** — `−10thPctile GAR/game × games`. Anchors "above replacement".
+
+### Components deliberately ZERO (methodology, not data gap)
+- **Hits + blocks** (micro): published research (Evolving-Hockey / Hockey Graphs) shows raw hits correlate *negatively* with goal differential post-possession-control. Blocks correlate with DZ deployment not quality.
+- **Finishing (iG − ixG)** and **Playmaking (A1 × leagueIxGPerShot)**: computed but NOT summed into WAR — they overlap with RAPM's on-ice xGF coefficient (player's own shots / set-ups are already in the on-ice total).
+
+### Intangibles (researched, REJECTED)
+- Clutch scoring, playoff elevation, pressure faceoffs, heart/grit, EDGE intensity, comeback/trailing performance: **all fail year-over-year repeatability** tests in published NHL literature (McCurdy, Schuckers, Krzywicki, Evolving-Hockey). Small samples + dominant noise. Included as descriptive UI metrics only, never in WAR.
+- Leadership / linemate uplift residuals: real but r ≈ 0.05–0.15 YoY, sample-starved. Weak-variant — don't sum into WAR.
+
+### WAR_market (v5.4)
+`warService.ts` returns `WAR` (symmetric — used for wins accounting / headlines) and `WAR_market` (clips negative EV defense — used by surplus only). Rationale: the NHL contract market doesn't penalize offensive players for negative EV-defense coefficients from team-level system weakness (Bedard-on-Chicago). Market variant prevents an ELC rookie's defensive RAPM coefficient from dragging surplus into absurdity. Headline WAR remains honest.
+
+### Surplus computation (v5.2 — ratio $/WAR × age curve)
+`surplusValueService.ts` uses the MoneyPuck/JFresh-style ratio approach:
+
+```
+openMarketValue = max($775K, WAR/82 × $/WAR × ageMultiplier(age))
+```
+
+- `$/WAR` = sum(UFA-signed cap hits) / sum(UFA WAR/82) over skaters with WAR ≥ 0.5. Fit separately for F / D.
+- `ageMultiplier` = published aging curve — peaks 26-30 at 1.0, ramps up from 0.55 at 18 to 0.96 at 24, declines post-31.
+- Floor at league minimum $775K for negative-WAR players.
+- Training set: UFA-expiry contracts only (not RFA, not ELC) — the market-clearing sample.
+
+Surplus = predicted − actual cap hit. Single number. ELC/RFA badges on the card signal contract-status context.
+
+**Why not the earlier regression:** log(cap) OLS fit on 360 UFA contracts ran at R²=0.17. The noise dominated individual predictions and produced absurdities like McDavid reading as "overpriced" when consensus says he's below market. The ratio approach uses one global $/WAR anchor — less information but less noise per prediction, and aligns with public models' outputs.
+
+**Caveats:** single-season only. Multi-year-term bargains (Hughes' 8-year deal signed at a lower cap ceiling) show as near-fair on current WAR, not as the career bargain they're known for. Multi-year rolling WAR would fix this — deferred as future work.
+
+**Worker endpoint:** `/cached/skater-ages` returns `{ [playerId]: { age, birthDate, position } }` for every skater with a birthDate in NHL Stats' `/skater/bios`. 7-day KV cache.
+
+### Replacement level (v5)
+Switched from 10th-percentile GAR/game to "13th F / 7th D by team TOI" mean (Evolving-Hockey methodology). `workers/src/index.ts:computeReplacementByTeamTOI` ranks each team's skaters by TOI within position; rank ≥ threshold = replacement cohort; baseline = mean of their GAR/game. More principled than a quantile cut — "replacement" means fringe-roster TOI rank, not abstract percentile.
+
+### v5 WAR knob changes
+- Stabilization threshold **20 → 35 GP** (Schuckers ~1000-play YoY reliability).
+- Faceoff discount **50% → 25%** (Tulsky/Cane: possession flip is entirely the center).
+- Bar colors sign-driven red/green (colorblind-safe; replaces 8-hue component palette).
+- Pace projection → dashed tick at 82-GP endpoint (replaces faded tail).
 
 ---
 

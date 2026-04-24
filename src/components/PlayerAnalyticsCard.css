@@ -31,15 +31,17 @@
   padding: var(--space-xl) var(--space-2xl);
   color: #fff;
   font-family: inherit;
-  /* Team-color outer ring gives the card a visible boundary on dark
-     Twitter / Discord backgrounds, where a transparent box would
-     blend into the page chrome. */
+  /* Team-color boundary drawn INSIDE the box-size (inset) so the ring
+     is captured within the 1200×675 bounds on export. An outer ring
+     would be clipped by the PNG capture on mobile, cropping the sides
+     of the shared image. The drop shadow is for screen preview only. */
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5),
-              0 0 0 2px var(--team-accent);
+              inset 0 0 0 2px var(--team-accent);
   position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 .player-analytics-card::before {

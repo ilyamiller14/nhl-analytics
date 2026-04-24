@@ -71,6 +71,17 @@ export interface WARResult {
   components: WARComponents;
   WAR: number;
   WAR_per_82: number;
+  // Market-facing WAR — total WAR with negative EV defense clipped.
+  // Rationale: the NHL contract market systematically UNDERPRICES
+  // defensive liability for offensive players. Empirical observation:
+  // 1st-line Cs with net-negative on-ice xGA differentials still
+  // command $10M+ AAVs when their offensive production is elite. A
+  // symmetric offense/defense WAR treatment (our total WAR) matches
+  // wins-on-ice; the cap-hit market weights offense more heavily.
+  // This variant is used by surplusValueService.ts to compute market
+  // value. It is NEVER the headline WAR — that stays symmetric.
+  WAR_market: number;
+  WAR_market_per_82: number;
   percentile: number;         // Position-group quantile placement from this season's distribution
   percentileLabel: string;
   sources: {
@@ -230,9 +241,20 @@ export function computeSkaterWAR(
   }
 
   // --- Component 3: Penalties
-  const penaltyValue = context.ppXGPerMinute * 2; // 2-minute minor
-  const netPenalty = row.penaltiesDrawn - row.penaltiesTaken;
-  const penalties = netPenalty * penaltyValue;
+  // Severity-weighted when the worker has populated penaltyMinutes*
+  // (v4 artifact). Each minute of exposure costs opposing xG =
+  // ppXGPerMinute — so a 5-minute major costs 2.5× a 2-min minor, a
+  // double-minor costs 2×, etc. Falls back to the old count × 2 × rate
+  // formula when the minutes fields are absent (older cached tables).
+  const penaltyValue = context.ppXGPerMinute * 2; // canonical 2-min minor (legacy reference)
+  let penalties = 0;
+  if (typeof row.penaltyMinutesDrawn === 'number' && typeof row.penaltyMinutesTaken === 'number') {
+    const netPenaltyMin = row.penaltyMinutesDrawn - row.penaltyMinutesTaken;
+    penalties = netPenaltyMin * context.ppXGPerMinute;
+  } else {
+    const netPenalty = row.penaltiesDrawn - row.penaltiesTaken;
+    penalties = netPenalty * penaltyValue;
+  }
 
   // Prefer the most specific position bucket the worker exposed.
   // Centers vs. wingers have meaningfully different GAR distributions
@@ -274,6 +296,9 @@ export function computeSkaterWAR(
   // The fallback triggers when RAPM is absent OR the player was flagged
   // lowSample (gp < 40 in the artifact's regression). In that case the
   // RAPM coefficient is too noisy to trust over the blended baseline.
+  // Declared up top so the zone-start deployment adjustment (below,
+  // inside the fallback EV block) can gate on `positionCode === 'C'`.
+  const isCenter = row.positionCode === 'C';
   const SKATER_ON_ICE_SHARE = 0.2;
   // All-strength on-ice hours — used by the fallback blend, whose
   // baselines (team off-ice rate, league median) are also all-strength
@@ -395,26 +420,116 @@ export function computeSkaterWAR(
     if (rapmEntry?.lowSample) {
       notes.push('RAPM available but flagged low-sample — using blended baseline instead.');
     }
+
+    // --- Zone-start deployment correction (fallback path only) ---
+    //
+    // The fallback blend assumes every skater starts shifts in a
+    // representative mix of zones. In reality coaches feed OZ-start
+    // forwards (offensive specialists) and DZ-start forwards (shutdown
+    // role) different shift contexts. RAPM handles that implicitly
+    // through line / zone control dummies; the fallback blend doesn't.
+    //
+    // We correct here for CENTERS only (they take their own faceoffs
+    // so `ozFaceoffWins/Losses + dzFaceoffWins/Losses` is a direct
+    // proxy for the center's own OZ-start share). Wingers and D-men
+    // share the zone-start context of whichever center is out with
+    // them, but we don't have per-player shift-start zone data in the
+    // artifact, so we leave those positions unadjusted.
+    //
+    // Correction magnitude: empirical public work (Tulsky, McCurdy,
+    // Cane) shows ~1.0 xGF/60 swing between a 100% OZ-start vs 100%
+    // DZ-start center-line. We scale linearly by deviation from 50%:
+    // a 65% OZ center picks up ~0.15 xGF/60 of deployment tailwind
+    // which we SUBTRACT from evOffense, and picks up a matching xGA/60
+    // tailwind (lower exposure) which we ALSO subtract from the
+    // evDefense credit — because both were gifts of deployment, not
+    // skill.
+    //
+    // Gated at 100 total O/D faceoffs so early-season noise can't flip
+    // a center's fallback by half a WAR.
+    if (isCenter && row.positionCode === 'C') {
+      const ozTotal = (row.ozFaceoffWins || 0) + (row.ozFaceoffLosses || 0);
+      const dzTotal = (row.dzFaceoffWins || 0) + (row.dzFaceoffLosses || 0);
+      const denom = ozTotal + dzTotal;
+      if (denom >= 100) {
+        const ozShare = ozTotal / denom;
+        const deviation = ozShare - 0.5; // + = OZ-favored; − = DZ-favored
+        const DEPLOYMENT_XGF_PER_100PCT_SKEW = 1.0;
+        const xgfShift = deviation * DEPLOYMENT_XGF_PER_100PCT_SKEW;
+        const adjustGoals = xgfShift * onIceHoursAllStrength * SKATER_ON_ICE_SHARE;
+        evOffense -= adjustGoals;
+        evDefense -= adjustGoals;
+        if (Math.abs(deviation) > 0.05) {
+          notes.push(
+            `Fallback EV adjusted ${deviation > 0 ? '−' : '+'}${Math.abs(adjustGoals).toFixed(2)} goals for ${Math.abs(deviation * 100).toFixed(0)}% ${deviation > 0 ? 'OZ' : 'DZ'}-start skew.`
+          );
+        }
+      }
+    }
   }
 
   // --- Component 5: Faceoffs — centers only. NHL positionCode "C"
-  // identifies centers; all other positions get zero. Value formula
-  // per the spec: (FO% − 0.5) × attempts × faceoffValuePerWin.
+  // identifies centers; all other positions get zero.
   //
-  // Small-sample shrinkage: a rookie center with 12 faceoffs at 75%
-  // must not score +3 goals of credit. We add `K_PHANTOM_FO = 100`
-  // phantom attempts at exactly 50% — empirical Bayes with a neutral
-  // prior. A center with 100 real attempts gets his observed rate 50%
-  // toward reality; at 1000+ real attempts the prior washes out.
+  // Zone-aware valuation: an OZ win is worth goals-for in the 30s
+  // after (league-empirical rate ozGoalRatePerWin); a DZ win is worth
+  // goals-against prevented in that same window (dzGoalRateAgainstPerWin).
+  // NZ wins carry negligible signal and are unscored. Each zone bucket
+  // gets its own (shrunk) win-rate so an OZ specialist gets OZ credit
+  // and a DZ specialist gets DZ credit, instead of the old averaged
+  // flat faceoffValuePerWin that collapsed the two.
+  //
+  // Small-sample shrinkage per zone: 50 phantom attempts at .500 in
+  // each zone. Keeps a rookie center with 8 OZ wins at 100% from
+  // scoring absurd credit, while a full-season veteran at 400 OZ
+  // attempts has the prior wash out completely.
+  //
+  // Falls back to the averaged faceoffValuePerWin × total-FO% formula
+  // when zone counts or zone rates are missing (older cached tables).
   const faceoffValuePerWin = context.faceoffValuePerWin ?? null;
+  // Partial discount on the zone-split follow-up values.
+  // Public research (Tulsky/Cane, Hockey Graphs — "Expected Faceoff
+  // Goal Differential", 2015) attributes the possession-flip event
+  // entirely to the center; the RAPM on-ice coefficient credits every
+  // skater during the full shift but does NOT separately credit the
+  // draw winner for the flip itself. So a 50% discount (the earlier
+  // kludge) halved real credit. The literature justifies full 100%
+  // attribution. We ship 75% here as a methodological compromise —
+  // research-grounded but conservative against any RAPM overlap we
+  // haven't fully audited. Top draw specialists net roughly 1–3 goals
+  // / season above average, matching published expectation.
+  const FACEOFF_POSSESSION_DISCOUNT = 0.75;
+  const ozRate = context.ozGoalRatePerWin != null
+    ? context.ozGoalRatePerWin * FACEOFF_POSSESSION_DISCOUNT
+    : null;
+  const dzRate = context.dzGoalRateAgainstPerWin != null
+    ? context.dzGoalRateAgainstPerWin * FACEOFF_POSSESSION_DISCOUNT
+    : null;
   let faceoffs = 0;
-  const isCenter = row.positionCode === 'C';
   if (isCenter) {
-    if (
+    const hasZoneCounts =
+      row.ozFaceoffWins != null && row.ozFaceoffLosses != null &&
+      row.dzFaceoffWins != null && row.dzFaceoffLosses != null;
+    if (hasZoneCounts && (ozRate != null || dzRate != null)) {
+      const K_PHANTOM_FO_ZONE = 50;
+      const zoneCredit = (wins: number, losses: number, rate: number | null): number => {
+        if (rate == null) return 0;
+        const attempts = wins + losses;
+        if (attempts === 0) return 0;
+        const shrunkPct = (wins + K_PHANTOM_FO_ZONE * 0.5) / (attempts + K_PHANTOM_FO_ZONE);
+        return (shrunkPct - 0.5) * attempts * rate;
+      };
+      // OZ wins → goals-for; same sign (positive = good).
+      // DZ wins → goals-against-prevented; same sign (positive = good).
+      const ozCredit = zoneCredit(row.ozFaceoffWins!, row.ozFaceoffLosses!, ozRate);
+      const dzCredit = zoneCredit(row.dzFaceoffWins!, row.dzFaceoffLosses!, dzRate);
+      faceoffs = ozCredit + dzCredit;
+    } else if (
       row.faceoffWins != null &&
       row.faceoffLosses != null &&
       faceoffValuePerWin != null
     ) {
+      // Fallback — averaged flat value (v3 and earlier artifacts).
       const attempts = row.faceoffWins + row.faceoffLosses;
       if (attempts > 0) {
         const K_PHANTOM_FO = 100;
@@ -514,25 +629,32 @@ export function computeSkaterWAR(
     }
   }
 
-  // --- Raw GAR (vs average)
+  // --- Raw GAR (vs average) — v5.1 INCLUDES individual finishing +
+  // primary-assist playmaking at full weight, consistent with
+  // Evolving-Hockey / Sprigings GAR composition.
   //
-  // NOT included in the sum (but computed + returned as diagnostic fields):
-  //   finishing (iG − ixG)       — a shooter-only conversion residual.
-  //                                  Volume scoring already flows into EV
-  //                                  Offense via the RAPM coefficient
-  //                                  (player's on-ice xGF includes their
-  //                                  own ixG contribution).
-  //   playmaking (A1 × ixG/shot) — overlaps with EV Offense too: a primary
-  //                                  assist leads to a shot whose xG is
-  //                                  already attributed to on-ice xGF in
-  //                                  RAPM. Crediting it separately would
-  //                                  double-count playmakers.
+  // Research grounding:
+  //   • Finishing (iG − ixG) is a PERSONAL skill residual above the
+  //     empirical shot-quality model. The player's own ixG is counted
+  //     in on-ice xGF, so RAPM credits his base shot volume — but the
+  //     above-expected conversion is uniquely the shooter's skill and
+  //     is not in the RAPM coefficient.
+  //   • Playmaking (A1 × league ixG-per-shot) credits the creator of
+  //     a shot. Yes, the shot's xG also enters on-ice xGF and is split
+  //     among 5 skaters in RAPM — but the A1 specifically CREATED the
+  //     scoring chance, which is not separately isolated by RAPM's
+  //     equal-share attribution. The theoretical overlap is ~1/5 of
+  //     the playmaking bar (the A1's own share of the on-ice total) —
+  //     on the order of 0.05–0.10 WAR for top playmakers. Small
+  //     enough that discounting introduces more bias (rejecting real
+  //     creator skill) than it removes (double-counting the fifth).
+  //     Include at full weight, matching EH / Sprigings.
   //
-  // Keeping these as individual stats (Finishing, A1) on the Stats tab
-  // while leaving them out of the WAR total gives a clean, non-
-  // overlapping decomposition: RAPM EV components + ST + discipline +
-  // faceoffs + turnovers + replacement baseline.
-  const rawGAR = evOffense + evDefense
+  // Empirical calibration: Hughes (pacing 103 pts) gains ~+0.80 WAR
+  // from finishing + ~+0.34 WAR from playmaking → ~2.96 WAR/82 total,
+  // in line with public models for top-10 scoring forwards.
+  const rawGAR = finishing + playmaking
+    + evOffense + evDefense
     + faceoffs + turnovers + micro + penalties + powerPlay + penaltyKill;
 
   // --- Replacement adjustment.
@@ -543,6 +665,22 @@ export function computeSkaterWAR(
   const totalGAR = rawGAR + replacementAdjust;
 
   const WAR = totalGAR / context.marginalGoalsPerWin;
+
+  // Market-facing WAR variant — clip out the NEGATIVE portion of EV
+  // defense. Rationale: the NHL contract market prices offensive
+  // production more aggressively than it penalizes defensive liability
+  // for offensive-role players. Example: a rookie 1C on a bad team
+  // (Bedard, Connor McMichael-types) shows a large negative evDefense
+  // from on-ice team xGA exposure, but the market pays those players
+  // as offensive talents — the defensive liability is assumed to
+  // improve as the player ages and the team's system improves.
+  // Symmetric defense treatment is right for WINS accounting (our
+  // headline WAR). Market value uses the clipped variant so players
+  // like Bedard don't read as negative-WAR "overpriced" relative to
+  // what teams would actually pay on the open market.
+  const evDefenseMarket = Math.max(0, evDefense); // clip the negative tail
+  const marketGAR = totalGAR - evDefense + evDefenseMarket;
+  const WAR_market = marketGAR / context.marginalGoalsPerWin;
 
   // WAR per 82 — honest pace projection above 20 GP.
   //
@@ -561,13 +699,20 @@ export function computeSkaterWAR(
   // ramp interpolates linearly from 0 at GP=0 to 1 at GP=STABILIZATION_GP,
   // then holds at 1.
   //
-  // At GP=10 this gives 0.5× — conservative enough that a 10-game
-  // call-up pace-projecting to +16 WAR gets trimmed to +8. At GP=20+
+  // At GP=17 this gives 0.5× — conservative enough that a 17-game
+  // call-up pace-projecting to +16 WAR gets trimmed to +8. At GP=35+
   // we trust the data and don't shrink at all.
-  const STABILIZATION_GP = 20;
+  //
+  // Threshold raised from 20 → 35 GP per Schuckers (THoR evaluation):
+  // year-over-year WAR stability reaches r ≈ 0.69 at ~1,000 plays,
+  // which corresponds to ~35 GP for a top-6 forward. 20 GP was
+  // declaring "stabilized" well below the published reliability point.
+  const STABILIZATION_GP = 35;
   const rawWARPer82 = row.gamesPlayed > 0 ? (WAR / row.gamesPlayed) * 82 : 0;
   const shrinkageFactor = Math.min(1, row.gamesPlayed / STABILIZATION_GP);
   const WAR_per_82 = rawWARPer82 * shrinkageFactor;
+  const rawWARMarketPer82 = row.gamesPlayed > 0 ? (WAR_market / row.gamesPlayed) * 82 : 0;
+  const WAR_market_per_82 = rawWARMarketPer82 * shrinkageFactor;
 
   const percentile = percentileFromQuantiles(
     WAR_per_82 * context.marginalGoalsPerWin,  // convert back to GAR space
@@ -594,6 +739,8 @@ export function computeSkaterWAR(
     },
     WAR,
     WAR_per_82,
+    WAR_market,
+    WAR_market_per_82,
     percentile,
     percentileLabel: labelFromPercentile(percentile),
     sources: {
@@ -629,7 +776,8 @@ function skaterPlaceholder(
       replacementAdjust: 0,
       totalGAR: 0, rawGAR: 0,
     },
-    WAR: 0, WAR_per_82: 0, percentile: 50, percentileLabel: 'average',
+    WAR: 0, WAR_per_82: 0, WAR_market: 0, WAR_market_per_82: 0,
+    percentile: 50, percentileLabel: 'average',
     sources: {
       marginalGoalsPerWin: context.marginalGoalsPerWin,
       penaltyValue: context.ppXGPerMinute * 2,

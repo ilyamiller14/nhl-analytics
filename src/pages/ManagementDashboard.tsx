@@ -38,6 +38,9 @@ import {
   getTeamCapCommitments,
 } from '../services/contractService';
 import { computePlayerSurplus } from '../services/surplusValueService';
+import { loadWARTables } from '../services/warTableService';
+import { computeSkaterWAR } from '../services/warService';
+import { loadRAPM } from '../services/rapmService';
 import type {
   PlayerSurplus,
   TeamContractData,
@@ -402,41 +405,34 @@ export default function ManagementDashboard() {
         setCapSummary(summary);
         setCapCommitments(commitments);
 
-        // Compute surplus values for all skaters on the team
+        // Compute surplus values for all skaters on the team.
+        // Surplus is now keyed off WAR_per_82 (not P/GP), so we need the
+        // WAR tables + RAPM artifact first. Fall back silently if
+        // either is unavailable — surplus is non-critical.
         const skaters = contracts.players.filter(
           p => p.position !== 'G' && p.status === 'active'
         );
         try {
-          const season = getCurrentSeason();
-          const statsUrl = `${API_CONFIG.NHL_STATS}/skater/summary?limit=-1&cayenneExp=seasonId=${season} and gameTypeId=2`;
-          const statsResp = await fetch(statsUrl);
-          if (statsResp.ok) {
-            const statsData = await statsResp.json();
-            const statsLookup = new Map<string, { points: number; gp: number }>();
-            for (const s of (statsData.data || [])) {
-              if (s.gamesPlayed >= 5 && s.positionCode !== 'G') {
-                statsLookup.set(
-                  String(s.skaterFullName).toLowerCase().replace(/\s+/g, ''),
-                  { points: s.points, gp: s.gamesPlayed }
-                );
-              }
-            }
+          const [tables, rapm] = await Promise.all([loadWARTables(), loadRAPM()]);
+          if (!tables) throw new Error('WAR tables unavailable');
 
-            const results = new Map<string, PlayerSurplus>();
-            await Promise.allSettled(
-              skaters.map(async (p) => {
-                const stats = statsLookup.get(p.name.toLowerCase().replace(/\s+/g, ''));
-                if (!stats) return;
-                const numId = typeof p.playerId === 'string'
-                  ? parseInt(p.playerId as string, 10) : p.playerId;
-                const surplus = await computePlayerSurplus(
-                  numId, p.name, stats.points, stats.gp, p.position
-                );
-                if (surplus) results.set(p.name, surplus);
-              })
-            );
-            setSurplusMap(results);
-          }
+          const results = new Map<string, PlayerSurplus>();
+          await Promise.allSettled(
+            skaters.map(async (p) => {
+              const numId = typeof p.playerId === 'string'
+                ? parseInt(p.playerId as string, 10) : p.playerId;
+              if (numId == null) return;
+              const row = tables.skaters[numId];
+              if (!row || row.gamesPlayed < 5) return;
+              const warResult = computeSkaterWAR(row, tables.context, rapm);
+              if (!warResult.dataComplete) return;
+              const surplus = await computePlayerSurplus(
+                numId, p.name, warResult.WAR_market_per_82, p.position, row.gamesPlayed,
+              );
+              if (surplus) results.set(p.name, surplus);
+            })
+          );
+          setSurplusMap(results);
         } catch {
           // Surplus is non-critical
         }

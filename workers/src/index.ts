@@ -311,6 +311,91 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     });
   }
 
+  // Asset passthrough with CORS headers added. html-to-image (used by
+  // the share-card export) needs to fetch cross-origin images to embed
+  // them as data URLs; assets.nhle.com does not send Access-Control-
+  // Allow-Origin, so the browser refuses to read the response and the
+  // final PNG drops the player headshot + team logo, visually clipping
+  // the card's left side. Routing those loads through this endpoint
+  // puts the CORS headers on them so the embed can succeed.
+  if (url.pathname === '/asset') {
+    const target = url.searchParams.get('url');
+    if (!target) {
+      return new Response('Missing url', { status: 400, headers: corsHeaders });
+    }
+    let parsed: URL;
+    try { parsed = new URL(target); } catch {
+      return new Response('Invalid url', { status: 400, headers: corsHeaders });
+    }
+    const ALLOW_HOSTS = new Set([
+      'assets.nhle.com',
+      'cms.nhl.bamgrid.com',
+      'cdn.nhle.com',
+    ]);
+    if (!ALLOW_HOSTS.has(parsed.host)) {
+      return new Response('Host not allowed', { status: 403, headers: corsHeaders });
+    }
+    const upstream = await fetch(parsed.toString(), {
+      cf: { cacheTtl: 86400, cacheEverything: true },
+    });
+    const headers = new Headers(corsHeaders);
+    const ct = upstream.headers.get('content-type');
+    if (ct) headers.set('content-type', ct);
+    headers.set('cache-control', 'public, max-age=86400');
+    return new Response(upstream.body, { status: upstream.status, headers });
+  }
+
+  // Special endpoint: skater age table — {[playerId]: age}.
+  // Used client-side by the hedonic surplus regression to control for
+  // age-curve effects on cap hit (Mincer / EH age + age² term). The
+  // NHL Stats API's /skater/bios endpoint returns birthDate per player
+  // for the whole league in a single call; we cache in KV for 7 days
+  // since birthDate per player doesn't change.
+  if (url.pathname === '/cached/skater-ages') {
+    const key = `skater_ages_${CURRENT_SEASON}`;
+    const cached = await env.NHL_CACHE.get(key, 'json') as any;
+    if (cached && cached.players) {
+      return new Response(JSON.stringify(cached), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'HIT' },
+      });
+    }
+    try {
+      const bioUrl = `https://api.nhle.com/stats/rest/en/skater/bios?limit=-1&cayenneExp=seasonId=${CURRENT_SEASON}`;
+      const r = await fetch(bioUrl, {
+        headers: { 'User-Agent': 'NHL-Analytics/1.0', 'Accept': 'application/json' },
+      });
+      if (!r.ok) {
+        return new Response(JSON.stringify({ error: `bios fetch ${r.status}` }), {
+          status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const json: any = await r.json();
+      const refDate = new Date(`${CURRENT_SEASON.slice(4)}-10-01T00:00:00Z`);
+      const players: Record<number, { age: number; birthDate: string; position: string }> = {};
+      for (const p of (json.data || [])) {
+        if (!p.playerId || !p.birthDate) continue;
+        const b = new Date(p.birthDate);
+        let age = refDate.getUTCFullYear() - b.getUTCFullYear();
+        const mDiff = refDate.getUTCMonth() - b.getUTCMonth();
+        if (mDiff < 0 || (mDiff === 0 && refDate.getUTCDate() < b.getUTCDate())) age -= 1;
+        players[p.playerId] = { age, birthDate: p.birthDate, position: p.positionCode || '' };
+      }
+      const payload = {
+        season: CURRENT_SEASON,
+        computedAt: new Date().toISOString(),
+        players,
+      };
+      await env.NHL_CACHE.put(key, JSON.stringify(payload), { expirationTtl: 7 * 24 * 60 * 60 });
+      return new Response(JSON.stringify(payload), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'MISS' },
+      });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   // Special endpoint: Serve empirical xG lookup (built from all cached PBP)
   if (url.pathname === '/cached/xg-lookup') {
     const cached = await env.NHL_CACHE.get(`xg_lookup_${CURRENT_SEASON}`);
@@ -2376,6 +2461,10 @@ interface WARSkaterRow {
   secondaryAssists: number;
   penaltiesDrawn: number;
   penaltiesTaken: number;
+  // v4: severity-weighted penalty discipline — sum of PBP durations (min)
+  // so a 5-min major counts 2.5× more than a regular 2-min minor.
+  penaltyMinutesDrawn?: number;
+  penaltyMinutesTaken?: number;
   // v2: micro-stat counts
   faceoffWins?: number;
   faceoffLosses?: number;
@@ -2425,6 +2514,11 @@ interface LeagueContext {
   // Each = (goals scored in 30s after event by the owning team) / event count.
   // All computed from this season's PBP only — no hardcoded constants.
   faceoffValuePerWin?: number;
+  // v4: zone-split follow-up values so the client can credit OZ / DZ
+  // faceoffs at their actual empirical rates instead of the averaged
+  // `faceoffValuePerWin` (which collapses the two signals).
+  ozGoalRatePerWin?: number;
+  dzGoalRateAgainstPerWin?: number;
   takeawayGoalValue?: number;
   giveawayGoalValue?: number;
   // Hits + blocks kept zero in the WAR formula (literature shows ~noise);
@@ -2650,17 +2744,23 @@ async function buildWARTables(env: Env): Promise<{
         if (type === 'penalty') {
           const drawnBy = d.drawnByPlayerId;
           const committedBy = d.committedByPlayerId;
+          // NHL PBP `details.duration` is penalty length in minutes. When
+          // it's missing (rare — exhibitions / edge cases) fall back to 2
+          // so a count-of-1 still contributes its canonical minor value.
+          const mins = typeof d.duration === 'number' && d.duration > 0 ? d.duration : 2;
           if (drawnBy) {
             gamePlayers.add(drawnBy);
             let row = skaters.get(drawnBy);
             if (!row) { row = blankSkaterRow(drawnBy); skaters.set(drawnBy, row); }
             row.penaltiesDrawn += 1;
+            row.penaltyMinutesDrawn = (row.penaltyMinutesDrawn || 0) + mins;
           }
           if (committedBy) {
             gamePlayers.add(committedBy);
             let row = skaters.get(committedBy);
             if (!row) { row = blankSkaterRow(committedBy); skaters.set(committedBy, row); }
             row.penaltiesTaken += 1;
+            row.penaltyMinutesTaken = (row.penaltyMinutesTaken || 0) + mins;
           }
         }
 
@@ -3053,8 +3153,19 @@ async function buildWARChunkTeam(env: Env, team: string): Promise<void> {
       if (type === 'penalty') {
         const drawnBy = d.drawnByPlayerId;
         const committedBy = d.committedByPlayerId;
-        if (drawnBy) { gamePlayers.add(drawnBy); getOrCreateSkater(drawnBy).penaltiesDrawn += 1; }
-        if (committedBy) { gamePlayers.add(committedBy); getOrCreateSkater(committedBy).penaltiesTaken += 1; }
+        const mins = typeof d.duration === 'number' && d.duration > 0 ? d.duration : 2;
+        if (drawnBy) {
+          gamePlayers.add(drawnBy);
+          const r = getOrCreateSkater(drawnBy);
+          r.penaltiesDrawn += 1;
+          r.penaltyMinutesDrawn = (r.penaltyMinutesDrawn || 0) + mins;
+        }
+        if (committedBy) {
+          gamePlayers.add(committedBy);
+          const r = getOrCreateSkater(committedBy);
+          r.penaltiesTaken += 1;
+          r.penaltyMinutesTaken = (r.penaltyMinutesTaken || 0) + mins;
+        }
       }
 
       // --- Faceoffs (zone-aware) ---
@@ -3404,8 +3515,14 @@ async function buildLeagueContext(
     }
   }
 
-  const fStats = computePositionStats(fArr);
-  const dStats = computePositionStats(dArr);
+  // EH-style replacement baseline from per-team TOI rank. Falls back
+  // to the old 10th-pctile-of-GAR if the per-team distribution has
+  // too few teams to be meaningful (defensively — should never trip).
+  const replacementF = computeReplacementByTeamTOI(skaters, 'F', penaltyValue);
+  const replacementD = computeReplacementByTeamTOI(skaters, 'D', penaltyValue);
+
+  const fStats = computePositionStats(fArr, replacementF ?? undefined);
+  const dStats = computePositionStats(dArr, replacementD ?? undefined);
 
   // Goalie statistics.
   const gsaxPerGame: number[] = [];
@@ -3445,6 +3562,13 @@ async function buildLeagueContext(
     goalies: gStats,
     ppXGPerMinute,
     faceoffValuePerWin,
+    // v4: zone-split faceoff value so the client can credit OZ-specialist
+    // centers (Kopitar-types) and DZ-specialist shutdown centers
+    // differently. Both are per-net-win; OZ is goals-for-per-OZ-win and
+    // DZ is goals-against-prevented-per-DZ-win (goals that would be
+    // scored at league rate but weren't because we won the faceoff).
+    ozGoalRatePerWin,
+    dzGoalRateAgainstPerWin,
     takeawayGoalValue,
     giveawayGoalValue,
     hitGoalValue,
@@ -3472,7 +3596,10 @@ interface PosArrays {
   blockPer60: number[];
 }
 
-function computePositionStats(arr: PosArrays): LeaguePositionStats {
+function computePositionStats(
+  arr: PosArrays,
+  replacementOverride?: number,
+): LeaguePositionStats {
   const ixSorted = arr.ixG60.slice().sort((a, b) => a - b);
   const garSorted = arr.garPerGame.slice().sort((a, b) => a - b);
   const count = garSorted.length;
@@ -3486,12 +3613,21 @@ function computePositionStats(arr: PosArrays): LeaguePositionStats {
   const taP = sortedIfAny(arr.takeawayPer60);
   const giP = sortedIfAny(arr.giveawayPer60);
   const blP = sortedIfAny(arr.blockPer60);
+  // Replacement level: v4 switches from 10th-pctile GAR/game to the
+  // Evolving-Hockey methodology "13th F / 7th D by team TOI" — players
+  // ranked below those thresholds on each team define the replacement
+  // cohort. Computed externally and passed in via `replacementOverride`
+  // because it needs per-team-per-position rank (not a pure quantile).
+  // Fallback to the old 10th-pctile when override is unavailable.
+  const replacement = replacementOverride != null
+    ? replacementOverride
+    : quantile(garSorted, 0.10);
   return {
     count,
     medianIxGPer60: quantile(ixSorted, 0.5),
     q10IxGPer60: quantile(ixSorted, 0.10),
     q90IxGPer60: quantile(ixSorted, 0.90),
-    replacementGARPerGame: quantile(garSorted, 0.10),
+    replacementGARPerGame: replacement,
     medianGARPerGame: quantile(garSorted, 0.50),
     q90GARPerGame: quantile(garSorted, 0.90),
     q99GARPerGame: quantile(garSorted, 0.99),
@@ -3502,6 +3638,56 @@ function computePositionStats(arr: PosArrays): LeaguePositionStats {
     medianGiveawayPer60: giP.length > 0 ? quantile(giP, 0.5) : undefined,
     medianBlockPer60: blP.length > 0 ? quantile(blP, 0.5) : undefined,
   };
+}
+
+/**
+ * EH-style replacement baseline: for each team, rank that team's skaters
+ * by TOI within the position, and designate anyone below the threshold
+ * (rank ≥ 13 for F, rank ≥ 7 for D) as the team's "replacement cohort."
+ * The league-wide replacement baseline per position is the MEAN of
+ * those cohorts' GAR/game.
+ *
+ * Rationale: 10th-pctile is too strict — a "replacement" player is the
+ * kind of skater a GM can call up or sign for league minimum, which
+ * corresponds to fringe-roster TOI ranking, not an abstract percentile.
+ * Reference: Evolving-Hockey "WAR Part 3: Replacement Level Decisions".
+ */
+function computeReplacementByTeamTOI(
+  skaters: Record<number, WARSkaterRow>,
+  position: 'F' | 'D',
+  penaltyValue: number,
+): number | null {
+  const RANK_THRESHOLD = position === 'F' ? 13 : 7;
+  const isPosition = (row: WARSkaterRow): boolean => {
+    if (position === 'D') return row.positionCode === 'D';
+    return row.positionCode === 'C' || row.positionCode === 'L' || row.positionCode === 'R';
+  };
+  // Group by primary team (first abbrev in the comma-separated list).
+  const byTeam = new Map<string, WARSkaterRow[]>();
+  for (const row of Object.values(skaters)) {
+    if (row.gamesPlayed < 5) continue;
+    if (!isPosition(row)) continue;
+    const team = (row.teamAbbrevs || '').split(',')[0].trim();
+    if (!team) continue;
+    const list = byTeam.get(team) || [];
+    list.push(row);
+    byTeam.set(team, list);
+  }
+  const replacementGARs: number[] = [];
+  for (const list of byTeam.values()) {
+    list.sort((a, b) => b.toiTotalSeconds - a.toiTotalSeconds);
+    // Skaters ranked THRESHOLD and below (1-indexed) form the cohort.
+    for (let rank1 = RANK_THRESHOLD; rank1 <= list.length; rank1++) {
+      const row = list[rank1 - 1];
+      const gax = row.iG - row.ixG;
+      const pdiff = (row.penaltiesDrawn - row.penaltiesTaken) * penaltyValue;
+      const garPerGame = (gax + pdiff) / row.gamesPlayed;
+      replacementGARs.push(garPerGame);
+    }
+  }
+  if (replacementGARs.length === 0) return null;
+  const mean = replacementGARs.reduce((a, b) => a + b, 0) / replacementGARs.length;
+  return mean;
 }
 
 function computeGoalieStats(gsaxPerGame: number[], marginalGoalsPerWin: number): LeagueGoalieStats {

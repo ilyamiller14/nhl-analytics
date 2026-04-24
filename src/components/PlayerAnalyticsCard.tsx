@@ -62,10 +62,20 @@ interface PlayerAnalyticsCardProps {
   edgeSpeed?: { topSpeed: number; percentile: number } | null;
   edgeShotSpeed?: { maxShotSpeed: number; percentile: number } | null;
   edgeDistance?: { distancePer60: number; percentile: number } | null;
-  // Contract / surplus value
+  // Contract / surplus value — hedonic model outputs (v5).
+  // `surplus` is legacy total (open-market value − actual cap hit). When
+  // the detailed fields are present the hero strip can show the
+  // earned-vs-team split; the tooltip / footer references the model's
+  // R² and RMSE so the number's precision is honest.
   capHit?: number;
   surplus?: number;
   surplusPercentile?: number;
+  openMarketValue?: number;    // predicted as-UFA
+  earnedSurplus?: number;      // structural (CBA-forced discount)
+  teamSurplus?: number;        // GM negotiation signal
+  isELC?: boolean;
+  isRFA?: boolean;
+  modelRmseDollars?: number;   // ±1σ precision on the surplus estimate
   // WAR decomposition for the right-side breakdown chart.
   warResult?: WARResult;
 }
@@ -311,6 +321,12 @@ export default function PlayerAnalyticsCard({
   capHit,
   surplus,
   surplusPercentile,
+  openMarketValue,
+  earnedSurplus,
+  teamSurplus,
+  isELC,
+  isRFA,
+  modelRmseDollars,
   warResult,
 }: PlayerAnalyticsCardProps) {
   // Get latest rolling metrics
@@ -403,26 +419,58 @@ export default function PlayerAnalyticsCard({
                 <span className="player-team">{teamAbbrev}</span>
                 <span className="season-badge">{season}</span>
               </div>
-              {/* Surplus Badge — only renders when capHit is provided.
-                  Value comes from surplusValueService (P/GP tier-median
-                  cap method — what comparable-producing players earn),
-                  which is a different question than the WAR-based
-                  surplus on the Advanced Stats page (on-ice value less
-                  cap). We label it "Market Surplus" so users don't
-                  conflate the two. */}
+              {/* Surplus Badge — hedonic model output (v5).
+                  `surplus` now = open-market value − actual cap hit,
+                  decomposed into:
+                    • earnedSurplus: the CBA-forced discount (ELC/RFA
+                      only; ≥0 by construction)
+                    • teamSurplus: what the GM negotiated beyond the
+                      contract-tier baseline (can go either way)
+                  We label ELC / RFA so the reader knows how much of
+                  the "bargain" is the CBA vs the team. See
+                  surplusValueService.ts for the full framework. */}
               {capHit != null && (
                 <div className="surplus-badge">
                   <span className="surplus-cap">{formatDollars(capHit)} AAV</span>
                   {surplus != null && (
                     <span
                       className={`surplus-value ${surplus >= 0 ? 'bargain' : 'overpaid'}`}
-                      title="Market Surplus = median cap hit for players at this production tier − actual cap hit"
+                      title={
+                        `SEASON market value (${season}): ${formatDollars(openMarketValue ?? 0)}\n` +
+                        `Actual cap hit: ${formatDollars(capHit)}\n` +
+                        `Gap: ${surplus >= 0 ? '+' : '−'}${formatDollars(Math.abs(surplus))}\n` +
+                        `\n` +
+                        `Method: open-market log(cap) regression on UFA-signed\n` +
+                        `contracts, applied to this season's WAR/82. Model R²\n` +
+                        `is low (~0.17) because multi-year term, NMC/NTC, and\n` +
+                        `cap-inflation at signing aren't captured.\n` +
+                        (modelRmseDollars
+                          ? `Typical residual error: ±${formatDollars(modelRmseDollars)}\n`
+                          : '') +
+                        `\n` +
+                        `A player with a below-average current season on a\n` +
+                        `multi-year deal can read as "overpriced" here even\n` +
+                        `if the contract is widely regarded as a bargain over\n` +
+                        `its full term — that's the single-season framing at\n` +
+                        `work, not a judgment of the deal.` +
+                        (earnedSurplus != null && earnedSurplus > 500_000
+                          ? `\n\nCBA-structural component: ${formatDollars(earnedSurplus)}`
+                          : '') +
+                        (teamSurplus != null && Math.abs(teamSurplus) > 250_000
+                          ? `\nTeam-negotiation component: ${teamSurplus >= 0 ? '+' : ''}${formatDollars(teamSurplus)}`
+                          : '')
+                      }
                     >
                       {formatDollars(Math.abs(surplus))}{' '}
-                      {surplus >= 0 ? 'MKT SURPLUS' : 'MKT DEFICIT'}
+                      {surplus >= 0 ? '25-26 MKT SURPLUS' : '25-26 MKT DEFICIT'}
                     </span>
                   )}
-                  {surplusPercentile != null && (
+                  {(isELC || isRFA) && (
+                    <span className="surplus-pct" title="Contract status suppresses open-market value; most of the surplus is CBA-structural, not GM negotiation.">
+                      {isELC ? 'ELC' : 'RFA'}
+                    </span>
+                  )}
+                  {!isELC && !isRFA && surplusPercentile != null && (
                     <span className="surplus-pct">{formatOrdinal(surplusPercentile)}</span>
                   )}
                 </div>
@@ -435,26 +483,49 @@ export default function PlayerAnalyticsCard({
         </div>
 
         <div className="header-right">
-          {/* Three hero stats, not five. PTS is the headline; P/GP
-              anchors the pace; Surplus is the one talking point fans
-              care about beyond goals. +/-, GP, A, TOI demoted to the
-              secondary strip below — +/- in particular is noise at
-              this scale and was taking up 1/5 of the header. */}
+          {/* Three hero stats: PTS is the headline, WAR anchors the
+              "how much is this player actually worth" question, Surplus
+              is the market-value framing. When WAR is unavailable (not
+              enough GP, no artifact), fall back to P/GP and +/-. */}
           <div className="hero-stats-row">
             <HeroStat label="PTS" value={points} sub={`${goals}G · ${assists}A`} />
-            {/* P/GP hero removed when WAR breakdown replaces the bottom
-                (it duplicates what WAR already shows via its 82-game
-                pace row and takes room the full-width WAR needs). The
-                old fallback variant still showed it. */}
-            {!warResult && (
+            {warResult && warResult.dataComplete ? (
+              <HeroStat
+                label="WAR / 82"
+                value={warResult.WAR_per_82 >= 0
+                  ? `+${warResult.WAR_per_82.toFixed(2)}`
+                  : warResult.WAR_per_82.toFixed(2)}
+                sub={`${warResult.WAR.toFixed(2)} cum · ${warResult.gamesPlayed} GP`}
+              />
+            ) : (
               <HeroStat label="P/GP" value={ppg.toFixed(2)} sub={`${gamesPlayed} GP`} />
             )}
             {surplus != null ? (
-              <HeroStat
-                label={surplus >= 0 ? 'MKT SURPLUS' : 'MKT DEFICIT'}
-                value={`${surplus >= 0 ? '+' : '−'}$${(Math.abs(surplus) / 1_000_000).toFixed(1)}M`}
-                sub={capHit != null ? `${formatDollars(capHit)} AAV` : undefined}
-              />
+              (() => {
+                const valueStr = `${surplus >= 0 ? '+' : '−'}$${(Math.abs(surplus) / 1_000_000).toFixed(1)}M`;
+                const isStructural = (isELC || isRFA) &&
+                  earnedSurplus != null &&
+                  Math.abs(earnedSurplus) > Math.abs(teamSurplus ?? 0);
+                const subParts: string[] = [];
+                if (isStructural && earnedSurplus != null) {
+                  subParts.push(`CBA ${earnedSurplus >= 0 ? '+' : '−'}$${(Math.abs(earnedSurplus) / 1_000_000).toFixed(1)}M`);
+                  if (teamSurplus != null && Math.abs(teamSurplus) > 250_000) {
+                    subParts.push(`team ${teamSurplus >= 0 ? '+' : '−'}$${(Math.abs(teamSurplus) / 1_000_000).toFixed(1)}M`);
+                  }
+                } else if (capHit != null) {
+                  // Put the season-framing into the sub so the headline
+                  // label can stay compact. 2025-26 specifically signals
+                  // that this is single-season not multi-year.
+                  subParts.push(`vs ${formatDollars(capHit)} AAV · single-season`);
+                }
+                return (
+                  <HeroStat
+                    label={surplus >= 0 ? '25-26 MKT SURPLUS' : '25-26 MKT DEFICIT'}
+                    value={valueStr}
+                    sub={subParts.join(' · ')}
+                  />
+                );
+              })()
             ) : (
               <HeroStat
                 label="+/-"

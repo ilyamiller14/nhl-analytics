@@ -15,7 +15,7 @@
 export interface XGFeatures {
   distance: number;        // Distance from net in feet
   angle: number;           // Angle from center in degrees
-  shotType: 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap';
+  shotType: 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap' | 'unknown';
   strength: '5v5' | 'PP' | 'SH' | '4v4' | '3v3';
 
   // Pre-shot context. Set by callers that have the surrounding play

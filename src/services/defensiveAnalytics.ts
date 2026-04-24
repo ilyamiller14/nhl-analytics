@@ -161,10 +161,14 @@ export function analyzeDefensiveCoverage(
       ? parseFloat((((slotSaves + slotBlocks) / slotShots) * 100).toFixed(1))
       : 0;
 
-  // Slot danger rating
+  // Slot danger rating — require a minimum sample before assigning a
+  // qualitative grade, otherwise an empty / one-game PBP looks "excellent"
+  // by default.
   let slotDangerRating: SlotProtection['slotDangerRating'];
-  if (slotShots < 5) {
-    slotDangerRating = 'excellent'; // Very few slot shots allowed
+  if (totalShotsAllowed < 20) {
+    slotDangerRating = 'average'; // Insufficient sample — don't praise missing data
+  } else if (slotShots < 5) {
+    slotDangerRating = 'excellent';
   } else if (slotShots < 10) {
     slotDangerRating = 'good';
   } else if (slotShots < 15) {
@@ -215,49 +219,3 @@ export function calculateGoalsSavedAboveExpected(
   return parseFloat((xGAllowed - goalsAllowed).toFixed(2));
 }
 
-/**
- * Compare defensive metrics to league average
- */
-export function compareDefenseToLeague(
-  analytics: DefensiveAnalytics
-): {
-  slotProtectionRank: 'elite' | 'above-average' | 'average' | 'below-average' | 'poor';
-  shotSuppressionRank: 'elite' | 'above-average' | 'average' | 'below-average' | 'poor';
-  blockRateRank: 'elite' | 'above-average' | 'average' | 'below-average' | 'poor';
-} {
-  // Use team's own data as baseline when no league averages available
-  const leagueAvgSlotShots = analytics.slotProtection.slotShotsAllowed;
-  const leagueAvgBlockRate = analytics.shotBlockRate;
-
-  // Slot protection ranking
-  let slotRank: 'elite' | 'above-average' | 'average' | 'below-average' | 'poor';
-  const slotDiff = analytics.slotProtection.slotShotsAllowed - leagueAvgSlotShots;
-  if (slotDiff < -5) slotRank = 'elite';
-  else if (slotDiff < -2) slotRank = 'above-average';
-  else if (slotDiff < 2) slotRank = 'average';
-  else if (slotDiff < 5) slotRank = 'below-average';
-  else slotRank = 'poor';
-
-  // Shot suppression ranking
-  let suppressionRank: 'elite' | 'above-average' | 'average' | 'below-average' | 'poor';
-  if (analytics.shotSuppressionRating > 70) suppressionRank = 'elite';
-  else if (analytics.shotSuppressionRating > 60) suppressionRank = 'above-average';
-  else if (analytics.shotSuppressionRating > 40) suppressionRank = 'average';
-  else if (analytics.shotSuppressionRating > 30) suppressionRank = 'below-average';
-  else suppressionRank = 'poor';
-
-  // Block rate ranking
-  let blockRank: 'elite' | 'above-average' | 'average' | 'below-average' | 'poor';
-  const blockDiff = analytics.shotBlockRate - leagueAvgBlockRate;
-  if (blockDiff > 5) blockRank = 'elite';
-  else if (blockDiff > 2) blockRank = 'above-average';
-  else if (blockDiff > -2) blockRank = 'average';
-  else if (blockDiff > -5) blockRank = 'below-average';
-  else blockRank = 'poor';
-
-  return {
-    slotProtectionRank: slotRank,
-    shotSuppressionRank: suppressionRank,
-    blockRateRank: blockRank,
-  };
-}

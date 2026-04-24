@@ -205,8 +205,10 @@ export function analyzeSpecialTeams(
     (s) => calculateShotEventXG(s, { priorShots: ppShots }) >= 0.15
   ).length;
 
-  // Estimate PP opportunities (rough approximation: cluster of PP shots = 1 PP)
-  const totalPowerPlays = Math.max(1, Math.ceil(ppShots.length / 3));
+  // Estimate PP opportunities (rough approximation: cluster of PP shots = 1 PP).
+  // When there are no PP shots, leave at 0 — conversion / shots-per-PP become
+  // "no data" downstream rather than fabricated 0% / 100% PK rates.
+  const totalPowerPlays = ppShots.length > 0 ? Math.ceil(ppShots.length / 3) : 0;
 
   // Calculate PK analytics
   const pkGoalsAllowed = pkShotsAgainst.filter((s) => s.result === 'goal').length;
@@ -216,7 +218,7 @@ export function analyzeSpecialTeams(
     0
   );
   const pkShotsBlocked = pkShotsAgainst.filter((s) => s.result === 'blocked-shot').length;
-  const totalPenaltyKills = Math.max(1, Math.ceil(pkShotsAgainst.length / 3));
+  const totalPenaltyKills = pkShotsAgainst.length > 0 ? Math.ceil(pkShotsAgainst.length / 3) : 0;
 
   // ES analytics
   const esGoals = evenStrengthShots.filter((s) => s.result === 'goal').length;
@@ -232,8 +234,12 @@ export function analyzeSpecialTeams(
       powerPlayShots: ppShots.length,
       powerPlayShotsOnGoal: ppShotsOnGoal,
       powerPlayXG: parseFloat(ppXG.toFixed(2)),
-      powerPlayConversionRate: parseFloat(((ppGoals / totalPowerPlays) * 100).toFixed(1)),
-      shotsPerPowerPlay: parseFloat((ppShots.length / totalPowerPlays).toFixed(1)),
+      powerPlayConversionRate: totalPowerPlays > 0
+        ? parseFloat(((ppGoals / totalPowerPlays) * 100).toFixed(1))
+        : 0,
+      shotsPerPowerPlay: totalPowerPlays > 0
+        ? parseFloat((ppShots.length / totalPowerPlays).toFixed(1))
+        : 0,
       avgTimeToFirstShot: 0, // Would need time tracking
       highDangerShotsOnPP: highDangerPP,
     },
@@ -243,7 +249,9 @@ export function analyzeSpecialTeams(
       shotsAllowed: pkShotsAgainst.length,
       shotsOnGoalAllowed: pkShotsOnGoalAllowed,
       xGAllowed: parseFloat(pkXGAllowed.toFixed(2)),
-      penaltyKillSuccessRate: parseFloat((((totalPenaltyKills - pkGoalsAllowed) / totalPenaltyKills) * 100).toFixed(1)),
+      penaltyKillSuccessRate: totalPenaltyKills > 0
+        ? parseFloat((((totalPenaltyKills - pkGoalsAllowed) / totalPenaltyKills) * 100).toFixed(1))
+        : 0,
       shotsBlockedOnPK: pkShotsBlocked,
       avgTimeToFirstShotAllowed: 0, // Would need time tracking
     },

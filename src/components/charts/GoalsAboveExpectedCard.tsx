@@ -57,7 +57,7 @@ export default function GoalsAboveExpectedCard({ shots, title }: Props) {
         </div>
         <div className="gax-card-stat">
           <div className="gax-card-label">xG</div>
-          <div className="gax-card-value">{totals.xG.toFixed(1)}</div>
+          <div className="gax-card-value">{totals.xG.toFixed(2)}</div>
         </div>
         <div className={`gax-card-stat gax-hero ${gaxClass}`}>
           <div className="gax-card-label">G − xG</div>

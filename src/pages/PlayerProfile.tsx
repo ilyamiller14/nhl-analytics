@@ -199,17 +199,153 @@ function PlayerProfile() {
       // and any iOS share sheet. Width is fixed because we export at
       // pixel scale 2 → 2400×1350 which downscales gracefully on
       // social previews without text becoming illegible.
-      const SHARE_CARD_WIDTH = 1200;
-      const SHARE_CARD_HEIGHT = 675;
+      // 1080×1080 square — fits preview windows natively (iMessage,
+      // WhatsApp, Twitter/X, Discord, Instagram feed). Previously 1200×675
+      // (16:9) which letterboxed with large vertical dead zones in chat
+      // previews, making the content appear tiny unless tapped open.
+      const SHARE_CARD_WIDTH = 1080;
+      const SHARE_CARD_HEIGHT = 1080;
       const original = cardRef.current;
+
+      // index.css has `@media (max-width: 768px) { html { font-size: 14px } }`
+      // for responsive typography. rem units inside the card (all the
+      // `var(--space-*)` paddings and rem font sizes) inherit that 14px
+      // root during capture, producing a visibly cramped mobile PNG.
+      // Install a temporary style override that forces html font-size
+      // back to 16px AND overrides the card's 16/9 aspect-ratio to 1/1
+      // for the square share export. Removed after capture so the live
+      // page keeps its mobile styling + on-screen 16:9 preview.
+      const rootFontStyle = document.createElement('style');
+      rootFontStyle.setAttribute('data-share-capture', 'root-font-lock');
+      rootFontStyle.textContent =
+        'html{font-size:16px !important}' +
+        `[data-share-capture-target]{` +
+          `aspect-ratio:1/1 !important;` +
+          `width:${SHARE_CARD_WIDTH}px !important;` +
+          `max-width:${SHARE_CARD_WIDTH}px !important;` +
+          `min-width:${SHARE_CARD_WIDTH}px !important;` +
+          `height:${SHARE_CARD_HEIGHT}px !important;` +
+          `min-height:${SHARE_CARD_HEIGHT}px !important;` +
+          `max-height:${SHARE_CARD_HEIGHT}px !important;` +
+          `padding:2.75rem 2.75rem !important;` +
+          `gap:1.5rem !important;` +
+        `}` +
+        // Card is designed for a 16:9 share; its direct children don't
+        // flex-grow, so stretching to 1:1 leaves dead space. During
+        // capture, force the header row, metrics, bottom columns, and
+        // footer to split the height evenly. The footer's native
+        // `margin-top:auto` is dropped too — with gap-based
+        // distribution it'd double-collapse toward the bottom.
+        `[data-share-capture-target] > .card-header-row{flex:0 0 auto !important;margin-bottom:0 !important}` +
+        `[data-share-capture-target] > .metrics-row{flex:0 0 auto !important}` +
+        `[data-share-capture-target] > .bottom-columns{flex:1 1 auto !important;min-height:0 !important}` +
+        `[data-share-capture-target] > .card-footer{flex:0 0 auto !important;margin-top:0 !important;padding-top:1rem !important}` +
+        // PlayerAnalyticsCard.css caps the WAR chart at max-height 380px
+        // (container) / 240px (svg) to protect the 16:9 layout. In 1:1
+        // square mode those caps leave the lower half empty — lift the
+        // ceilings so the WAR chart scales to fill.
+        `[data-share-capture-target] .bottom-war-full{max-height:none !important;height:100% !important;align-items:stretch !important;overflow:visible !important}` +
+        `[data-share-capture-target] .bottom-war-full .share-war-breakdown{height:100% !important}` +
+        `[data-share-capture-target] .bottom-war-full .share-war-breakdown .war-break{height:100% !important}` +
+        `[data-share-capture-target] .share-war-breakdown svg{max-height:none !important;height:100% !important;width:100% !important}` +
+        // Size bump: the card's base design was 16:9 1200×675; at 1080×1080
+        // there's more vertical budget, so upsize the hero elements so
+        // they read clearly in a small preview thumbnail.
+        `[data-share-capture-target] .hero-stat-value{font-size:3.25rem !important;line-height:1 !important}` +
+        `[data-share-capture-target] .hero-stat-label{font-size:0.9rem !important}` +
+        `[data-share-capture-target] .player-name{font-size:2.25rem !important;line-height:1.15 !important}` +
+        `[data-share-capture-target] .card-header-row{gap:1.5rem !important}` +
+        `[data-share-capture-target] .player-headshot,[data-share-capture-target] .player-headshot-placeholder{width:112px !important;height:112px !important}` +
+        `[data-share-capture-target] .edge-badge-value,[data-share-capture-target] .rate-value{font-size:1.9rem !important}` +
+        `[data-share-capture-target] .edge-badge-label,[data-share-capture-target] .rate-label{font-size:0.8rem !important}` +
+        `[data-share-capture-target] .card-methodology{font-size:0.85rem !important;line-height:1.45 !important}`;
+      document.head.appendChild(rootFontStyle);
+
       const wrapper = document.createElement('div');
-      wrapper.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;overflow:hidden;pointer-events:none;z-index:-1;';
+      // html-to-image on mobile Chrome/Safari honors the clone's
+      // computed width only when the wrapper is actually part of the
+      // layout tree. 0×0 wrappers (overflow:hidden) and transformed
+      // off-screen wrappers both cause descendants to inherit the
+      // mobile viewport's narrow computed styles, cutting off the
+      // sides of the final PNG. Position with `left: -100000px` — fully
+      // laid out, never visible, and Chrome/Safari paint it correctly.
+      wrapper.style.cssText =
+        `position:fixed;left:-100000px;top:0;` +
+        `width:${SHARE_CARD_WIDTH}px;height:${SHARE_CARD_HEIGHT}px;` +
+        `pointer-events:none;z-index:-9999;background:transparent;` +
+        `overflow:visible;`;
       const clone = original.cloneNode(true) as HTMLElement;
+      // cardRef points to a wrapper <div style={{zoom}}> that HOLDS the
+      // actual .player-analytics-card inside. If we stamp attributes
+      // on the clone itself, our CSS rules never hit the card — they
+      // end up on the wrapper (which is block, not flex) and the card
+      // keeps its original 16:9 aspect. Find the real card element
+      // and target it.
+      const cardEl = clone.classList.contains('player-analytics-card')
+        ? clone
+        : (clone.querySelector('.player-analytics-card') as HTMLElement | null);
+      if (!cardEl) throw new Error('share capture: .player-analytics-card not found in clone');
       clone.style.cssText =
-        `position:absolute;left:0;top:0;width:${SHARE_CARD_WIDTH}px;min-width:${SHARE_CARD_WIDTH}px;` +
-        `height:${SHARE_CARD_HEIGHT}px;max-height:${SHARE_CARD_HEIGHT}px;aspect-ratio:unset;overflow:hidden;`;
+        `box-sizing:border-box;margin:0;padding:0;` +
+        `transform:none;filter:none;font-size:16px;` +
+        `width:${SHARE_CARD_WIDTH}px;height:${SHARE_CARD_HEIGHT}px;` +
+        `overflow:visible;`;
+      // Remove the live zoom style from the capture wrapper — it would
+      // double-scale the card on mobile and break the 1080×1080 target.
+      clone.style.removeProperty('zoom');
+      cardEl.setAttribute('data-share-capture-target', 'true');
+      cardEl.style.setProperty('aspect-ratio', '1 / 1', 'important');
+      cardEl.style.setProperty('width', `${SHARE_CARD_WIDTH}px`, 'important');
+      cardEl.style.setProperty('min-width', `${SHARE_CARD_WIDTH}px`, 'important');
+      cardEl.style.setProperty('max-width', `${SHARE_CARD_WIDTH}px`, 'important');
+      cardEl.style.setProperty('height', `${SHARE_CARD_HEIGHT}px`, 'important');
+      cardEl.style.setProperty('min-height', `${SHARE_CARD_HEIGHT}px`, 'important');
+      cardEl.style.setProperty('max-height', `${SHARE_CARD_HEIGHT}px`, 'important');
       wrapper.appendChild(clone);
       document.body.appendChild(wrapper);
+
+      // Route cross-origin image srcs (player headshot, team logo)
+      // through our worker's /asset passthrough, which echoes the bytes
+      // with CORS headers. Without this, html-to-image's fetch-then-
+      // embed cycle fails for assets.nhle.com (no ACAO header), the
+      // IMG collapses to 0×0, and the card's left column loses the
+      // headshot + logo — visually clipping the final PNG.
+      const ALLOW_PROXY_HOSTS = new Set([
+        'assets.nhle.com',
+        'cms.nhl.bamgrid.com',
+        'cdn.nhle.com',
+      ]);
+      const WORKER_BASE = 'https://nhl-api-proxy.deepdivenhl.workers.dev';
+      const imgs = Array.from(cardEl.querySelectorAll('img'));
+      for (const img of imgs) {
+        try {
+          const u = new URL(img.src, window.location.href);
+          if (ALLOW_PROXY_HOSTS.has(u.host)) {
+            img.src = `${WORKER_BASE}/asset?url=${encodeURIComponent(u.toString())}`;
+            img.crossOrigin = 'anonymous';
+          }
+        } catch { /* skip malformed src */ }
+      }
+
+      // Wait for the rewritten images to finish loading so html-to-image
+      // captures them instead of 0×0 broken-image boxes.
+      await Promise.all(imgs.map((img) => {
+        if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          const done = () => resolve();
+          img.addEventListener('load', done, { once: true });
+          img.addEventListener('error', done, { once: true });
+          // Safety timeout — never block the share forever on a bad asset.
+          setTimeout(done, 4000);
+        });
+      }));
+
+      // Force a layout read on the actual card so the browser computes
+      // all descendant widths BEFORE html-to-image snapshots computed
+      // styles. Some mobile browsers defer layout until the element is
+      // visible and the snapshot sees stale narrow widths.
+      void cardEl.getBoundingClientRect();
+      void cardEl.offsetWidth;
 
       // Two frames: first for layout, second for image decode
       await new Promise(r => requestAnimationFrame(r));
@@ -217,7 +353,7 @@ function PlayerProfile() {
 
       let dataUrl: string;
       try {
-        dataUrl = await toPng(clone, {
+        dataUrl = await toPng(cardEl, {
           quality: 0.95,
           backgroundColor: '#0c0c1d',
           pixelRatio: 2,
@@ -228,7 +364,7 @@ function PlayerProfile() {
         });
       } catch {
         console.log('Retrying without external images...');
-        dataUrl = await toPng(clone, {
+        dataUrl = await toPng(cardEl, {
           quality: 0.95,
           backgroundColor: '#0c0c1d',
           pixelRatio: 2,
@@ -244,6 +380,9 @@ function PlayerProfile() {
         });
       } finally {
         document.body.removeChild(wrapper);
+        if (rootFontStyle.parentNode) {
+          rootFontStyle.parentNode.removeChild(rootFontStyle);
+        }
       }
 
       // Try to share, fall back to download
@@ -256,6 +395,11 @@ function PlayerProfile() {
       console.error('Error generating image:', err);
       alert('Unable to generate image. Please use your browser\'s screenshot feature:\n\n• Mac: Cmd+Shift+4\n• Windows: Win+Shift+S\n• Mobile: Volume+Power buttons');
     } finally {
+      // Belt-and-suspenders: remove any stray root-font-lock style left
+      // behind if an exception fired before the normal cleanup path ran.
+      document
+        .querySelectorAll('style[data-share-capture="root-font-lock"]')
+        .forEach((el) => el.parentNode?.removeChild(el));
       setIsSharing(false);
     }
   }, [player]);
@@ -344,22 +488,32 @@ function PlayerProfile() {
     retry: 1,
   });
 
-  // Fetch surplus value data for the card (skaters only, 5+ GP)
+  // Fetch surplus value data for the card (skaters only, 5+ GP).
+  // Surplus now keys off WAR_per_82 (from shareWarResult) rather than
+  // P/GP — captures defense, faceoffs, special teams, and penalty
+  // differential, not just offense. `computePlayerSurplus` returns
+  // null until the WAR tables are loaded and the player has enough
+  // games to produce a stable WAR/82 figure.
   const { data: surplusData } = useQuery({
-    queryKey: ['player-surplus', player?.playerId, player?.featuredStats?.regularSeason?.subSeason?.points, player?.featuredStats?.regularSeason?.subSeason?.gamesPlayed],
+    queryKey: [
+      'player-surplus',
+      player?.playerId,
+      shareWarResult?.WAR_market_per_82,
+      player?.featuredStats?.regularSeason?.subSeason?.gamesPlayed,
+    ],
     queryFn: async () => {
-      if (!player) return null;
+      if (!player || !shareWarResult) return null;
       const stats = player.featuredStats?.regularSeason?.subSeason;
       if (!stats || stats.gamesPlayed < 5) return null;
       return computePlayerSurplus(
         player.playerId,
         `${player.firstName.default} ${player.lastName.default}`,
-        stats.points ?? 0,
+        shareWarResult.WAR_market_per_82,
+        player.position,
         stats.gamesPlayed,
-        player.position
       );
     },
-    enabled: !!player && player.position !== 'G',
+    enabled: !!player && player.position !== 'G' && !!shareWarResult,
     staleTime: ANALYTICS_CACHE.LEAGUE_STATS,
     retry: 1,
   });
@@ -1360,6 +1514,12 @@ function PlayerProfile() {
                     capHit={contractData?.contract.capHit ?? surplusData?.capHit}
                     surplus={surplusData?.surplus}
                     surplusPercentile={surplusData?.surplusPercentile}
+                    openMarketValue={surplusData?.openMarketValue}
+                    earnedSurplus={surplusData?.earnedSurplus}
+                    teamSurplus={surplusData?.teamSurplus}
+                    isELC={surplusData?.isELC}
+                    isRFA={surplusData?.isRFA}
+                    modelRmseDollars={surplusData?.modelRmseDollars}
                     warResult={shareWarResult}
                   />
                   </div>

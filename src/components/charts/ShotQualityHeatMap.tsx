@@ -36,7 +36,9 @@ export default function ShotQualityHeatMap({
   // Calculate height based on viewBox aspect ratio
   const height = propHeight ?? (halfRink ? Math.round(width * (85 / 100)) : Math.round(width * (85 / 200)));
 
-  // Convert shots to SVG coordinates with xG weights
+  // Convert shots to SVG coordinates with xG weights. Use the raw xG even
+  // when it is 0 — floor-flooring to 0.05 would paint fake heat where the
+  // model has no signal, contradicting the "Total xG" summary above.
   const shotPoints = useMemo(() => {
     return shots.map((shot) => {
       const coords = halfRink
@@ -44,7 +46,7 @@ export default function ShotQualityHeatMap({
         : convertToSVGCoords(shot.x, shot.y);
       return {
         ...coords,
-        xGoal: shot.xGoal || 0.05,
+        xGoal: shot.xGoal ?? 0,
       };
     });
   }, [shots, halfRink]);

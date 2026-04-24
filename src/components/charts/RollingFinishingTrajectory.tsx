@@ -105,7 +105,7 @@ export default function RollingFinishingTrajectory({
     <div className="rft">
       {title && <h3 className="rft-title">{title}</h3>}
       <div className="rft-summary">
-        <span>{ordered.length} shots · {goals} goals · {xG.toFixed(1)} xG</span>
+        <span>{ordered.length} attempts · {goals} goals · {xG.toFixed(2)} xG</span>
         <span className="rft-sep">·</span>
         <span className={residual >= 0 ? 'rft-pos' : 'rft-neg'}>
           current G − xG: {residual >= 0 ? '+' : ''}{residual.toFixed(2)}

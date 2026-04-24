@@ -31,6 +31,7 @@ import {
 } from '../services/leagueSkaterAttackDnaService';
 import { fetchGamePlayByPlay, fetchPlayerSeasonGames, type GamePlayByPlay } from '../services/playByPlayService';
 import { fetchCachedTeamPBP, convertCachedToGamePBP } from '../services/cachedDataService';
+import { initEmpiricalXgModel } from '../services/empiricalXgModel';
 import { API_CONFIG } from '../config/api';
 import { getCurrentSeason, formatSeasonString } from '../utils/seasonUtils';
 import type { AttackDNAv2 as AttackDNAv2Type, SeasonTrend, GameMetrics } from '../types/playStyle';
@@ -272,8 +273,13 @@ export default function AttackDNAPage() {
       ? data.allGameIds
       : data.allGameIds.slice(0, range);
 
-    // Fetch play-by-play for selected games (uses edge cache if available)
-    const playByPlayData = await getGameData(data, gamesToUse);
+    // Fetch play-by-play for selected games (uses edge cache if available).
+    // Also ensure the empirical xG lookup is loaded so per-shot xG calls
+    // inside computeAttackDNAv2 resolve to real values instead of 0.
+    const [playByPlayData] = await Promise.all([
+      getGameData(data, gamesToUse),
+      initEmpiricalXgModel(),
+    ]);
 
     // Compute v2 Attack DNA
     const dna = computeAttackDNAv2(

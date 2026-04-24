@@ -213,7 +213,10 @@ export async function fetchGamePlayByPlay(gameId: number): Promise<GamePlayByPla
             timeInPeriod: play.timeInPeriod || '00:00',
             xCoord: play.details.xCoord,
             yCoord: play.details.yCoord,
-            shotType: play.details.shotType || 'wrist',
+            // Keep the raw value — downstream xG lookup falls back to the
+            // shot-type-agnostic bucket when this is empty. Defaulting to
+            // "wrist" would silently feed a plausible-but-wrong xG.
+            shotType: play.details.shotType || '',
             result: play.typeDescKey as 'goal' | 'shot-on-goal' | 'missed-shot' | 'blocked-shot',
             shootingPlayerId: shooterId,
             goalieInNetId: play.details?.goalieInNetId,
@@ -584,7 +587,9 @@ export function convertToShotAttempt(
   else if (shotEvent.result === 'missed-shot') type = 'miss';
   else type = 'block';
 
-  // Map shot type
+  // Map shot type. Empty / unrecognized → 'unknown' so the empirical
+  // lookup falls back to the shot-type-agnostic bucket instead of
+  // silently treating every unknown shot as a wrister.
   const shotTypeMap: Record<string, 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap'> = {
     'wrist': 'wrist',
     'slap': 'slap',
@@ -595,7 +600,8 @@ export function convertToShotAttempt(
     'wrap-around': 'wrap',
   };
 
-  const shotType = shotTypeMap[shotEvent.shotType?.toLowerCase()] || 'wrist';
+  const shotType: 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap' | 'unknown' =
+    shotTypeMap[shotEvent.shotType?.toLowerCase()] || 'unknown';
 
   // Parse strength from situation code: [awayGoalies][awaySkaters][homeSkaters][homeGoalies]
   let strength: '5v5' | 'PP' | 'SH' | '4v4' | '3v3' = '5v5';

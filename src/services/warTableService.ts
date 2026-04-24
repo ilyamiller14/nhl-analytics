@@ -34,6 +34,12 @@ export interface WARSkaterRow {
   secondaryAssists: number;
   penaltiesDrawn: number;
   penaltiesTaken: number;
+  // v4: severity-weighted penalty minutes. When present, warService
+  // values discipline as `minutes × ppXGPerMinute` so a 5-min major
+  // costs 2.5× a regular 2-min minor. Falls back to the count-based
+  // formula when absent (older artifacts).
+  penaltyMinutesDrawn?: number;
+  penaltyMinutesTaken?: number;
   // v2 additions — zero when worker hasn't populated yet; present when
   // shift × shot integration is live in the worker.
   onIceShotsFor?: number;
@@ -49,6 +55,16 @@ export interface WARSkaterRow {
   giveaways?: number;
   hits?: number;
   blocks?: number;
+  // v4: zone-aware faceoffs — raw counts per zone. When present, the
+  // WAR faceoff component weights wins/losses by the zone's empirical
+  // goal-rate value (LeagueContext.ozGoalRatePerWin etc.) instead of
+  // the averaged faceoffValuePerWin.
+  ozFaceoffWins?: number;
+  ozFaceoffLosses?: number;
+  dzFaceoffWins?: number;
+  dzFaceoffLosses?: number;
+  nzFaceoffWins?: number;
+  nzFaceoffLosses?: number;
 }
 
 export interface WARGoalieRow {
@@ -124,6 +140,14 @@ export interface LeagueContext {
   //   blockGoalValue       = empirical shot-suppression × xG-per-shot
   // Absent = component is zeroed and a note is emitted.
   faceoffValuePerWin?: number;
+  // v4: zone-split follow-up values — exposes what the worker
+  // internally averaged into faceoffValuePerWin so the client can
+  // credit OZ / DZ wins at their actual empirical rates (OZ ≈ goals
+  // scored in 30s after an OZ win, DZ ≈ goals prevented in 30s after
+  // a DZ win). NZ wins intentionally have no value — follow-up goals
+  // from neutral-zone faceoffs are noisy.
+  ozGoalRatePerWin?: number;
+  dzGoalRateAgainstPerWin?: number;
   takeawayGoalValue?: number;
   giveawayGoalValue?: number;
   hitGoalValue?: number;

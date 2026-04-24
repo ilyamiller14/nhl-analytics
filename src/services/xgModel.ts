@@ -156,14 +156,16 @@ export function calculateGoalsAboveExpected(
 
 function mapShotType(
   shotType: string
-): 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap' {
+): 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap' | 'unknown' {
   const lowerType = shotType?.toLowerCase() || '';
+  if (!lowerType) return 'unknown';
+  if (lowerType.includes('wrist')) return 'wrist';
   if (lowerType.includes('slap')) return 'slap';
   if (lowerType.includes('snap')) return 'snap';
   if (lowerType.includes('backhand')) return 'backhand';
   if (lowerType.includes('tip') || lowerType.includes('deflect')) return 'tip';
   if (lowerType.includes('wrap')) return 'wrap';
-  return 'wrist';
+  return 'unknown';
 }
 
 /**

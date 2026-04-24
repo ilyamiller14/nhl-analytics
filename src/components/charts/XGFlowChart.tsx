@@ -106,7 +106,7 @@ export default function XGFlowChart({ data, playerName }: XGFlowChartProps) {
             On-Ice xG
           </div>
           <div style={{ fontSize: '1.5rem', fontWeight: 600, color: '#f59e0b' }}>
-            {latestData.cumulativeXG.toFixed(1)}
+            {latestData.cumulativeXG.toFixed(2)}
           </div>
         </div>
         <div style={{ flex: 1 }}>
@@ -195,7 +195,7 @@ export default function XGFlowChart({ data, playerName }: XGFlowChartProps) {
                   </div>
                   <div style={{ fontSize: '0.875rem', marginBottom: '0.25rem' }}>
                     <span style={{ color: '#f59e0b' }}>On-Ice xG: </span>
-                    <strong>{data.cumulativeXG.toFixed(1)}</strong>
+                    <strong>{data.cumulativeXG.toFixed(2)}</strong>
                   </div>
                   <div style={{ fontSize: '0.875rem', marginBottom: '0.25rem' }}>
                     <span style={{ color: '#6b7280' }}>This game: </span>

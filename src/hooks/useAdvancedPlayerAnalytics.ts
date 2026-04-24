@@ -11,11 +11,11 @@ import {
   fetchGamePlayByPlay,
   fetchPlayerSeasonGames,
   filterPlayerShots,
-  calculateShotMetrics,
   type ShotEvent,
 } from '../services/playByPlayService';
 import { analyzeDefensiveCoverage } from '../services/defensiveAnalytics';
-import { calculateXG, calculateXGDifferential } from '../services/xgModel';
+import { calculateShotEventXG } from '../services/xgModel';
+import { initEmpiricalXgModel } from '../services/empiricalXgModel';
 import { calculateRollingMetrics, type GameMetrics, type RollingMetrics } from '../services/rollingAnalytics';
 import { getCurrentSeason } from '../utils/seasonUtils';
 
@@ -119,6 +119,13 @@ export function useAdvancedPlayerAnalytics(
       setError(null);
 
       try {
+        // Block on the empirical xG lookup. If this hook runs before the
+        // lookup loads (cold browser / slow worker), every calculateXG()
+        // returns 0 and the all-zero result gets cached in state forever
+        // because the useEffect only re-runs on [playerId, teamId, season].
+        await initEmpiricalXgModel();
+        if (isCancelled) return;
+
         // Get player's games
         const gameIds = await fetchPlayerSeasonGames(playerId!, season);
 
@@ -193,16 +200,14 @@ export function useAdvancedPlayerAnalytics(
               shotAttemptsAgainst: shotsAgainst.length,
               unblockedFor: shotsFor.filter((s) => s.result !== 'blocked-shot').length,
               unblockedAgainst: shotsAgainst.filter((s) => s.result !== 'blocked-shot').length,
-              xGFor: shotsFor.reduce((sum, s) => {
-                const { distance, angle } = calculateShotMetrics(s.xCoord, s.yCoord);
-                const result = calculateXG({ distance, angle, shotType: 'wrist', strength: '5v5' });
-                return sum + result.xGoal;
-              }, 0),
-              xGAgainst: shotsAgainst.reduce((sum, s) => {
-                const { distance, angle } = calculateShotMetrics(s.xCoord, s.yCoord);
-                const result = calculateXG({ distance, angle, shotType: 'wrist', strength: '5v5' });
-                return sum + result.xGoal;
-              }, 0),
+              xGFor: shotsFor.reduce(
+                (sum, s) => sum + calculateShotEventXG(s, { priorShots: shotsFor }),
+                0
+              ),
+              xGAgainst: shotsAgainst.reduce(
+                (sum, s) => sum + calculateShotEventXG(s, { priorShots: shotsAgainst }),
+                0
+              ),
               goalsFor: shotsFor.filter((s) => s.result === 'goal').length,
               goalsAgainst: shotsAgainst.filter((s) => s.result === 'goal').length,
               toi: 0, // Would need shift data
@@ -217,59 +222,31 @@ export function useAdvancedPlayerAnalytics(
 
         if (isCancelled) return;
 
-        // Calculate xG metrics using corrected angle formula
-        const calculateShotAngle = (xCoord: number, yCoord: number) => {
-          // Net is at x=89 or x=-89 depending on zone
-          const netX = xCoord >= 0 ? 89 : -89;
-          const distanceFromGoalLine = Math.abs(netX - xCoord);
-          const lateralDistance = Math.abs(yCoord);
-          // Angle 0 = center, higher = more to the side
-          return distanceFromGoalLine > 0
-            ? Math.atan(lateralDistance / distanceFromGoalLine) * (180 / Math.PI)
-            : 90;
+        // Sum on-ice xG using the empirical model with real strength /
+        // rebound / rush / score-state / prev-event context derived from
+        // each shot's surrounding events.
+        const xGF = playerOnIceShotsFor.reduce(
+          (sum, s) => sum + calculateShotEventXG(s, { priorShots: playerOnIceShotsFor }),
+          0
+        );
+        const xGA = playerOnIceShotsAgainst.reduce(
+          (sum, s) => sum + calculateShotEventXG(s, { priorShots: playerOnIceShotsAgainst }),
+          0
+        );
+        const xGDiffTotal = xGF - xGA;
+        const xGMetrics = {
+          xGF: parseFloat(xGF.toFixed(2)),
+          xGA: parseFloat(xGA.toFixed(2)),
+          xGDiff: parseFloat(xGDiffTotal.toFixed(2)),
+          xGPercent: parseFloat(((xGF + xGA > 0 ? (xGF / (xGF + xGA)) * 100 : 50)).toFixed(1)),
         };
 
-        const calculateDistance = (xCoord: number, yCoord: number) => {
-          const netX = xCoord >= 0 ? 89 : -89;
-          return Math.sqrt(Math.pow(xCoord - netX, 2) + Math.pow(yCoord, 2));
-        };
-
-        // Convert on-ice shots FOR to xG features
-        // These are shots by player's team when player was actually on the ice
-        const shotsForFeatures = playerOnIceShotsFor.map((shot) => ({
-          distance: calculateDistance(shot.xCoord, shot.yCoord),
-          angle: calculateShotAngle(shot.xCoord, shot.yCoord),
-          shotType: mapShotType(shot.shotType),
-          strength: '5v5' as const,
-          isRebound: false,
-          isRushShot: false,
-        }));
-
-        // Convert on-ice shots AGAINST to xG features
-        // These are shots by opposing team when player was actually on the ice
-        const shotsAgainstFeatures = playerOnIceShotsAgainst.map((shot) => ({
-          distance: calculateDistance(shot.xCoord, shot.yCoord),
-          angle: calculateShotAngle(shot.xCoord, shot.yCoord),
-          shotType: mapShotType(shot.shotType),
-          strength: '5v5' as const,
-          isRebound: false,
-          isRushShot: false,
-        }));
-
-        // Calculate player on-ice xG metrics using actual on-ice data
-        const xGMetrics = calculateXGDifferential(shotsForFeatures, shotsAgainstFeatures);
-
-        // Calculate Individual xG (ixG) using canonical xG model for
-        // consistency. Enrich each shot with chronological context
-        // (gameId, gameDate, period, timeInPeriod) for downstream visuals.
+        // Calculate Individual xG (ixG) using the full-context xG model.
+        // priorShots is scoped to the player's own shots so the empirical
+        // rebound lookup still fires on consecutive same-player shots.
         const playerShotsWithXG = playerOwnShotContexts.map(({ gameId: gid, gameDate: gdate, shot }) => {
-          const distance = calculateDistance(shot.xCoord, shot.yCoord);
-          const angle = calculateShotAngle(shot.xCoord, shot.yCoord);
-          const prediction = calculateXG({
-            distance,
-            angle,
-            shotType: mapShotType(shot.shotType),
-            strength: '5v5', // TODO: parse actual strength from situationCode
+          const xGoal = calculateShotEventXG(shot, {
+            priorShots: playerOwnShotContexts.map((c) => c.shot),
           });
           return {
             x: shot.xCoord,
@@ -277,7 +254,7 @@ export function useAdvancedPlayerAnalytics(
             result: shot.result === 'goal' ? 'goal' as const :
                     shot.result === 'shot-on-goal' ? 'shot' as const :
                     shot.result === 'missed-shot' ? 'miss' as const : 'block' as const,
-            xGoal: prediction.xGoal,
+            xGoal,
             shotType: mapShotType(shot.shotType),
             period: shot.period,
             timeInPeriod: shot.timeInPeriod,
@@ -371,12 +348,14 @@ export function useAdvancedPlayerAnalytics(
  */
 function mapShotType(
   shotType: string
-): 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap' {
+): 'wrist' | 'slap' | 'snap' | 'backhand' | 'tip' | 'wrap' | 'unknown' {
   const lowerType = shotType?.toLowerCase() || '';
+  if (!lowerType) return 'unknown';
+  if (lowerType.includes('wrist')) return 'wrist';
   if (lowerType.includes('slap')) return 'slap';
   if (lowerType.includes('snap')) return 'snap';
   if (lowerType.includes('backhand')) return 'backhand';
   if (lowerType.includes('tip') || lowerType.includes('deflect')) return 'tip';
   if (lowerType.includes('wrap')) return 'wrap';
-  return 'wrist';
+  return 'unknown';
 }

@@ -23,24 +23,25 @@ interface Props {
   compact?: boolean;
 }
 
-// Distinct colors per domain:
-//   green/cyan  → individual offense
-//   teal/rose   → on-ice offense / defense
-//   purple      → special teams (faceoffs)
-//   slate       → micro (hits/blocks)
-//   red/gray    → turnovers / replacement
-//   gold        → discipline (penalties)
-const SEGMENT_COLORS = {
-  finishing: '#34d399',       // green  — individual finishing (GAX)
-  playmaking: '#38bdf8',      // cyan   — primary-assist setup value
-  evOffense: '#2dd4bf',       // teal   — on-ice xGF vs league median
-  evDefense: '#fb7185',       // rose   — on-ice xGA vs league median
-  faceoffs: '#a855f7',        // purple — special-teams / faceoffs
-  turnovers: '#f97316',       // orange — takeaways − giveaways
-  micro: '#94a3b8',           // slate  — hits + shot blocks
-  penalties: '#fbbf24',       // gold   — discipline
-  replacement: 'rgba(148, 163, 184, 0.65)', // gray — replacement floor
+// v5 palette change: sign-driven diverging color instead of
+// per-component hues. Public tools (JFresh, Evolving-Hockey,
+// MoneyPuck) all use a single red→neutral→green ramp keyed on sign
+// because 8+ component hues fail common colorblindness simulations
+// (deuteranopia collapses green/cyan/teal, protanopia collapses
+// rose/orange). Component identity is conveyed by row label.
+// Replacement baseline stays gray as a deliberate neutral.
+const BAR_COLORS = {
+  positive: '#34d399',                  // green — contribution above zero
+  negative: '#f87171',                  // red   — contribution below zero
+  neutral: 'rgba(148, 163, 184, 0.6)',  // slate — replacement baseline
 } as const;
+
+function colorForValue(value: number, isReplacement = false): string {
+  if (isReplacement) return BAR_COLORS.neutral;
+  if (value > 0.01) return BAR_COLORS.positive;
+  if (value < -0.01) return BAR_COLORS.negative;
+  return BAR_COLORS.neutral;
+}
 
 type ComponentKey = keyof WARResult['components'];
 
@@ -86,7 +87,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       key: 'finishing',
       label: 'Finishing (G − xG)',
       value: c.finishing,
-      color: SEGMENT_COLORS.finishing,
+      color: '',
       desc: 'Shooting skill above expected: iG − ixG on shots taken. This credits CONVERSION skill only — taking many shots at league-average rate scores 0 here. Volume scoring shows up under EV Offense via RAPM\'s on-ice xGF coefficient (which includes this player\'s own shot contribution).',
       pending: false,
       sourceLabel: 'from iG / ixG on shots taken',
@@ -95,7 +96,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       key: 'playmaking',
       label: 'Playmaking',
       value: c.playmaking,
-      color: SEGMENT_COLORS.playmaking,
+      color: "",
       desc: `Primary assists × league median ixG/60 (${s.leagueMedianGARPerGame.toFixed(2)} league-median GAR/game anchor, ${result.position})`,
       pending: false,
       sourceLabel: `league median ixG/60 for ${result.position}`,
@@ -104,7 +105,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       key: 'evOffense',
       label: 'EV offense (on-ice)',
       value: c.evOffense,
-      color: SEGMENT_COLORS.evOffense,
+      color: "",
       desc: evOffPending
         ? 'Pending: median on-ice xGF/60 missing from league_context.'
         : `(player on-ice xGF/60 − team off-ice xGF/60) × EV-hours × 1/5 (skater share — line credit split among 5 skaters)`,
@@ -115,7 +116,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       key: 'evDefense',
       label: 'EV defense (on-ice)',
       value: c.evDefense,
-      color: SEGMENT_COLORS.evDefense,
+      color: "",
       desc: evDefPending
         ? 'Pending: median on-ice xGA/60 missing from league_context.'
         : `(team off-ice xGA/60 − player on-ice xGA/60) × EV-hours × 1/5 (skater share)`,
@@ -126,7 +127,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       key: 'powerPlay',
       label: 'Power play',
       value: c.powerPlay,
-      color: SEGMENT_COLORS.faceoffs,
+      color: "",
       desc: 'PP xGF contribution above what a league-average PP skater would produce in the same PP minutes. Share-weighted by actual on-ice skater count during each PP window.',
       pending: c.powerPlay === 0 && (!result.gamesPlayed || result.gamesPlayed === 0),
       sourceLabel: 'rapm artifact.ppXGF − leaguePpXgfPerMin × ppMinutes',
@@ -135,7 +136,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       key: 'penaltyKill',
       label: 'Penalty kill',
       value: c.penaltyKill,
-      color: SEGMENT_COLORS.evDefense,
+      color: "",
       desc: 'PK defensive value — expected opposing xG at league PK rate minus opposing xG actually allowed while this player defended. Positive = team gave up less than average PK while this skater was on.',
       pending: c.penaltyKill === 0 && (!result.gamesPlayed || result.gamesPlayed === 0),
       sourceLabel: 'rapm artifact.pkXGA − leaguePkXgaPerMin × pkMinutes (sign-flipped)',
@@ -144,7 +145,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       key: 'faceoffs',
       label: 'Faceoffs',
       value: c.faceoffs,
-      color: SEGMENT_COLORS.faceoffs,
+      color: "",
       desc: faceoffPending
         ? 'Pending: faceoffValuePerWin missing from league_context.'
         : `(wins − losses) × ${s.faceoffValuePerWin!.toFixed(4)} goals per net-win`,
@@ -155,7 +156,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       key: 'turnovers',
       label: 'Turnovers',
       value: c.turnovers,
-      color: SEGMENT_COLORS.turnovers,
+      color: "",
       desc: turnoverPending
         ? 'Pending: takeaway/giveaway goal values missing from league_context.'
         : `takeaways × ${s.takeawayGoalValue!.toFixed(4)} − giveaways × ${s.giveawayGoalValue!.toFixed(4)} goals`,
@@ -173,7 +174,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       key: 'penalties',
       label: 'Discipline',
       value: c.penalties,
-      color: SEGMENT_COLORS.penalties,
+      color: "",
       desc: `(drawn − taken) × ${s.penaltyValue.toFixed(3)} goals per penalty (this season's PP xG/min × 2)`,
       pending: false,
       sourceLabel: 'league_context.ppXGPerMinute × 2',
@@ -182,22 +183,17 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       key: 'replacement',
       label: 'vs replacement',
       value: c.replacementAdjust,
-      color: SEGMENT_COLORS.replacement,
+      color: "",
       desc: `Replacement = 10th-%ile ${result.position} at ${s.replacementGARPerGame.toFixed(3)} GAR/game this season`,
       pending: false,
       sourceLabel: `league_context.skaters.${result.position}.replacementGARPerGame`,
     },
   ];
-  // Finishing and Playmaking are individual-skill residuals that also
-  // flow into RAPM's EV Offense coefficient (a player's on-ice xGF
-  // includes their own shots and their line-mates' shots they set up).
-  // Crediting them as separate WAR bars would double-count. The values
-  // stay in WARComponents (individual stats), but the breakdown shows
-  // only RAPM-derived components + discipline/faceoffs/turnovers + ST +
-  // replacement — which is the set that genuinely sums to WAR.
-  const segments: Segment[] = rawSegments.filter(
-    seg => seg.key !== 'finishing' && seg.key !== 'playmaking',
-  );
+  // v5.1: Finishing and Playmaking are BACK in the WAR sum at full
+  // weight (matches Evolving-Hockey / Sprigings methodology). Chart
+  // shows them as the first two rows so the sum visibly reconciles to
+  // the headline WAR.
+  const segments: Segment[] = rawSegments;
 
   // Convert every component to wins (component_goals / marginal goals
   // per win). The chart is titled "Wins Above Replacement"; the bars
@@ -207,10 +203,26 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
   const gpw = Math.max(0.001, s.marginalGoalsPerWin);
   const segValuesWin = segments.map(seg => seg.value / gpw);
 
+  // Pace multiplier — bars are cumulative across games played; this
+  // converts any segment to its 82-game pace so a viewer can mentally
+  // reconcile a partial-season number against a full-season expectation.
+  const paceMult = result.gamesPlayed > 0 ? 82 / result.gamesPlayed : 0;
+
+  // Projection delta = (82-GP pace − cumulative). Rendered as a faded
+  // extension on the same bar so a viewer sees at a glance "here's what
+  // this player has contributed so far, and here's what extrapolating
+  // that pace through a full 82-GP schedule would add." Only shown for
+  // <80 GP since full-season veterans have zero delta.
+  const SHOW_PROJECTION = result.gamesPlayed > 0 && result.gamesPlayed < 80;
+  const segValuesProj = segments.map((_, i) =>
+    SHOW_PROJECTION ? segValuesWin[i] * paceMult : 0);
+
   const maxAbs = Math.max(
     0.05,
     ...segValuesWin.map(v => Math.abs(v)),
+    ...(SHOW_PROJECTION ? segValuesProj.map(v => Math.abs(v)) : []),
     Math.abs(result.WAR),
+    SHOW_PROJECTION ? Math.abs(result.WAR_per_82) : 0,
   );
 
   const pad = compact
@@ -221,30 +233,34 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
   const pxPerWin = plotW / 2 / maxAbs;
   const rowHeight = compact ? 18 : 28;
   const rowGap = compact ? 2 : 5;
-  // `54` in the non-compact layout reserved space for the "Total WAR"
-  // row + x-axis label. Compact mode drops the x-axis label row, so
-  // the extra only covers the total-WAR row.
   const extraRows = compact ? 28 : 54;
   const height = pad.top + segments.length * (rowHeight + rowGap) + extraRows + pad.bottom;
 
   const warClass = result.WAR_per_82 > 1 ? 'pos' : result.WAR_per_82 < 0 ? 'neg' : 'neutral';
-
-  // Pace multiplier — bars are cumulative across games played; this
-  // converts any segment to its 82-game pace so a viewer can mentally
-  // reconcile a partial-season number against a full-season expectation.
-  const paceMult = result.gamesPlayed > 0 ? 82 / result.gamesPlayed : 0;
 
   return (
     <div className="war-break">
       {title && <h3 className="war-title">{title}</h3>}
 
       <p className="war-explainer">
-        <strong>How to read this:</strong> bars are <em>cumulative wins</em> across the
-        {' '}{result.gamesPlayed} games this player has played, and they sum to the
-        {' '}<strong>{result.WAR.toFixed(2)} WAR</strong> shown to the left. Multiply any bar by
-        {' '}<strong>{paceMult.toFixed(2)}× </strong>
-        (i.e. 82 ÷ {result.gamesPlayed}) to get its 82-game pace.
-        Each component is its goal-units value ÷ {gpw.toFixed(2)} goals-per-win.
+        <strong>How to read this:</strong>
+        {SHOW_PROJECTION ? (
+          <>
+            {' '}each bar is cumulative WAR through {result.gamesPlayed} GP
+            ({(result.gamesPlayed / 82 * 100).toFixed(0)}% of an 82-GP season).
+            The <strong>dashed tick</strong> marks the 82-GP pace projection
+            (×{paceMult.toFixed(2)}) — where the bar would end if the current
+            rate held through the remaining {82 - result.gamesPlayed} games.
+            Numeric label is the cumulative value.
+          </>
+        ) : (
+          <>
+            {' '}bars are <em>cumulative wins</em> across all
+            {' '}{result.gamesPlayed} games, summing to
+            {' '}<strong>{result.WAR.toFixed(2)} WAR</strong>.
+          </>
+        )}
+        {' '}Each component is its goal-units value ÷ {gpw.toFixed(2)} goals-per-win.
       </p>
 
       <div className="war-headline">
@@ -288,12 +304,26 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
 
         {segments.map((seg, i) => {
           const wins = segValuesWin[i];
+          const winsProj = segValuesProj[i];
           const y = pad.top + 14 + i * (rowHeight + rowGap);
-          const absV = Math.abs(wins);
-          const w = absV * pxPerWin;
-          const barX = wins >= 0 ? zeroX : zeroX - w;
-          const dim = seg.pending || wins === 0;
-          const opacity = seg.pending ? 0.25 : (wins === 0 ? 0.35 : 0.85);
+          const pendingPill = seg.pending;
+          // Single bar per segment. The bright portion = cumulative
+          // (what's already happened). The faded tail = extrapolated
+          // delta to 82-GP pace (cumulative × paceMult − cumulative).
+          // Both grow from zero on the same side of the axis; the
+          // projection is drawn AFTER the cumulative so it looks like a
+          // natural extension of the same bar.
+          const cumAbs = Math.abs(wins);
+          const projAbs = Math.abs(winsProj);
+          const deltaAbs = Math.max(0, projAbs - cumAbs); // only tail; same sign as wins
+          const sign = wins >= 0 ? 1 : (winsProj >= 0 ? 1 : -1);
+          const cumW = cumAbs * pxPerWin;
+          const deltaW = deltaAbs * pxPerWin;
+          const barStartX = sign >= 0 ? zeroX : zeroX - cumW;
+          // Delta extends from the END of the cumulative segment,
+          // further away from zero.
+          const deltaStartX = sign >= 0 ? zeroX + cumW : zeroX - cumW - deltaW;
+          const dim = pendingPill || (cumAbs === 0 && deltaAbs === 0);
           return (
             <g key={seg.key}>
               <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 3 : 4)}
@@ -301,60 +331,99 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
                 fill={dim ? '#64748b' : '#cbd5f5'}>
                 {seg.label}
               </text>
-              <rect x={barX} y={y} width={Math.max(w, 1)} height={rowHeight}
-                fill={seg.color} opacity={opacity} rx={3}>
-                <title>
-                  {`${seg.label}
-Cumulative: ${fmt(wins)} wins (${fmt(seg.value)} goals ÷ ${gpw.toFixed(2)} goals/win)
-82-game pace: ${fmt(wins * paceMult)} wins (${result.gamesPlayed} GP × ${paceMult.toFixed(2)}× pace)
-${seg.desc}
-source: ${seg.sourceLabel}`}
-                </title>
-              </rect>
-              {seg.pending ? (
+              {pendingPill ? (
                 <g>
-                  <rect x={barX + 4} y={y + rowHeight / 2 - 7}
+                  <rect x={zeroX - 39} y={y + rowHeight / 2 - 7}
                     width={78} height={14} rx={7}
                     fill="rgba(71, 85, 105, 0.6)"
                     stroke="rgba(148, 163, 184, 0.4)" />
-                  <text x={barX + 43} y={y + rowHeight / 2 + 3}
+                  <text x={zeroX} y={y + rowHeight / 2 + 3}
                     textAnchor="middle" fontSize={9}
                     fill="#e2e8f0" fontWeight={600}
                     data-pending="true">
                     data pending
                   </text>
                 </g>
-              ) : (() => {
-                // Decide whether the numeric label sits OUTSIDE the bar
-                // (short bars) or INSIDE (long bars whose outside-placement
-                // would collide with the row's category label on the left,
-                // or run off the plot on the right). ~40px is enough room
-                // for "-12.34" at fontSize 12.
-                const valueTextWidth = 40;
-                const outsideX = wins >= 0 ? barX + w + 6 : barX - 6;
-                const collidesLeft = wins < 0 && (outsideX - valueTextWidth) < pad.left + 4;
-                const collidesRight = wins > 0 && (outsideX + valueTextWidth) > pad.left + plotW;
-                const inside = collidesLeft || collidesRight;
-                const insideX = wins >= 0 ? barX + w - 6 : barX + 6;
-                return (
-                  <text x={inside ? insideX : outsideX}
-                    y={y + rowHeight / 2 + (compact ? 3 : 4)}
-                    textAnchor={inside ? (wins >= 0 ? 'end' : 'start') : (wins >= 0 ? 'start' : 'end')}
-                    fontSize={compact ? 10 : 12}
-                    fill={inside ? '#0f172a' : (wins > 0 ? '#34d399' : wins < 0 ? '#f87171' : '#64748b')}
-                    fontWeight={600}>
-                    {fmt(wins)}
-                  </text>
-                );
-              })()}
+              ) : (
+                <>
+                  {/* Cumulative bar — sign-driven diverging color. */}
+                  <rect x={barStartX} y={y} width={Math.max(cumW, 1)} height={rowHeight}
+                    fill={colorForValue(wins, seg.key === 'replacement')}
+                    opacity={cumAbs === 0 ? 0.25 : 0.9} rx={2}>
+                    <title>
+                      {`${seg.label}
+Cumulative: ${fmt(wins)} wins · ${result.gamesPlayed} GP
+82-GP pace: ${fmt(winsProj)} wins (×${paceMult.toFixed(2)})
+${seg.desc}
+source: ${seg.sourceLabel}`}
+                    </title>
+                  </rect>
+                  {/* Pace tick — single vertical mark at the projected
+                      82-GP endpoint. Cleaner than a faded tail (agent
+                      feedback: stacked fill invites readers to sum the
+                      two segments). The tick shows projection without
+                      claiming it as cumulative evidence. */}
+                  {SHOW_PROJECTION && deltaW > 0 && (
+                    <g>
+                      <line
+                        x1={deltaStartX + deltaW}
+                        x2={deltaStartX + deltaW}
+                        y1={y - 3}
+                        y2={y + rowHeight + 3}
+                        stroke={colorForValue(winsProj, seg.key === 'replacement')}
+                        strokeWidth={2}
+                        strokeDasharray="2 2"
+                        opacity={0.85}
+                      />
+                      <title>
+                        {`${seg.label} — 82-GP pace marker at ${fmt(winsProj)} wins`}
+                      </title>
+                    </g>
+                  )}
+                  {/* Value label — shows cumulative; 82-GP pace in tooltip.
+                      Anchoring the visible number to cumulative avoids
+                      the "bar says X, label says Y" disagreement the
+                      faded-tail variant had. */}
+                  {(() => {
+                    const valueTextWidth = 44;
+                    const outsideX = sign >= 0 ? barStartX + cumW + 6 : barStartX - 6;
+                    const collidesLeft = sign < 0 && (outsideX - valueTextWidth) < pad.left + 4;
+                    const collidesRight = sign > 0 && (outsideX + valueTextWidth) > pad.left + plotW;
+                    const inside = collidesLeft || collidesRight;
+                    const insideX = sign >= 0 ? barStartX + cumW - 6 : barStartX + 6;
+                    return (
+                      <text x={inside ? insideX : outsideX}
+                        y={y + rowHeight / 2 + 4}
+                        textAnchor={inside ? (sign >= 0 ? 'end' : 'start') : (sign >= 0 ? 'start' : 'end')}
+                        fontSize={compact ? 10 : 12}
+                        fill={inside ? '#0f172a' : (wins > 0 ? '#34d399' : wins < 0 ? '#f87171' : '#64748b')}
+                        fontWeight={600}>
+                        {fmt(wins)}
+                      </text>
+                    );
+                  })()}
+                </>
+              )}
             </g>
           );
         })}
 
         {(() => {
           const y = pad.top + 14 + segments.length * (rowHeight + rowGap) + 10;
-          const totalW = Math.abs(result.WAR) * pxPerWin;
-          const totalX = result.WAR >= 0 ? zeroX : zeroX - totalW;
+          const cum = result.WAR;
+          const proj = result.WAR_per_82;
+          const cumAbs = Math.abs(cum);
+          const projAbs = Math.abs(proj);
+          const deltaAbs = Math.max(0, projAbs - cumAbs);
+          const sign = cum >= 0 ? 1 : (proj >= 0 ? 1 : -1);
+          const cumW = cumAbs * pxPerWin;
+          const deltaW = deltaAbs * pxPerWin;
+          const barStartX = sign >= 0 ? zeroX : zeroX - cumW;
+          const deltaStartX = sign >= 0 ? zeroX + cumW : zeroX - cumW - deltaW;
+          void deltaW; // used in tick marker below
+          const posColor = '#10b981';
+          const negColor = '#dc2626';
+          const mainColor = sign >= 0 ? posColor : negColor;
           return (
             <g>
               <line x1={pad.left - 20} x2={pad.left + plotW}
@@ -362,19 +431,32 @@ source: ${seg.sourceLabel}`}
                 stroke="rgba(148, 163, 184, 0.3)" />
               <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 3 : 4)}
                 textAnchor="end" fontSize={compact ? 11 : 13} fill="#f3f4f6" fontWeight={700}>Total WAR</text>
-              <rect x={totalX} y={y} width={Math.max(totalW, 1)} height={rowHeight}
-                fill={result.WAR >= 0 ? '#10b981' : '#dc2626'} rx={3}>
-                <title>
-                  {`Total WAR: ${fmt(result.WAR)} wins (${fmt(c.totalGAR)} GAR ÷ ${gpw.toFixed(2)} goals/win)`}
-                </title>
+              <rect x={barStartX} y={y} width={Math.max(cumW, 1)} height={rowHeight}
+                fill={mainColor} rx={2}>
+                <title>{`Total WAR — cumulative: ${fmt(cum)} wins · 82-GP pace: ${fmt(proj)} wins`}</title>
               </rect>
-              <text x={result.WAR >= 0 ? totalX + totalW + 6 : totalX - 6}
+              {SHOW_PROJECTION && deltaW > 0 && (
+                <g>
+                  <line
+                    x1={deltaStartX + deltaW}
+                    x2={deltaStartX + deltaW}
+                    y1={y - 3}
+                    y2={y + rowHeight + 3}
+                    stroke={mainColor}
+                    strokeWidth={2}
+                    strokeDasharray="2 2"
+                    opacity={0.9}
+                  />
+                  <title>{`82-GP pace marker at ${fmt(proj)} WAR`}</title>
+                </g>
+              )}
+              <text x={sign >= 0 ? barStartX + cumW + 6 : barStartX - 6}
                 y={y + rowHeight / 2 + (compact ? 3 : 4)}
-                textAnchor={result.WAR >= 0 ? 'start' : 'end'}
+                textAnchor={sign >= 0 ? 'start' : 'end'}
                 fontSize={compact ? 11 : 13}
-                fill={result.WAR >= 0 ? '#34d399' : '#f87171'}
+                fill={mainColor === posColor ? '#34d399' : '#f87171'}
                 fontWeight={700}>
-                {fmt(result.WAR)}
+                {fmt(cum)}
               </text>
             </g>
           );
