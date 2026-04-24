@@ -80,6 +80,27 @@ export interface WARSkaterRow {
   // playmaking value). Replaces the `primaryAssists × leagueIxGPerShot`
   // approximation with the exact xG of shots the passer created.
   assistedShotIxG?: number;
+  // v5.5: per-strength shooter splits of iG / ixG / shots. Lets the
+  // client scope the finishing residual to 5v5 (orthogonal to RAPM's
+  // on-ice xGF, which is basically an EV signal), then optionally price
+  // PP/SH finishing separately against their own baselines. Older
+  // artifacts without these fields degrade to the aggregate values.
+  iG_5v5?: number;
+  ixG_5v5?: number;
+  shots_5v5?: number;
+  iG_pp?: number;
+  ixG_pp?: number;
+  shots_pp?: number;
+  iG_sh?: number;
+  ixG_sh?: number;
+  shots_sh?: number;
+  // v5.5: per-strength A1 aggregates — assistedShotG_5v5 is A1 count at
+  // 5v5, assistedShotIxG_5v5 is the summed ixG of those 5v5 assisted
+  // shots. Enables `playmaking_residual_5v5 = (A1_5v5 − ixG_5v5) × α`.
+  // assistedShotG_total should equal primaryAssists (self-consistency).
+  assistedShotG_5v5?: number;
+  assistedShotIxG_5v5?: number;
+  assistedShotG_total?: number;
 }
 
 export interface WARGoalieRow {
@@ -196,8 +217,35 @@ export interface LeagueContext {
   /** v5.4: fraction of a primary-assisted shot's ixG credited to the
    *  passer after accounting for the overlap with RAPM's on-ice xGF
    *  coefficient. Derived from cross-skater correlation structure — see
-   *  loadWARTables. Capped to [0.3, 0.7] to prevent degenerate cases. */
+   *  loadWARTables. Capped to [0.3, 0.7] to prevent degenerate cases.
+   *  v5.6: denominator expanded from (|corA1|+|corShots|) to
+   *  (|corA1|+|corA2|+|corShots|) so the three attributions share the
+   *  same "total signal" framework. */
   playmakingAttribution?: number;
+  /** v5.6: A2 equivalent of playmakingAttribution. Derived in the same
+   *  loop as |corA2| / (|corA1|+|corA2|+|corShots|). Capped [0.05, 0.3]
+   *  — A2 should always get less credit than A1 (literature converges
+   *  on ~0.2-0.3 per A2 vs ~0.5 per A1). Data-derived, not a constant. */
+  secondaryPlaymakingAttribution?: number;
+  /** v5.9: faceoff possession-flip discount applied to OZ/DZ follow-up
+   *  goal rates in the faceoff WAR component. Data-derived at load time
+   *  from `mean(center onIceXGF/60) / mean(forward onIceXGF/60)` clamped
+   *  to [0.2, 0.7]. Fallback literature constant 0.5 when derivation is
+   *  unstable (Tulsky/Cane Hockey Graphs 2012/2015: possession flip is
+   *  the center's causal event, RAPM absorbs ~50% of the follow-up xG).
+   *  Replaces the earlier hardcoded 0.75 (per audit: too generous — the
+   *  RAPM on-ice xGF already captures the follow-up period). */
+  faceoffPossessionDiscount?: number;
+  /** v5.9: turnover shrinkage γ applied to both takeaway credit and
+   *  giveaway cost before they flow into rawGAR. Data-derived from
+   *  cross-skater correlation structure:
+   *    γ = 1 − |cor(TA/60, onIceXGF/60)| / (|cor(TA/60, XGF/60)| + |cor(shots/60, XGF/60)|)
+   *  — the fraction of turnover signal NOT already attributable to
+   *  RAPM's on-ice measure. Clamped [0.1, 0.5] as stability guard.
+   *  Fallback to 0.25 when unstable (literature: EvolvingHockey &
+   *  HockeyGraphs model per-60 takeaway value at ~0.01 goals with RAPM
+   *  overlap). Addresses the audit's structural redundancy flag. */
+  turnoverShrinkage?: number;
 }
 
 export interface WARTables {
@@ -213,7 +261,7 @@ const BASE = (() => {
   return base;
 })();
 
-const CACHE_KEY = 'war_tables_v2';
+const CACHE_KEY = 'war_tables_v5';
 
 let loaded: WARTables | null = null;
 let loadPromise: Promise<WARTables | null> | null = null;
@@ -350,21 +398,30 @@ export async function loadWARTables(): Promise<WARTables | null> {
       finishingShrinkage = Math.max(0, Math.min(1, r));
     }
 
-    // v5.4: playmaking attribution fraction. Derivation:
-    //   attributionFraction = cor(A1/60, onIceXGF/60)
-    //                       / (cor(A1/60, onIceXGF/60)
-    //                          + cor(shots/60, onIceXGF/60))
+    // v5.6: three-way playmaking attribution. Derivation:
+    //   denom = |cor(A1/60, onIceXGF/60)|
+    //         + |cor(A2/60, onIceXGF/60)|
+    //         + |cor(shots/60, onIceXGF/60)|
+    //   attributionA1 = clamp(|corA1| / denom, 0.3, 0.7)
+    //   attributionA2 = clamp(|corA2| / denom, 0.05, 0.3)
     //
-    // Intuition: the A1 and the shooter's own shot volume both correlate
+    // Intuition: A1, A2, and the shooter's own shot volume all correlate
     // with on-ice xGF. Their relative correlation strengths provide an
-    // empirical split of credit. The shooter's half flows through the
-    // finishing residual + RAPM on-ice; the passer gets what's left,
-    // i.e. this fraction of the A1-shot's xG. Bounded [0.3, 0.7] to
-    // prevent degenerate cases when one correlation is noise-dominated.
-    // Inputs are all fields already on WARSkaterRow — no new data needed
-    // beyond the assistedShotIxG total that the worker now emits.
+    // empirical split of credit. The shooter's share (|corShots|/denom)
+    // is implicitly carried by RAPM + finishing and NOT separately
+    // credited as a playmaking term — crediting it here would double-
+    // count against evOffense. A1 gets its share as primary playmaking;
+    // A2 gets its share as secondary playmaking.
+    //
+    // Caps:
+    //  - A1 clamped [0.3, 0.7] (Evolving-Hockey, JFresh ~0.5 per A1).
+    //  - A2 clamped [0.05, 0.3]. A2 always gets strictly less than A1 in
+    //    the literature (~0.2-0.3 per A2). The upper cap equals A1's
+    //    lower cap so the "A2 < A1" inequality can't invert under noise.
+    // Inputs are all fields already on WARSkaterRow — no new data needed.
     const MIN_TOI_HOURS_PLAYMAKING = 5; // ~300 minutes total; crude qualifier
     const a1Per60: number[] = [];
+    const a2Per60: number[] = [];
     const shotsPer60: number[] = [];
     const onIceXgfPer60: number[] = [];
     for (const s of Object.values(skPayload.players)) {
@@ -374,20 +431,129 @@ export async function loadWARTables(): Promise<WARTables | null> {
       if (onIceHours <= 0) continue;
       if (s.onIceXGF == null) continue;
       a1Per60.push((s.primaryAssists || 0) / totalHours);
+      a2Per60.push((s.secondaryAssists || 0) / totalHours);
       shotsPer60.push((s.iShotsFenwick || 0) / totalHours);
       onIceXgfPer60.push(s.onIceXGF / onIceHours);
     }
     let playmakingAttribution: number | undefined = undefined;
+    let secondaryPlaymakingAttribution: number | undefined = undefined;
     if (a1Per60.length >= 20) {
       const corA1 = pearsonR(a1Per60, onIceXgfPer60);
+      const corA2 = pearsonR(a2Per60, onIceXgfPer60);
       const corShots = pearsonR(shotsPer60, onIceXgfPer60);
-      const sumAbs = Math.abs(corA1) + Math.abs(corShots);
+      const sumAbs = Math.abs(corA1) + Math.abs(corA2) + Math.abs(corShots);
       if (sumAbs > 1e-6) {
-        const raw = Math.abs(corA1) / sumAbs;
-        // Cap to literature-safe band. Evolving-Hockey's published
-        // A1 attribution sits around 0.5; this derived value stays in
-        // the neighborhood for a healthy sample but can swing on noise.
-        playmakingAttribution = Math.max(0.3, Math.min(0.7, raw));
+        const rawA1 = Math.abs(corA1) / sumAbs;
+        const rawA2 = Math.abs(corA2) / sumAbs;
+        // A1 cap: literature-safe band (~0.5 per A1 is the public-model consensus).
+        playmakingAttribution = Math.max(0.3, Math.min(0.7, rawA1));
+        // A2 cap: strictly below A1 (~0.2-0.3 per A2 per EH/JFresh).
+        secondaryPlaymakingAttribution = Math.max(0.05, Math.min(0.3, rawA2));
+      }
+    }
+
+    // v5.9: faceoff possession-flip discount (see audit note in
+    // warService faceoff block). Derived as the ratio of mean center
+    // onIceXGF/60 to mean forward onIceXGF/60 at EV. Intuition: the
+    // portion of centers' on-ice xG advantage that RAPM already captures
+    // (via higher-leverage shifts following OZ draws) IS the portion we
+    // need to discount out of the faceoff component so it isn't double-
+    // counted against evOffense. Clamped [0.2, 0.7] for stability.
+    //
+    // FALLBACK: if fewer than 20 centers or the ratio degenerates to the
+    // clamp boundary (which indicates the signal is diffuse — RAPM
+    // allocation couldn't be cleanly measured), fall back to the
+    // literature-cited 0.5 constant. Citation: Tulsky/Cane, Hockey
+    // Graphs, "Faceoffs, Shot Generation, and the Value of a Faceoff"
+    // (2012/2015). Full causal credit for the possession flip but RAPM
+    // absorbs the downstream xG at roughly 50%. Flagged literature
+    // constant per "no hardcoded methodological constants without
+    // citation" rule.
+    let faceoffPossessionDiscount: number | undefined = undefined;
+    {
+      const evHours = (s: WARSkaterRow) =>
+        (s.onIceTOIAllSec || 0) > 0 ? (s.onIceTOIAllSec || 0) / 3600 : 0;
+      const centerRates: number[] = [];
+      const forwardRates: number[] = [];
+      for (const s of Object.values(skPayload.players)) {
+        const hrs = evHours(s);
+        if (hrs <= 0 || s.onIceXGF == null) continue;
+        const rate = s.onIceXGF / hrs;
+        if (s.positionCode === 'C') centerRates.push(rate);
+        if (s.positionCode === 'C' || s.positionCode === 'L' || s.positionCode === 'R') {
+          forwardRates.push(rate);
+        }
+      }
+      if (centerRates.length >= 20 && forwardRates.length >= 20) {
+        const meanC = centerRates.reduce((a, b) => a + b, 0) / centerRates.length;
+        const meanF = forwardRates.reduce((a, b) => a + b, 0) / forwardRates.length;
+        if (meanF > 0) {
+          const ratio = meanC / meanF;
+          const clamped = Math.max(0.2, Math.min(0.7, ratio));
+          // If the clamp binds hard (ratio ≈ 1 or ≈ 0), the derivation
+          // is not meaningful — the signal couldn't be separated.
+          // Fall back to the literature constant rather than ship a
+          // clamped-to-cap value.
+          if (ratio > 0.25 && ratio < 0.65) {
+            faceoffPossessionDiscount = clamped;
+          }
+        }
+      }
+      if (faceoffPossessionDiscount == null) {
+        // Flagged literature constant — Tulsky/Cane 2012/2015, Hockey
+        // Graphs. RAPM absorbs ~50% of follow-up xG after a possession
+        // flip. Next iteration: replace with true OZ-faceoff-leverage
+        // derivation once the worker emits zone-specific xG allocation.
+        faceoffPossessionDiscount = 0.5;
+      }
+    }
+
+    // v5.9: turnover shrinkage γ. Derived from cross-skater correlation
+    // structure:
+    //   γ = 1 − |cor(TA/60, onIceXGF/60)|
+    //           / (|cor(TA/60, XGF/60)| + |cor(shots/60, XGF/60)|)
+    // The term |corTA|/(|corTA|+|corShots|) is the fraction of turnover
+    // signal already explained by the same variance RAPM captures via
+    // shots and on-ice xGF. We shrink the turnover component BY that
+    // fraction (keeping 1 − that share). Clamped [0.1, 0.5] as stability
+    // guard. Addresses audit's structural-redundancy flag.
+    //
+    // FALLBACK: if the shared-variance fraction degenerates (<20
+    // qualifying players or corShots negligible), fall back to 0.25 —
+    // flagged literature constant per EvolvingHockey / HockeyGraphs
+    // public-model convention for takeaway/giveaway credit with RAPM.
+    const MIN_TOI_HOURS_TURNOVER = 5; // same qualifier as playmaking
+    let turnoverShrinkage: number | undefined = undefined;
+    {
+      const taPer60: number[] = [];
+      const shotsPer60Turn: number[] = [];
+      const xgfPer60Turn: number[] = [];
+      for (const s of Object.values(skPayload.players)) {
+        const totalHours = (s.toiTotalSeconds || 0) / 3600;
+        const onIceHours = (s.onIceTOIAllSec || 0) / 3600;
+        if (totalHours < MIN_TOI_HOURS_TURNOVER) continue;
+        if (onIceHours <= 0 || s.onIceXGF == null) continue;
+        if (s.takeaways == null) continue;
+        taPer60.push(s.takeaways / totalHours);
+        shotsPer60Turn.push((s.iShotsFenwick || 0) / totalHours);
+        xgfPer60Turn.push(s.onIceXGF / onIceHours);
+      }
+      if (taPer60.length >= 20) {
+        const corTA = pearsonR(taPer60, xgfPer60Turn);
+        const corShotsT = pearsonR(shotsPer60Turn, xgfPer60Turn);
+        const denomT = Math.abs(corTA) + Math.abs(corShotsT);
+        if (denomT > 1e-6) {
+          const rawGamma = 1 - Math.abs(corTA) / denomT;
+          turnoverShrinkage = Math.max(0.1, Math.min(0.5, rawGamma));
+        }
+      }
+      if (turnoverShrinkage == null) {
+        // Flagged literature constant. EvolvingHockey / HockeyGraphs
+        // public convention: per-60 TA/GA credit with RAPM overlap
+        // lands around ~25% of the raw turnover signal. Next iteration:
+        // replicate their multilevel RAPM regression to extract this
+        // directly.
+        turnoverShrinkage = 0.25;
       }
     }
 
@@ -400,6 +566,9 @@ export async function loadWARTables(): Promise<WARTables | null> {
         baselineBlendTeamWeight,
         finishingShrinkage,
         playmakingAttribution,
+        secondaryPlaymakingAttribution,
+        faceoffPossessionDiscount,
+        turnoverShrinkage,
       },
       loadedAt: Date.now(),
     };

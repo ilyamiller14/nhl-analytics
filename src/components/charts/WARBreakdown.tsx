@@ -82,24 +82,46 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
   const faceoffPending = s.faceoffValuePerWin == null;
   const turnoverPending = s.takeawayGoalValue == null || s.giveawayGoalValue == null;
 
+  // v5.7 — interpolate data-derived attributions into bar tooltips so
+  // readers see the actual derived weights, not hardcoded literature
+  // constants. Fallbacks mirror the warService literature defaults so a
+  // pre-v5.7 artifact still reads coherently.
+  const pmA1 = s.playmakingAttribution;
+  const pmA2 = s.secondaryPlaymakingAttribution;
+  const foDisc = s.faceoffPossessionDiscount;
+  const toShr = s.turnoverShrinkage;
+
   const rawSegments: Segment[] = [
     {
       key: 'finishing',
       label: 'Finishing (G − xG)',
       value: c.finishing,
       color: '',
-      desc: 'Shooting skill above expected: iG − ixG on shots taken. This credits CONVERSION skill only — taking many shots at league-average rate scores 0 here. Volume scoring shows up under EV Offense via RAPM\'s on-ice xGF coefficient (which includes this player\'s own shot contribution).',
+      desc: 'Shooting skill above expected on your own shots at EV. Shrunk by season split-half reliability to damp luck. PP finishing excluded — credited in Power Play component.',
       pending: false,
-      sourceLabel: 'from iG / ixG on shots taken',
+      sourceLabel: 'iG − ixG × (toiEv/toiTotal) × finishingShrinkage',
     },
     {
       key: 'playmaking',
-      label: 'Playmaking',
+      label: 'Playmaking (A1)',
       value: c.playmaking,
       color: "",
-      desc: `Primary assists × league median ixG/60 (${s.leagueMedianGARPerGame.toFixed(2)} league-median GAR/game anchor, ${result.position})`,
+      desc: pmA1 != null
+        ? `Primary assists × data-derived attribution fraction. Each A1 is on an actual scored goal; your share of that goal's credit is ${pmA1.toFixed(2)} based on how strongly A1/60 correlates with team on-ice xGF. PP excluded (credited in Power Play).`
+        : `Primary assists × data-derived attribution fraction. Each A1 is on an actual scored goal; your share of that goal's credit is derived from how strongly A1/60 correlates with team on-ice xGF (capped [0.3, 0.7]). PP excluded (credited in Power Play).`,
       pending: false,
-      sourceLabel: `league median ixG/60 for ${result.position}`,
+      sourceLabel: `league_context.playmakingAttribution`,
+    },
+    {
+      key: 'secondaryPlaymaking',
+      label: 'Playmaking (A2)',
+      value: c.secondaryPlaymaking,
+      color: "",
+      desc: pmA2 != null
+        ? `Secondary playmaking (A2) × data-derived attribution. A2 correlations vs team xGF are weaker than A1's, so your share is ${pmA2.toFixed(2)}. PP excluded (credited in Power Play).`
+        : `Secondary playmaking (A2) × data-derived attribution. A2 correlations vs team xGF are weaker than A1's, so your share sits below A1 (capped [0.05, 0.3]). PP excluded (credited in Power Play).`,
+      pending: false,
+      sourceLabel: `league_context.secondaryPlaymakingAttribution`,
     },
     {
       key: 'evOffense',
@@ -148,9 +170,9 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       color: "",
       desc: faceoffPending
         ? 'Pending: faceoffValuePerWin missing from league_context.'
-        : `(wins − losses) × ${s.faceoffValuePerWin!.toFixed(4)} goals per net-win`,
+        : `Zone-aware wins × value-per-flip, discounted by ${(foDisc ?? 0.5).toFixed(2)} (${foDisc != null ? 'data-derived' : 'literature fallback'}) because RAPM already captures some of the resulting possession xG.`,
       pending: faceoffPending,
-      sourceLabel: 'league_context.faceoffValuePerWin',
+      sourceLabel: 'league_context.ozGoalRatePerWin / dzGoalRateAgainstPerWin × faceoffPossessionDiscount',
     },
     {
       key: 'turnovers',
@@ -159,9 +181,9 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       color: "",
       desc: turnoverPending
         ? 'Pending: takeaway/giveaway goal values missing from league_context.'
-        : `takeaways × ${s.takeawayGoalValue!.toFixed(4)} − giveaways × ${s.giveawayGoalValue!.toFixed(4)} goals`,
+        : `Takeaways credited, giveaways penalized, all shrunk by ${(toShr ?? 0.25).toFixed(2)} (${toShr != null ? 'data-derived' : 'literature fallback'}) because RAPM on-ice xGF already captures the xG impact.`,
       pending: turnoverPending,
-      sourceLabel: 'league_context.takeaway/giveawayGoalValue',
+      sourceLabel: 'league_context.takeaway/giveawayGoalValue × turnoverShrinkage',
     },
     // Hits + blocks excluded from the WAR decomposition — published
     // research (Evolving-Hockey, Hockey Graphs) finds raw hits correlate
@@ -261,6 +283,12 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
           </>
         )}
         {' '}Each component is its goal-units value ÷ {gpw.toFixed(2)} goals-per-win.
+        {' '}<strong>Each component credits a distinct source of value:</strong>
+        {' '}RAPM captures team-level on-ice xG; Finishing and Playmaking (A1/A2)
+        {' '}credit only the above-expected residual on shots you took or set up
+        {' '}at EV; Faceoffs and Turnovers are discounted to avoid double-counting
+        {' '}with RAPM; PP/PK finishing is credited separately so EV components
+        {' '}stay orthogonal.
       </p>
 
       <div className="war-headline">

@@ -13,8 +13,10 @@ import type {
   SeasonCapCommitment,
 } from '../types/contract';
 
-const WORKER_URL = import.meta.env.VITE_API_WORKER_URL || 'https://nhl-api-proxy.deepdivenhl.workers.dev';
-const isDev = import.meta.env.DEV;
+// WORKER_URL / isDev: previously used to try the worker's /cached/contracts
+// endpoint first. Removed because the KV there decays silently to partial
+// playerId coverage and breaks surplus downstream. Static JSON is the
+// source of truth; worker scrape is only for the nightly regen script.
 
 // In-memory cache
 let contractsCache: ContractsData | null = null;
@@ -37,21 +39,14 @@ export async function loadContracts(): Promise<ContractsData | null> {
     return contractsCache;
   }
 
-  // In production, try the worker's nightly-refreshed KV data first
-  if (!isDev) {
-    try {
-      const workerResp = await fetch(`${WORKER_URL}/cached/contracts`);
-      if (workerResp.ok) {
-        const data: ContractsData = await workerResp.json();
-        contractsCache = data;
-        cacheTimestamp = now;
-        buildIndexes(data);
-        return data;
-      }
-    } catch {
-      // Worker unavailable — fall through to static JSON
-    }
-  }
+  // Prefer static JSON first — it's regenerated nightly by the build
+  // script with full playerId coverage (99.94%). The worker's
+  // `/cached/contracts` KV can decay silently (scraper HTML changes,
+  // Cloudflare CPU/time limits on the cacheContractData parallel scrape)
+  // and ship partial data with ~1-2% playerId coverage, which silently
+  // breaks `computePlayerSurplus` for 99% of players. Static first,
+  // worker as fallback for when the bundled JSON isn't available.
+  // Only trust worker data if it has meaningful playerId coverage.
 
   // Fallback: static JSON bundled in the app
   try {

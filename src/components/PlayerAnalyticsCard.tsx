@@ -466,9 +466,22 @@ export default function PlayerAnalyticsCard({
                       `Actual cap hit: ${formatDollars(capHit)}\n` +
                       `Surplus = predicted − actual: ${surplus >= 0 ? '+' : '−'}${formatDollars(Math.abs(surplus))}\n` +
                       `\n` +
-                      `Method (v5.4, ratio-based; see surplusValueService.ts):\n` +
+                      `Method (v5.7, ratio-based; see surplusValueService.ts):\n` +
                       `  predicted = WAR_market/82 × $/WAR × ageMult(age),\n` +
                       `  floored at the $775K league minimum.\n` +
+                      `\n` +
+                      `  WAR v5.7 is orthogonally decomposed so no two\n` +
+                      `  components credit the same source of value:\n` +
+                      `   · RAPM captures on-ice team xG (EV O/D, PP, PK).\n` +
+                      `   · Finishing credits only the EV above-expected\n` +
+                      `     residual on shots you took (PP finishing is in\n` +
+                      `     the PP component). Shrunk by split-half r.\n` +
+                      `   · Playmaking = A1 × data-derived attribution,\n` +
+                      `     not a literature constant. A2 credited separately\n` +
+                      `     at a strictly-smaller data-derived fraction.\n` +
+                      `   · Faceoffs + Turnovers are discounted (data-derived)\n` +
+                      `     because RAPM already captures the follow-up xG.\n` +
+                      `\n` +
                       `  WAR_market clips the negative tail of EV defense\n` +
                       `  so offensive players on bad teams aren't penalized\n` +
                       `  by drag the contract market doesn't actually price.\n` +

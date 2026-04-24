@@ -106,7 +106,7 @@ function ageMultiplier(age: number): number {
 // Cache
 // ============================================================================
 
-const CACHE_KEY = 'surplus_ratio_market_war_v5_5';
+const CACHE_KEY = 'surplus_ratio_market_war_v5_9';
 let coeffCache: HedonicCoefficients | null = null;
 
 // ============================================================================
@@ -352,10 +352,16 @@ export async function computePlayerSurplus(
   let age: number | null = null;
   try {
     const ages = await fetchAges();
-    const idForAge = contract.playerId ??
-      (typeof playerId === 'number' ? playerId : undefined);
-    if (typeof idForAge === 'number' && ages[idForAge] != null) {
-      age = ages[idForAge];
+    // Contract JSON sometimes stores playerId as a string ("8478402");
+    // coerce to number before keying the ages map (which is keyed by
+    // number, per fetchAges). Falling back to the caller-supplied
+    // `playerId` if the contract row lacks one.
+    const rawId = contract.playerId ?? playerId;
+    const idNum = typeof rawId === 'string' ? parseInt(rawId, 10)
+                : typeof rawId === 'number' ? rawId
+                : NaN;
+    if (Number.isFinite(idNum) && ages[idNum] != null) {
+      age = ages[idNum];
     }
   } catch { /* age stays null; we'll bail below */ }
   if (age == null) return null;

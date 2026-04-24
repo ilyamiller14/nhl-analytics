@@ -1094,11 +1094,95 @@ function extractContractsFromNextData(nextData: any): any | null {
 }
 
 /**
+ * Search NHL for a player by name, preferring active players and team matches.
+ * Fixes the "Jack Hughes" homonym bug: limit=1 returns the retired 1981 Jack
+ * Hughes (D, NJD) before the active center (8481559). Always ask for 10 + active.
+ */
+async function searchNhlPlayerId(name: string, teamAbbrev?: string): Promise<string | null> {
+  try {
+    const active = await fetch(
+      `https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=10&active=true&q=${encodeURIComponent(name)}`
+    );
+    let results: any[] = active.ok ? await active.json() as any[] : [];
+    if (!Array.isArray(results) || results.length === 0) {
+      const all = await fetch(
+        `https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=10&q=${encodeURIComponent(name)}`
+      );
+      results = all.ok ? await all.json() as any[] : [];
+    }
+    if (!Array.isArray(results) || results.length === 0) return null;
+    if (teamAbbrev) {
+      const teamMatch = results.find(r => r.active && (r.teamAbbrev === teamAbbrev || r.lastTeamAbbrev === teamAbbrev));
+      if (teamMatch) return teamMatch.playerId;
+    }
+    const anyActive = results.find(r => r.active);
+    if (anyActive) return anyActive.playerId;
+    if (teamAbbrev) {
+      const teamOnly = results.find(r => r.teamAbbrev === teamAbbrev || r.lastTeamAbbrev === teamAbbrev);
+      if (teamOnly) return teamOnly.playerId;
+    }
+    return results[0].playerId || null;
+  } catch { return null; }
+}
+
+/**
+ * Scrape one CapWages team page; returns structured team contract data or null.
+ * Pulled out of cacheContractData so we can run teams in parallel.
+ */
+async function scrapeCapWagesTeam(abbrev: string, slug: string): Promise<any | null> {
+  try {
+    const response = await fetch(`https://capwages.com/teams/${slug}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      cf: { cacheTtl: 300, cacheEverything: true } as any,
+    });
+    if (!response.ok) {
+      console.error(`[contracts] ${abbrev}: HTTP ${response.status}`);
+      return null;
+    }
+    const html = await response.text();
+    const match = html.match(/<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s);
+    if (!match) {
+      console.warn(`[contracts] ${abbrev}: No __NEXT_DATA__ (html ${html.length} bytes)`);
+      return null;
+    }
+    let nextData: any;
+    try { nextData = JSON.parse(match[1]); } catch (e) {
+      console.warn(`[contracts] ${abbrev}: __NEXT_DATA__ JSON parse failed`, (e as Error).message);
+      return null;
+    }
+    const teamData = extractContractsFromNextData(nextData);
+    if (!teamData) {
+      console.warn(`[contracts] ${abbrev}: extractContractsFromNextData returned null (pp keys: ${Object.keys(nextData?.props?.pageProps || {}).join(',')})`);
+      return null;
+    }
+    if (teamData.players.length === 0) {
+      console.warn(`[contracts] ${abbrev}: 0 players extracted (roster keys: ${Object.keys(nextData?.props?.pageProps?.data || {}).join(',')})`);
+      return null;
+    }
+    return teamData;
+  } catch (err) {
+    console.error(`[contracts] ${abbrev} scrape error:`, (err as Error).message);
+    return null;
+  }
+}
+
+/**
  * Fetch and cache contract data from CapWages for all 32 teams.
  * Stores the full dataset in KV as `contracts_current`.
+ *
+ * Previously broke Cloudflare CPU limits by running sequentially with a 1s
+ * sleep per team + 100ms sleep per $1M player lookup — roughly 60s of pure
+ * sleeps, far over the 30s worker budget. ctx.waitUntil() would silently
+ * terminate mid-loop, leaving KV unwritten and zero observable error.
+ *
+ * Now runs the 32 scrapes in parallel batches and player-ID lookups in
+ * parallel per team. Typical wall time: ~5-15s. No blocking sleeps.
  */
 async function cacheContractData(env: Env): Promise<{ teamsOk: number; teamsFailed: number }> {
-  console.log('Starting contract data refresh from CapWages...');
+  console.log('[contracts] Starting refresh from CapWages...');
 
   const output: any = {
     season: CURRENT_SEASON,
@@ -1107,75 +1191,58 @@ async function cacheContractData(env: Env): Promise<{ teamsOk: number; teamsFail
     teams: {},
   };
 
+  const entries = Object.entries(CAPWAGES_TEAM_SLUGS);
+  // Scrape all teams in parallel — CapWages serves ~500KB HTML, subrequest
+  // budget is fine at 32 parallel fetches.
+  const scrapeResults = await Promise.all(
+    entries.map(async ([abbrev, slug]) => ({
+      abbrev,
+      data: await scrapeCapWagesTeam(abbrev, slug),
+    }))
+  );
+
   let teamsOk = 0;
   let teamsFailed = 0;
+  const idLookupPromises: Promise<void>[] = [];
 
-  for (const [abbrev, slug] of Object.entries(CAPWAGES_TEAM_SLUGS)) {
-    try {
-      const response = await fetch(`https://capwages.com/teams/${slug}`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-          'Accept': 'text/html,application/xhtml+xml',
-        },
-      });
+  for (const { abbrev, data: teamData } of scrapeResults) {
+    if (!teamData) { teamsFailed++; continue; }
 
-      if (!response.ok) {
-        console.error(`CapWages ${abbrev}: HTTP ${response.status}`);
-        teamsFailed++;
-        continue;
-      }
-
-      const html = await response.text();
-      const match = html.match(/<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s);
-      if (!match) { console.warn(`CapWages ${abbrev}: No __NEXT_DATA__`); teamsFailed++; continue; }
-
-      let nextData;
-      try { nextData = JSON.parse(match[1]); } catch { console.warn(`CapWages ${abbrev}: Bad JSON`); teamsFailed++; continue; }
-
-      const teamData = extractContractsFromNextData(nextData);
-      if (!teamData || teamData.players.length === 0) {
-        console.warn(`CapWages ${abbrev}: No players`);
-        teamsFailed++;
-        continue;
-      }
-
-      // Look up player IDs for top players (cap hit >= $1M)
-      for (const player of teamData.players) {
-        if (player.capHit >= 1000000) {
-          try {
-            const searchResp = await fetch(
-              `https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=1&q=${encodeURIComponent(player.name)}`
-            );
-            if (searchResp.ok) {
-              const results = await searchResp.json() as any[];
-              if (results.length > 0) player.playerId = results[0].playerId;
-            }
-          } catch { /* skip */ }
-          // Small delay for rate limiting
-          await new Promise(r => setTimeout(r, 100));
-        }
-      }
-
-      output.teams[abbrev] = teamData;
-      console.log(`CapWages ${abbrev}: ${teamData.players.length} players, $${(teamData.totalCapHit / 1e6).toFixed(1)}M`);
-      teamsOk++;
-    } catch (err) {
-      console.error(`CapWages ${abbrev} error:`, err);
-      teamsFailed++;
+    // Lookup playerIds for ALL players (not just >= $1M) in parallel.
+    // Previously gated at $1M, which left ~60% of entries without playerId and
+    // broke surplus-value display for depth / minors / ELC tails.
+    for (const player of teamData.players) {
+      idLookupPromises.push((async () => {
+        const pid = await searchNhlPlayerId(player.name, abbrev);
+        if (pid) player.playerId = pid;
+      })());
     }
 
-    // Polite delay between teams
-    await new Promise(r => setTimeout(r, 1000));
+    output.teams[abbrev] = teamData;
+    console.log(`[contracts] ${abbrev}: ${teamData.players.length} players, $${(teamData.totalCapHit / 1e6).toFixed(1)}M cap`);
+    teamsOk++;
   }
 
-  // Only update KV if we got a reasonable number of teams
+  // Resolve all ID lookups in parallel. search.d3.nhle.com is a CDN-fronted
+  // static search — high concurrency tolerated.
+  const startIds = Date.now();
+  await Promise.all(idLookupPromises);
+  let idCount = 0;
+  for (const t of Object.values(output.teams) as any[]) {
+    for (const p of t.players) if (p.playerId) idCount++;
+  }
+  console.log(`[contracts] Resolved ${idCount}/${idLookupPromises.length} playerIds in ${Date.now() - startIds}ms`);
+
+  // Write to KV if a meaningful fraction of teams succeeded. Previous
+  // threshold was 20/32 = 62.5%; we keep that but log loudly when skipping
+  // so the failure mode is observable.
   if (teamsOk >= 20) {
     await env.NHL_CACHE.put('contracts_current', JSON.stringify(output), {
-      expirationTtl: 7 * 24 * 60 * 60, // 7 days (refreshed daily)
+      expirationTtl: 7 * 24 * 60 * 60,
     });
-    console.log(`Contract data cached: ${teamsOk} teams, ${teamsFailed} failed`);
+    console.log(`[contracts] KV write OK — ${teamsOk} teams, ${teamsFailed} failed, ${idCount} playerIds`);
   } else {
-    console.warn(`Only ${teamsOk} teams succeeded — skipping KV update to preserve existing data`);
+    console.warn(`[contracts] SKIPPING KV write: only ${teamsOk}/${entries.length} teams succeeded (need >=20). ${teamsFailed} failed. Previous KV value retained.`);
   }
 
   return { teamsOk, teamsFailed };
@@ -2501,6 +2568,30 @@ interface WARSkaterRow {
   // assist. Replaces the dimensionally-approximate `A1 × leagueIxGPerShot`
   // playmaking formula with the actual xG of shots the player created.
   assistedShotIxG?: number;
+  // v5.5: per-strength splits on the shooter side (for the orthogonal
+  // finishing component — RAPM's on-ice xGF is basically an EV signal,
+  // so finishing residual should be scoped to 5v5 before mixing PP
+  // expertise in). Each split is the strength-filtered count / ixG of
+  // the same fenwick events that feed the aggregate iG / ixG / shots.
+  iG_5v5?: number;
+  ixG_5v5?: number;
+  shots_5v5?: number;
+  iG_pp?: number;
+  ixG_pp?: number;
+  shots_pp?: number;
+  iG_sh?: number;
+  ixG_sh?: number;
+  shots_sh?: number;
+  // v5.5: per-strength primary-assist aggregates. assistedShotG_* is
+  // the count of A1-credited goals at the given strength (equivalent
+  // to A1 count because each A1 is on a goal); assistedShotIxG_5v5
+  // is the 5v5-scoped version of the existing assistedShotIxG so the
+  // playmaking residual can be priced at EV only. assistedShotG_total
+  // should match `primaryAssists` exactly — emitted for self-consistency
+  // checks on the client.
+  assistedShotG_5v5?: number;
+  assistedShotIxG_5v5?: number;
+  assistedShotG_total?: number;
 }
 
 interface WARGoalieRow {
@@ -2735,6 +2826,25 @@ async function buildWARTables(env: Env): Promise<{
               row.ixG += xg;
               if (type === 'goal') row.iG += 1;
 
+              // v5.5 per-strength shooter split. `strength` is already
+              // the shooter-perspective label from normalizeStrength; we
+              // only bucket the three canonical strengths (5v5, pp, sh)
+              // so 4v4 / 3v3 / empty-net flurries aren't double-counted
+              // into any split — they stay in the aggregate iG/ixG/shots.
+              if (strength === '5v5') {
+                row.shots_5v5 = (row.shots_5v5 || 0) + 1;
+                row.ixG_5v5 = (row.ixG_5v5 || 0) + xg;
+                if (type === 'goal') row.iG_5v5 = (row.iG_5v5 || 0) + 1;
+              } else if (strength === 'pp') {
+                row.shots_pp = (row.shots_pp || 0) + 1;
+                row.ixG_pp = (row.ixG_pp || 0) + xg;
+                if (type === 'goal') row.iG_pp = (row.iG_pp || 0) + 1;
+              } else if (strength === 'sh') {
+                row.shots_sh = (row.shots_sh || 0) + 1;
+                row.ixG_sh = (row.ixG_sh || 0) + xg;
+                if (type === 'goal') row.iG_sh = (row.iG_sh || 0) + 1;
+              }
+
               // v5.4 split-half: record per-game tally keyed by gameId.
               let perGame = perPlayerGameShots.get(shooterId);
               if (!perGame) { perGame = new Map(); perPlayerGameShots.set(shooterId, perGame); }
@@ -2756,6 +2866,15 @@ async function buildWARTables(env: Env): Promise<{
                   ra.primaryAssists += 1;
                   // v5.4: see buildWARChunkTeam for rationale.
                   ra.assistedShotIxG = (ra.assistedShotIxG || 0) + xg;
+                  // v5.5: per-strength primary-assist splits. Each A1 is
+                  // on a goal by construction, so assistedShotG_total is
+                  // a redundant emit of primaryAssists used client-side
+                  // for self-consistency checks across strength buckets.
+                  ra.assistedShotG_total = (ra.assistedShotG_total || 0) + 1;
+                  if (strength === '5v5') {
+                    ra.assistedShotG_5v5 = (ra.assistedShotG_5v5 || 0) + 1;
+                    ra.assistedShotIxG_5v5 = (ra.assistedShotIxG_5v5 || 0) + xg;
+                  }
                 }
                 if (a2) {
                   let ra = skaters.get(a2);
@@ -3217,6 +3336,22 @@ async function buildWARChunkTeam(env: Env, team: string): Promise<void> {
             row.ixG += xg;
             if (type === 'goal') row.iG += 1;
 
+            // v5.5 per-strength shooter split (see buildWARTables for
+            // the matching aggregation in the non-chunked path).
+            if (strength === '5v5') {
+              row.shots_5v5 = (row.shots_5v5 || 0) + 1;
+              row.ixG_5v5 = (row.ixG_5v5 || 0) + xg;
+              if (type === 'goal') row.iG_5v5 = (row.iG_5v5 || 0) + 1;
+            } else if (strength === 'pp') {
+              row.shots_pp = (row.shots_pp || 0) + 1;
+              row.ixG_pp = (row.ixG_pp || 0) + xg;
+              if (type === 'goal') row.iG_pp = (row.iG_pp || 0) + 1;
+            } else if (strength === 'sh') {
+              row.shots_sh = (row.shots_sh || 0) + 1;
+              row.ixG_sh = (row.ixG_sh || 0) + xg;
+              if (type === 'goal') row.iG_sh = (row.iG_sh || 0) + 1;
+            }
+
             // v5.4 split-half: record per-game shooting tally so finalize
             // can split each player's games by date into first/second halves.
             bumpGameShot(shooterId, g.gameId, g.gameDate, type === 'goal' ? 1 : 0, xg, 1);
@@ -3238,6 +3373,13 @@ async function buildWARChunkTeam(env: Env, team: string): Promise<void> {
                 // approximation — this is the literal expected-goals
                 // value of the play the passer created.
                 ra.assistedShotIxG = (ra.assistedShotIxG || 0) + xg;
+                // v5.5: per-strength A1 splits. Each A1 is on a goal so
+                // assistedShotG_total mirrors primaryAssists (self-check).
+                ra.assistedShotG_total = (ra.assistedShotG_total || 0) + 1;
+                if (strength === '5v5') {
+                  ra.assistedShotG_5v5 = (ra.assistedShotG_5v5 || 0) + 1;
+                  ra.assistedShotIxG_5v5 = (ra.assistedShotIxG_5v5 || 0) + xg;
+                }
               }
               if (a2) getOrCreateSkater(a2).secondaryAssists += 1;
             }

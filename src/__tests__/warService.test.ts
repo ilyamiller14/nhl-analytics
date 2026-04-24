@@ -109,7 +109,7 @@ describe('computeSkaterWAR — invariants', () => {
     const res = computeSkaterWAR(kucherovLikeRow(), ctx);
     const c = res.components;
     const sumGoals =
-      c.finishing + c.playmaking + c.evOffense + c.evDefense +
+      c.finishing + c.playmaking + c.secondaryPlaymaking + c.evOffense + c.evDefense +
       c.faceoffs + c.turnovers + c.micro + c.penalties + c.replacementAdjust;
     expect(sumGoals).toBeCloseTo(c.totalGAR, 6);
   });
@@ -126,7 +126,8 @@ describe('computeSkaterWAR — invariants', () => {
     const c = res.components;
     const gpw = ctx.marginalGoalsPerWin;
     const sumWins =
-      c.finishing / gpw + c.playmaking / gpw + c.evOffense / gpw + c.evDefense / gpw +
+      c.finishing / gpw + c.playmaking / gpw + c.secondaryPlaymaking / gpw +
+      c.evOffense / gpw + c.evDefense / gpw +
       c.faceoffs / gpw + c.turnovers / gpw + c.micro / gpw + c.penalties / gpw +
       c.replacementAdjust / gpw;
     expect(sumWins).toBeCloseTo(res.WAR, 6);

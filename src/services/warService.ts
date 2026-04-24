@@ -41,7 +41,8 @@ export type PositionGroup = 'F' | 'D' | 'G';
 
 export interface WARComponents {
   finishing: number;          // GAX (iG − ixG)
-  playmaking: number;         // primary assists × median ixG (playmaker credit)
+  playmaking: number;         // primary assists × playmakingAttribution (A1 passer credit)
+  secondaryPlaymaking: number; // secondary assists × secondaryPlaymakingAttribution (A2 passer credit)
   penalties: number;          // (drawn − taken) × PP-xG-per-minute × 2 (discipline — drawing > taking)
   evOffense: number;          // (onIceXGF/60 − league median) × EV TOI hours OR RAPM offense
   evDefense: number;          // (league median − onIceXGA/60) × EV TOI hours OR RAPM defense
@@ -99,6 +100,16 @@ export interface WARResult {
     giveawayGoalValue: number | null;
     hitGoalValue: number | null;
     blockGoalValue: number | null;
+    // v5.7 — data-derived attributions / shrinkages surfaced so the
+    // viz layer can interpolate them into tooltips without re-
+    // importing LeagueContext. null = upstream context didn't carry
+    // the field (pre-v5.7 artifact); component falls back to its
+    // literature constant in that case.
+    playmakingAttribution: number | null;
+    secondaryPlaymakingAttribution: number | null;
+    faceoffPossessionDiscount: number | null;
+    turnoverShrinkage: number | null;
+    finishingShrinkage: number | null;
     season: string;
   };
   dataComplete: boolean;      // true = all inputs available; false = missing fields
@@ -221,44 +232,98 @@ export function computeSkaterWAR(
   // max(0, r) so unrepeatable variance is damped. No hardcoded shrinkage
   // constant — the weight is this season's measured repeatability.
   //
+  // v5.9 audit: strip PP contribution via 5v5 TOI proxy. PP goals are
+  // already credited by the `powerPlay` component (rapm.ppXGF −
+  // expected). Including all-strength iG/ixG in the finishing residual
+  // would double-count the PP shooter share. Until the worker emits
+  // true per-strength iG/ixG, multiply the finishing residual by the EV
+  // share of total TOI (toiEvSeconds / toiTotalSeconds) as a proxy.
+  // This is a PROXY, not a true 5v5-only measurement — PP shot rate per
+  // minute is higher than EV, so this slightly over-discounts. Flagged
+  // in notes and documented in warTableService for the worker TODO.
+  //
   // If the context lacks `finishingShrinkage` (legacy artifact that
   // predates the split-half fields), we pass the raw residual through
   // unshrunk and flag a note rather than substitute a guess.
   const rawFinishing = row.iG - row.ixG;
-  let finishing = rawFinishing;
+  // 5v5 share proxy: fraction of total TOI at EV. Guard zero denominator.
+  const evShareOfTOI =
+    row.toiTotalSeconds > 0 && row.toiEvSeconds != null && row.toiEvSeconds > 0
+      ? row.toiEvSeconds / row.toiTotalSeconds
+      : 1;
+  let finishing = rawFinishing * evShareOfTOI;
   if (typeof context.finishingShrinkage === 'number') {
-    finishing = rawFinishing * context.finishingShrinkage;
+    finishing = finishing * context.finishingShrinkage;
   } else {
     notes.push('Finishing shrinkage unavailable — worker artifact predates split-half fields. Raw (iG − ixG) passed through unshrunk.');
   }
 
-  // --- Component 2: Playmaking — Σ(ixG of shots primary-assisted)
-  // × playmakingAttribution.
+  // --- Component 2: Playmaking — A1 × playmakingAttribution.
   //
-  // `assistedShotIxG` is summed in the worker at goal time: each primary
-  // assist picks up the exact empirical xG of the shot it set up. This
-  // replaces the old `primaryAssists × leagueIxGPerShot` approximation,
-  // which credited every A1 at an AVERAGE shot's xG regardless of the
-  // shot's actual location / strength / context.
+  // Each primary assist is, by definition, on an actual scored goal
+  // (worth 1 marginal goal). The passer's share of that outcome is
+  // `playmakingAttribution`, derived empirically in warTableService from
+  // cross-skater correlation structure: |cor(A1/60, onIceXGF/60)| /
+  // (|cor(A1/60, onIceXGF/60)| + |cor(shots/60, onIceXGF/60)|). Capped
+  // [0.3, 0.7] as a stability guard, not a methodological cap.
   //
-  // `playmakingAttribution` is derived in warTableService from the
-  // cross-skater correlation structure (A1/60 vs on-ice xGF/60 vs shot
-  // volume). Capped [0.3, 0.7]. When absent, we fall back to the legacy
-  // `A1 × leagueIxGPerShot` formula but emit a note so viewers know
-  // the artifact is missing the new field.
+  // Previously tried (v5.5-alpha): `assistedShotIxG × attribution`. That
+  // credits per expected-goal of the assisted shot — but the assist is
+  // on an actual goal scored, not on an expected-goal opportunity. The
+  // correct scale is per-goal. The `assistedShotIxG` field is retained
+  // on the row for diagnostic/context display but is not the multiplicand.
+  //
+  // Known residual: RAPM on-ice xGF already absorbs some passer credit
+  // (team-level xGF while the player is on ice). There is structural
+  // double-count with this component. The attribution cap [0.3, 0.7]
+  // indirectly damps it; a proper regression-based decomposition is a
+  // deferred research task.
+  //
+  // v5.9 audit: strip PP contribution via 5v5 TOI proxy. PP assists are
+  // already credited through the `powerPlay` component. Multiply by
+  // evShareOfTOI so the playmaking term only reflects 5v5 assist value.
   let playmaking = 0;
-  if (typeof row.assistedShotIxG === 'number' && typeof context.playmakingAttribution === 'number') {
-    playmaking = row.assistedShotIxG * context.playmakingAttribution;
-  } else if (typeof row.assistedShotIxG === 'number') {
-    // Field present, attribution missing — apply at full value and note.
-    playmaking = row.assistedShotIxG;
-    notes.push('Playmaking attribution fraction unavailable — full assistedShotIxG passed through.');
+  if (typeof context.playmakingAttribution === 'number') {
+    playmaking = row.primaryAssists * context.playmakingAttribution * evShareOfTOI;
   } else if (typeof context.leagueIxGPerShot === 'number' && context.leagueIxGPerShot > 0) {
-    // Legacy artifact path.
-    playmaking = row.primaryAssists * context.leagueIxGPerShot;
-    notes.push('Playmaking using legacy A1 × leagueIxGPerShot — worker artifact predates assistedShotIxG.');
+    // Legacy artifact path (attribution cannot be derived).
+    playmaking = row.primaryAssists * context.leagueIxGPerShot * evShareOfTOI;
+    notes.push('Playmaking using legacy A1 × leagueIxGPerShot — attribution fraction unavailable.');
   } else if (row.primaryAssists > 0) {
-    notes.push('Playmaking unavailable — assistedShotIxG and leagueIxGPerShot both missing.');
+    notes.push('Playmaking unavailable — attribution and leagueIxGPerShot both missing.');
+  }
+
+  // --- Component 2b: Secondary Playmaking (v5.6) —
+  // secondaryAssists × secondaryPlaymakingAttribution.
+  //
+  // A2 (the pass before the primary assist) is an earlier event in the
+  // offensive sequence that set up the opportunity that eventually became
+  // a goal. Public research (Evolving-Hockey, JFresh) consistently finds
+  // A2s carry repeatable, goal-differential-predictive signal — just
+  // less than A1s — and credits them ~0.2-0.3 goals per A2 vs ~0.5 per
+  // A1. Crediting zero (the v5.4/v5.5 formula did) under-values distribu-
+  // tor defensemen and breakout-pass centers.
+  //
+  // Attribution is data-derived in warTableService on the same shared
+  // denominator as primary playmaking (|corA1|+|corA2|+|corShots|) so
+  // the three terms don't double-count against the same "total signal"
+  // of on-ice xGF. Cap [0.05, 0.3] is a stability guard; the actual
+  // value tracks cross-skater correlation structure.
+  //
+  // No legacy fallback: secondary playmaking is new in v5.6, and a
+  // "legacy A2 × leagueIxGPerShot" equivalent would re-introduce the
+  // dimensionally-wrong per-shot framing we already removed. When
+  // secondaryPlaymakingAttribution is absent (very old artifacts), this
+  // component is zero and a note is emitted.
+  //
+  // v5.9 audit: strip PP contribution via 5v5 TOI proxy (same rationale
+  // as primary playmaking — A2s on PP are already credited through the
+  // powerPlay component).
+  let secondaryPlaymaking = 0;
+  if (typeof context.secondaryPlaymakingAttribution === 'number') {
+    secondaryPlaymaking = row.secondaryAssists * context.secondaryPlaymakingAttribution * evShareOfTOI;
+  } else if (row.secondaryAssists > 0) {
+    notes.push('Secondary playmaking unavailable — secondaryPlaymakingAttribution missing.');
   }
 
   // --- Component 3: Penalties
@@ -374,7 +439,18 @@ export function computeSkaterWAR(
     if (
       row.onIceXGF != null && row.onIceTOIAllSec != null && row.onIceTOIAllSec > 0
     ) {
-      const playerXGF60 = row.onIceXGF / onIceHoursAllStrength;
+      // v5.9 audit: ORTHOGONAL CORRECTION per the clean-decomposition
+      // audit. The player's individual ixG enters as its own finishing
+      // component (iG − ixG shrunk by split-half r). If we also include
+      // the shooter's ixG inside the on-ice xGF rate that feeds this
+      // blend, the baseline vs league/team compares a rate that
+      // includes the shooter's chance-creation — double-counting. Strip
+      // ixG out of the numerator before the delta so evOffense only
+      // represents the NON-shooter on-ice xG (teammate + system + draw
+      // leverage). The finishing residual will still capture the
+      // shooter's ixG contribution separately.
+      const playerIxGPer60 = row.ixG / onIceHoursAllStrength;
+      const playerXGF60 = row.onIceXGF / onIceHoursAllStrength - playerIxGPer60;
 
       let teamRelDelta: number | null = null;
       if (teamTotal && teamTotal.onIceTOI > row.onIceTOIAllSec) {
@@ -508,23 +584,29 @@ export function computeSkaterWAR(
   // Falls back to the averaged faceoffValuePerWin × total-FO% formula
   // when zone counts or zone rates are missing (older cached tables).
   const faceoffValuePerWin = context.faceoffValuePerWin ?? null;
-  // Partial discount on the zone-split follow-up values.
-  // Public research (Tulsky/Cane, Hockey Graphs — "Expected Faceoff
-  // Goal Differential", 2015) attributes the possession-flip event
-  // entirely to the center; the RAPM on-ice coefficient credits every
-  // skater during the full shift but does NOT separately credit the
-  // draw winner for the flip itself. So a 50% discount (the earlier
-  // kludge) halved real credit. The literature justifies full 100%
-  // attribution. We ship 75% here as a methodological compromise —
-  // research-grounded but conservative against any RAPM overlap we
-  // haven't fully audited. Top draw specialists net roughly 1–3 goals
-  // / season above average, matching published expectation.
-  const FACEOFF_POSSESSION_DISCOUNT = 0.75;
+  // v5.9 audit: possession-flip discount is now DATA-DERIVED in
+  // warTableService (`context.faceoffPossessionDiscount`). See the
+  // derivation comment there. The previous hardcoded 0.75 was too
+  // generous — audit finding: the RAPM on-ice xGF already captures the
+  // downstream xG that follows the possession flip, so we need to
+  // discount the OZ/DZ goal rates by the share RAPM already absorbs.
+  //
+  // Fallback: 0.5 literature constant (Tulsky/Cane 2012/2015) when the
+  // data derivation is unstable. Previous 0.75 was a research-grounded
+  // but un-audited methodological compromise; the audit surfaced the
+  // double-count with RAPM and we now ship the derivation.
+  let faceoffPossessionDiscount: number;
+  if (typeof context.faceoffPossessionDiscount === 'number') {
+    faceoffPossessionDiscount = context.faceoffPossessionDiscount;
+  } else {
+    faceoffPossessionDiscount = 0.5;
+    notes.push('faceoffPossessionDiscount unavailable on context — using literature fallback 0.5 (Tulsky/Cane 2012).');
+  }
   const ozRate = context.ozGoalRatePerWin != null
-    ? context.ozGoalRatePerWin * FACEOFF_POSSESSION_DISCOUNT
+    ? context.ozGoalRatePerWin * faceoffPossessionDiscount
     : null;
   const dzRate = context.dzGoalRateAgainstPerWin != null
-    ? context.dzGoalRateAgainstPerWin * FACEOFF_POSSESSION_DISCOUNT
+    ? context.dzGoalRateAgainstPerWin * faceoffPossessionDiscount
     : null;
   let faceoffs = 0;
   if (isCenter) {
@@ -590,7 +672,22 @@ export function computeSkaterWAR(
     const gaRate = row.giveaways / totalHours;
     const taCredit = (taRate - posMedianTA60) * totalHours * takeawayGoalValue;
     const gaCost = (gaRate - posMedianGA60) * totalHours * giveawayGoalValue;
-    turnovers = taCredit - gaCost;
+    // v5.9 audit: RAPM's on-ice xGF/A already captures the xG impact of
+    // turnovers (a team that takes the puck away generates more shots;
+    // a team that gives it up concedes more). Structural redundancy
+    // with this component. Shrink by γ = context.turnoverShrinkage —
+    // the share of turnover signal NOT already attributable to RAPM's
+    // on-ice measure. Derived in warTableService from cross-skater
+    // correlation structure; falls back to 0.25 literature convention
+    // (EvolvingHockey/HockeyGraphs).
+    let turnoverShrinkage: number;
+    if (typeof context.turnoverShrinkage === 'number') {
+      turnoverShrinkage = context.turnoverShrinkage;
+    } else {
+      turnoverShrinkage = 0.25;
+      notes.push('turnoverShrinkage unavailable on context — using literature fallback 0.25 (EvolvingHockey/HockeyGraphs).');
+    }
+    turnovers = (taCredit - gaCost) * turnoverShrinkage;
   } else {
     notes.push(
       'Turnover component unavailable — worker must populate takeaways / giveaways, LeagueContext takeaway/giveawayGoalValue, and position medianTakeaway/GiveawayPer60.'
@@ -666,7 +763,7 @@ export function computeSkaterWAR(
   //   Capped [0.3, 0.7]. Replaces the old `A1 × leagueIxGPerShot`,
   //   which was dimensionally wrong and used the average shot's xG
   //   instead of the actual assisted shot's xG.
-  const rawGAR = finishing + playmaking
+  const rawGAR = finishing + playmaking + secondaryPlaymaking
     + evOffense + evDefense
     + faceoffs + turnovers + micro + penalties + powerPlay + penaltyKill;
 
@@ -738,6 +835,7 @@ export function computeSkaterWAR(
     components: {
       finishing,
       playmaking,
+      secondaryPlaymaking,
       evOffense,
       evDefense,
       faceoffs,
@@ -768,6 +866,11 @@ export function computeSkaterWAR(
       giveawayGoalValue,
       hitGoalValue: context.hitGoalValue ?? null,
       blockGoalValue: context.blockGoalValue ?? null,
+      playmakingAttribution: context.playmakingAttribution ?? null,
+      secondaryPlaymakingAttribution: context.secondaryPlaymakingAttribution ?? null,
+      faceoffPossessionDiscount: context.faceoffPossessionDiscount ?? null,
+      turnoverShrinkage: context.turnoverShrinkage ?? null,
+      finishingShrinkage: context.finishingShrinkage ?? null,
       season,
     },
     dataComplete: true,
@@ -782,7 +885,7 @@ function skaterPlaceholder(
     position: pos,
     gamesPlayed: gp,
     components: {
-      finishing: 0, playmaking: 0,
+      finishing: 0, playmaking: 0, secondaryPlaymaking: 0,
       evOffense: 0, evDefense: 0,
       faceoffs: 0, turnovers: 0, micro: 0,
       penalties: 0, powerPlay: 0, penaltyKill: 0,
@@ -803,6 +906,11 @@ function skaterPlaceholder(
       giveawayGoalValue: context.giveawayGoalValue ?? null,
       hitGoalValue: context.hitGoalValue ?? null,
       blockGoalValue: context.blockGoalValue ?? null,
+      playmakingAttribution: context.playmakingAttribution ?? null,
+      secondaryPlaymakingAttribution: context.secondaryPlaymakingAttribution ?? null,
+      faceoffPossessionDiscount: context.faceoffPossessionDiscount ?? null,
+      turnoverShrinkage: context.turnoverShrinkage ?? null,
+      finishingShrinkage: context.finishingShrinkage ?? null,
       season: context.season,
     },
     dataComplete: false,

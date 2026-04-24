@@ -109,14 +109,38 @@ function normalizePosition(pos) {
   return 'F';
 }
 
-// Search NHL API for a player's ID by name
-async function searchPlayerId(name) {
+// Search NHL API for a player's ID by name.
+// Prefers: active players, then matching team abbrev (current or last), then active-by-active.
+// Rationale: search.d3.nhle returns retired homonyms first (e.g. "Jack Hughes" returns
+// the 1981 Devils D before the active NJD center), so limit=1 is wrong.
+async function searchPlayerId(name, teamAbbrev) {
   try {
     const searchName = normalizeName(name);
-    const url = `https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=1&q=${encodeURIComponent(searchName)}`;
+    const url = `https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=10&q=${encodeURIComponent(searchName)}&active=true`;
     const body = await fetchPage(url);
-    const results = JSON.parse(body);
-    if (results.length > 0) return results[0].playerId;
+    let results = JSON.parse(body);
+    if (!Array.isArray(results) || results.length === 0) {
+      // fallback: allow inactive (some prospects/minors)
+      const urlAll = `https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=10&q=${encodeURIComponent(searchName)}`;
+      const body2 = await fetchPage(urlAll);
+      results = JSON.parse(body2);
+      if (!Array.isArray(results) || results.length === 0) return null;
+    }
+    // 1) active + team match
+    if (teamAbbrev) {
+      const teamMatch = results.find(r => r.active && (r.teamAbbrev === teamAbbrev || r.lastTeamAbbrev === teamAbbrev));
+      if (teamMatch) return teamMatch.playerId;
+    }
+    // 2) any active
+    const anyActive = results.find(r => r.active);
+    if (anyActive) return anyActive.playerId;
+    // 3) team match regardless of active
+    if (teamAbbrev) {
+      const teamOnly = results.find(r => r.teamAbbrev === teamAbbrev || r.lastTeamAbbrev === teamAbbrev);
+      if (teamOnly) return teamOnly.playerId;
+    }
+    // 4) first result
+    return results[0].playerId;
   } catch { /* skip */ }
   return null;
 }
@@ -269,14 +293,14 @@ async function main() {
       const teamData = extractTeamContracts(nextData);
       if (!teamData || teamData.players.length === 0) { console.log(' WARN: No players'); failCount++; continue; }
 
-      // Look up player IDs via NHL search API (only for players with cap hit >= $1M)
+      // Look up player IDs via NHL search API for ALL players (was: only >= $1M).
+      // 922/1561 entries were missing playerId under the old threshold, which breaks
+      // surplus-value lookups for mid/low cap-hit players (ELCs, depth, minors).
       let idCount = 0;
       for (const player of teamData.players) {
-        if (player.capHit >= 1000000) {
-          const pid = await searchPlayerId(player.name);
-          if (pid) { player.playerId = pid; idCount++; }
-          await new Promise(r => setTimeout(r, 150));
-        }
+        const pid = await searchPlayerId(player.name, abbrev);
+        if (pid) { player.playerId = pid; idCount++; }
+        await new Promise(r => setTimeout(r, 120));
       }
 
       output.teams[abbrev] = teamData;
