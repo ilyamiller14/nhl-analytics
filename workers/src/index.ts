@@ -2487,6 +2487,20 @@ interface WARSkaterRow {
   onIceGoalsAgainst?: number;
   onIceXGA?: number;
   onIceTOIAllSec?: number; // sum of seconds player was on-ice across all games
+  // v5.4: split-half aggregates for finishing reliability (split by
+  // even/odd index within each player's own game log sorted by date,
+  // populated at finalize). Client computes split-half Pearson r across
+  // (iG-ixG)/shots and uses r as the finishing-residual shrinkage factor.
+  iGFirstHalf?: number;
+  iGSecondHalf?: number;
+  ixGFirstHalf?: number;
+  ixGSecondHalf?: number;
+  shotsFirstHalf?: number;
+  shotsSecondHalf?: number;
+  // v5.4: summed ixG of shots on which this player earned a primary
+  // assist. Replaces the dimensionally-approximate `A1 × leagueIxGPerShot`
+  // playmaking formula with the actual xG of shots the player created.
+  assistedShotIxG?: number;
 }
 
 interface WARGoalieRow {
@@ -2530,6 +2544,19 @@ interface LeagueContext {
   // (teamTotals[row.team].xGF − player.onIceXGF) /
   // ((teamTotals[row.team].onIceTOI − player.onIceTOIAllSec)/3600).
   teamTotals?: Record<string, { xGF: number; xGA: number; onIceTOI: number }>;
+  // v5.4: split-half Pearson r of per-skater finishing rate
+  // (iG − ixG) / shots, computed across all qualified skaters
+  // (≥ 50 shots in each half). Used as the finishing-residual shrinkage
+  // factor in warService: finishing = (iG − ixG) × shrinkage. Higher r =
+  // more repeatable skill = less shrinkage. Clamped to [0, 1] (negative
+  // correlations collapse to zero finishing credit).
+  finishingShrinkage?: number;
+  // v5.4: fraction of an A1-assisted shot's ixG credited to the passer,
+  // net of RAPM's on-ice xGF overlap. Derived from cross-skater
+  // correlation of A1/60 vs on-ice xGF/60 and A1 vs independent shot
+  // volume — see buildLeagueContext. Capped [0.3, 0.7] to prevent
+  // degenerate values. Worker emits; client multiplies by assistedShotIxG.
+  playmakingAttribution?: number;
 }
 
 interface LeaguePositionStats {
@@ -2607,6 +2634,11 @@ async function buildWARTables(env: Env): Promise<{
   const goalies = new Map<number, WARGoalieRow>();
   const gamesSeenPerPlayer = new Map<number, Set<number>>();
   const seenGameIds = new Set<number>();
+  // v5.4: per-skater per-game shot tallies for split-half reliability.
+  // playerId → gameId → { iG, ixG, shots, date }
+  const perPlayerGameShots = new Map<number, Map<number, {
+    iG: number; ixG: number; shots: number; date: string;
+  }>>();
 
   for (const team of NHL_TEAMS) {
     const key = `team_pbp_${team}_${CURRENT_SEASON}`;
@@ -2703,6 +2735,17 @@ async function buildWARTables(env: Env): Promise<{
               row.ixG += xg;
               if (type === 'goal') row.iG += 1;
 
+              // v5.4 split-half: record per-game tally keyed by gameId.
+              let perGame = perPlayerGameShots.get(shooterId);
+              if (!perGame) { perGame = new Map(); perPlayerGameShots.set(shooterId, perGame); }
+              const prev = perGame.get(g.gameId);
+              if (prev) {
+                if (type === 'goal') prev.iG += 1;
+                prev.ixG += xg; prev.shots += 1;
+              } else {
+                perGame.set(g.gameId, { iG: type === 'goal' ? 1 : 0, ixG: xg, shots: 1, date: g.gameDate || '' });
+              }
+
               // Assist credits
               if (type === 'goal') {
                 const a1 = d.assist1PlayerId;
@@ -2711,6 +2754,8 @@ async function buildWARTables(env: Env): Promise<{
                   let ra = skaters.get(a1);
                   if (!ra) { ra = blankSkaterRow(a1); skaters.set(a1, ra); }
                   ra.primaryAssists += 1;
+                  // v5.4: see buildWARChunkTeam for rationale.
+                  ra.assistedShotIxG = (ra.assistedShotIxG || 0) + xg;
                 }
                 if (a2) {
                   let ra = skaters.get(a2);
@@ -2829,12 +2874,74 @@ async function buildWARTables(env: Env): Promise<{
     }
   }
 
+  // v5.4 split-half finalize (non-chunked path): for each player, sort
+  // their game-shot tallies by date and split by even/odd index.
+  applySplitHalfFromPerGame(skaters, perPlayerGameShots);
+
   console.log(`WAR aggregation: ${skaters.size} skaters, ${goalies.size} goalies, ${seenGameIds.size} games`);
   const skOut: Record<number, WARSkaterRow> = {};
   const goOut: Record<number, WARGoalieRow> = {};
   for (const [pid, row] of skaters) skOut[pid] = row;
   for (const [pid, row] of goalies) goOut[pid] = row;
   return { skaters: skOut, goalies: goOut };
+}
+
+/**
+ * v5.4 split-half finalization. For each player, sort their games by date
+ * and split even-indexed into firstHalf, odd-indexed into secondHalf.
+ * Populates iGFirstHalf/SecondHalf, ixGFirstHalf/SecondHalf, and
+ * shotsFirstHalf/SecondHalf on each skater row. Standard split-half
+ * reliability methodology — avoids calendar-date bias from uneven league
+ * scheduling (bye weeks, late call-ups, trades).
+ *
+ * Accepts both the non-chunked Map form and the chunked plain-object form.
+ */
+function applySplitHalfFromPerGame(
+  skatersMap: Map<number, WARSkaterRow> | Record<number, WARSkaterRow>,
+  perPlayerGameShots: Map<number, Map<number, { iG: number; ixG: number; shots: number; date: string }>>
+    | Record<number, Record<number, { iG: number; ixG: number; shots: number; date: string }>>,
+): void {
+  const entries: Array<[number, Array<{ gameId: number; iG: number; ixG: number; shots: number; date: string }>]> = [];
+  if (perPlayerGameShots instanceof Map) {
+    for (const [pid, inner] of perPlayerGameShots) {
+      const list: Array<{ gameId: number; iG: number; ixG: number; shots: number; date: string }> = [];
+      for (const [gid, v] of inner) list.push({ gameId: gid, ...v });
+      entries.push([pid, list]);
+    }
+  } else {
+    for (const pidStr of Object.keys(perPlayerGameShots)) {
+      const pid = parseInt(pidStr, 10);
+      const inner = perPlayerGameShots[pid];
+      const list: Array<{ gameId: number; iG: number; ixG: number; shots: number; date: string }> = [];
+      for (const gidStr of Object.keys(inner)) {
+        const gid = parseInt(gidStr, 10);
+        list.push({ gameId: gid, ...inner[gid] });
+      }
+      entries.push([pid, list]);
+    }
+  }
+  const getRow = (pid: number): WARSkaterRow | undefined =>
+    skatersMap instanceof Map ? skatersMap.get(pid) : skatersMap[pid];
+  for (const [pid, games] of entries) {
+    const row = getRow(pid);
+    if (!row) continue;
+    games.sort((a, b) => {
+      if (a.date && b.date && a.date !== b.date) return a.date < b.date ? -1 : 1;
+      return a.gameId - b.gameId; // stable tiebreak
+    });
+    let iG1 = 0, iG2 = 0, ixG1 = 0, ixG2 = 0, s1 = 0, s2 = 0;
+    for (let i = 0; i < games.length; i++) {
+      const g = games[i];
+      if (i % 2 === 0) { iG1 += g.iG; ixG1 += g.ixG; s1 += g.shots; }
+      else              { iG2 += g.iG; ixG2 += g.ixG; s2 += g.shots; }
+    }
+    row.iGFirstHalf = iG1;
+    row.iGSecondHalf = iG2;
+    row.ixGFirstHalf = ixG1;
+    row.ixGSecondHalf = ixG2;
+    row.shotsFirstHalf = s1;
+    row.shotsSecondHalf = s2;
+  }
 }
 
 // Chunked WAR build state — persisted in KV between per-team invocations
@@ -2853,6 +2960,14 @@ interface WARPartial {
     xGA: number;          // summed xG of unblocked shots AGAINST team
     onIceTOI: number;     // sum of every team player's shift durations (sec)
   }>;
+  // v5.4: per-skater, per-game shooting tallies. At finalize the chunked
+  // build sorts each player's games by date and splits even-indexed vs
+  // odd-indexed into first/second halves for split-half reliability of
+  // finishing rate (iG − ixG) / shots. Keyed [playerId][gameId] so the
+  // same game processed via different team chunks stays idempotent.
+  perPlayerGameShots?: Record<number, Record<number, {
+    iG: number; ixG: number; shots: number; date: string;
+  }>>;
   // v3: league-level followup counters. At finalize we derive empirical
   // goal values as (followup goals / event count). Zero hardcoded values.
   leagueCounters?: {
@@ -2924,6 +3039,21 @@ async function buildWARChunkTeam(env: Env, team: string): Promise<void> {
     if (!abbrev) return;
     if (!teamTotals[abbrev]) teamTotals[abbrev] = { xGF: 0, xGA: 0, onIceTOI: 0 };
     teamTotals[abbrev][field] += amount;
+  };
+
+  // v5.4: per-skater per-game shot tallies. At finalize we sort each
+  // player's games by date and split even/odd-indexed into first/second
+  // halves so the client can compute split-half reliability of finishing.
+  if (!partial.perPlayerGameShots) partial.perPlayerGameShots = {};
+  const perGameShots = partial.perPlayerGameShots;
+  const bumpGameShot = (pid: number, gameId: number, gameDate: string, iG: number, ixG: number, shots: number) => {
+    if (!perGameShots[pid]) perGameShots[pid] = {};
+    const bucket = perGameShots[pid][gameId];
+    if (bucket) {
+      bucket.iG += iG; bucket.ixG += ixG; bucket.shots += shots;
+    } else {
+      perGameShots[pid][gameId] = { iG, ixG, shots, date: gameDate || '' };
+    }
   };
 
   const xgLookupRaw = await env.NHL_CACHE.get(`xg_lookup_${CURRENT_SEASON}`, 'json') as any;
@@ -3087,6 +3217,10 @@ async function buildWARChunkTeam(env: Env, team: string): Promise<void> {
             row.ixG += xg;
             if (type === 'goal') row.iG += 1;
 
+            // v5.4 split-half: record per-game shooting tally so finalize
+            // can split each player's games by date into first/second halves.
+            bumpGameShot(shooterId, g.gameId, g.gameDate, type === 'goal' ? 1 : 0, xg, 1);
+
             // Team totals — attribute xG to shooter's team, xGA to defender's
             const shooterTeamAbbrev = teamId === homeTeamId ? g.homeTeamAbbrev : g.awayTeamAbbrev;
             const defenderTeamAbbrev = teamId === homeTeamId ? g.awayTeamAbbrev : g.homeTeamAbbrev;
@@ -3096,7 +3230,15 @@ async function buildWARChunkTeam(env: Env, team: string): Promise<void> {
             if (type === 'goal') {
               const a1 = d.assist1PlayerId;
               const a2 = d.assist2PlayerId;
-              if (a1) getOrCreateSkater(a1).primaryAssists += 1;
+              if (a1) {
+                const ra = getOrCreateSkater(a1);
+                ra.primaryAssists += 1;
+                // v5.4 playmaking: accumulate the actual xG of the shot
+                // the A1 set up. Replaces the `A1 × leagueIxGPerShot`
+                // approximation — this is the literal expected-goals
+                // value of the play the passer created.
+                ra.assistedShotIxG = (ra.assistedShotIxG || 0) + xg;
+              }
               if (a2) getOrCreateSkater(a2).secondaryAssists += 1;
             }
             if (type === 'goal' || type === 'shot-on-goal') {
@@ -3315,6 +3457,14 @@ async function finalizeWARTables(env: Env): Promise<void> {
     const pid = parseInt(pidStr, 10);
     const row = partial.skaters[pid];
     if (row) row.gamesPlayed = gameIds.length;
+  }
+
+  // v5.4: split-half finalization. Emits iG/ixG/shots per half on each
+  // skater row, driven by even/odd index within each player's games
+  // sorted by date. Client computes the league-wide Pearson r and uses
+  // it as the finishing shrinkage factor.
+  if (partial.perPlayerGameShots) {
+    applySplitHalfFromPerGame(partial.skaters, partial.perPlayerGameShots);
   }
 
   const [toi, goalieToi] = await Promise.all([fetchSkaterTOI(), fetchGoalieTOI()]);

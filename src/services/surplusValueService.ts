@@ -106,7 +106,7 @@ function ageMultiplier(age: number): number {
 // Cache
 // ============================================================================
 
-const CACHE_KEY = 'surplus_ratio_market_war_v5_4';
+const CACHE_KEY = 'surplus_ratio_market_war_v5_5';
 let coeffCache: HedonicCoefficients | null = null;
 
 // ============================================================================
@@ -341,7 +341,15 @@ export async function computePlayerSurplus(
   // Age — grab from the worker's cached ages. Same fetch as fit phase
   // but this lives a little off the hot path; fitHedonicModel already
   // populated the CacheManager entry so the fetch is KV-hit.
-  let age = 27; // fallback if worker age not available (rare)
+  //
+  // If age is unavailable we return null rather than falling back to a
+  // default. The age curve peaks at 1.0 for 26–30, so any fixed default
+  // in that window (the old code used 27) would *silently inflate*
+  // predicted market value for young/old players whose ages happen to
+  // be missing — a ~18% overstatement for a 22-year-old rookie, for
+  // example. Better to hide the surplus card entirely than to ship a
+  // misleading number.
+  let age: number | null = null;
   try {
     const ages = await fetchAges();
     const idForAge = contract.playerId ??
@@ -349,7 +357,8 @@ export async function computePlayerSurplus(
     if (typeof idForAge === 'number' && ages[idForAge] != null) {
       age = ages[idForAge];
     }
-  } catch { /* stay at 27 */ }
+  } catch { /* age stays null; we'll bail below */ }
+  if (age == null) return null;
 
   const expiry = parseExpiryStatus(contract.expiryStatus);
   const isELCFlag = isELC(contract.contractType);

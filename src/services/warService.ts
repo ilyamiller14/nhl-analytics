@@ -182,28 +182,21 @@ function percentileFromQuantiles(
 }
 
 // ============================================================================
-// Per-player skater GAR — median ixG per primary assist is derived per
-// call from the league distribution (the median forward's total ixG
-// gives the "expected setup value" of one primary assist).
+// Per-player skater GAR
+//
+// v5.4 — finishing and playmaking are both data-driven with no residual
+// hardcoded constants:
+//   • Finishing residual (iG − ixG) is shrunk by the split-half Pearson
+//     correlation of per-skater finishing rate across halves, stored on
+//     `context.finishingShrinkage`.
+//   • Playmaking credits the real ixG of every shot this skater primary-
+//     assisted (worker's `assistedShotIxG` field), scaled by
+//     `context.playmakingAttribution` — a derived fraction, not a
+//     literature constant — capped [0.3, 0.7]. The old formula
+//     `primaryAssists × leagueIxGPerShot` is retained only as a last-
+//     resort fallback when assistedShotIxG isn't on the row (legacy
+//     artifact with no fresh worker build).
 // ============================================================================
-
-function medianIxGPerPrimary(context: LeagueContext, pos: 'F' | 'D'): number {
-  // A primary assist leads to one shot. The defensible credit is the
-  // league-average expected-goals VALUE of a shot — Σ(ixG) / Σ(shots)
-  // across the league, derived client-side at load time in
-  // warTableService.loadWARTables (`context.leagueIxGPerShot`, ~0.07).
-  //
-  // If that field is missing we return 0 and let the caller emit a
-  // note. The previous fallback used `medianIxGPer60 / 60`, a per-
-  // MINUTE rate multiplied by an assist count — dimensionally wrong,
-  // quietly wrong, and biased down by ~5×. Zero is more honest than
-  // silently broken math.
-  void pos;
-  if (typeof context.leagueIxGPerShot === 'number' && context.leagueIxGPerShot > 0) {
-    return context.leagueIxGPerShot;
-  }
-  return 0;
-}
 
 export function computeSkaterWAR(
   row: WARSkaterRow,
@@ -221,23 +214,51 @@ export function computeSkaterWAR(
     return skaterPlaceholder(pos, 0, context, ['No games played yet.']);
   }
 
-  // --- Component 1: Finishing (GAX) — purely individual, directly observable.
-  const finishing = row.iG - row.ixG;
+  // --- Component 1: Finishing (GAX) — (iG − ixG) shrunk by the league
+  // split-half reliability of per-skater finishing rate. When the worker
+  // artifact exposes per-half iG/ixG/shots, the client (warTableService)
+  // computes Pearson r across halves; we multiply the raw residual by
+  // max(0, r) so unrepeatable variance is damped. No hardcoded shrinkage
+  // constant — the weight is this season's measured repeatability.
+  //
+  // If the context lacks `finishingShrinkage` (legacy artifact that
+  // predates the split-half fields), we pass the raw residual through
+  // unshrunk and flag a note rather than substitute a guess.
+  const rawFinishing = row.iG - row.ixG;
+  let finishing = rawFinishing;
+  if (typeof context.finishingShrinkage === 'number') {
+    finishing = rawFinishing * context.finishingShrinkage;
+  } else {
+    notes.push('Finishing shrinkage unavailable — worker artifact predates split-half fields. Raw (iG − ixG) passed through unshrunk.');
+  }
 
-  // --- Component 2: Playmaking — primary assists × median playmaking xG
-  // per assist. ixG-per-minute × minutes-per-primary-assist is a
-  // reasonable lower-bound estimate. We use: primary assists ×
-  // median ixG per-60 / 60 × typical shot-to-assist interval (1 minute
-  // average setup window). Simpler and more defensible: primary assists
-  // times the median player's xG-per-primary = (ixG_total / primaries)
-  // as league-average. We fall back to a proportional estimate when the
-  // league-wide primary count isn't in the artifact.
-  const perAssistXG = medianIxGPerPrimary(context, pos === 'F' ? 'F' : 'D');
-  // Upper-bound of primary-assist credit: assume each primary assist
-  // was worth the league-median EV shot's xG. This is conservative.
-  const playmaking = row.primaryAssists * perAssistXG;
-  if (row.primaryAssists > 0 && perAssistXG === 0) {
-    notes.push('Primary-assist playmaking credit unavailable — league median ixG/60 is 0.');
+  // --- Component 2: Playmaking — Σ(ixG of shots primary-assisted)
+  // × playmakingAttribution.
+  //
+  // `assistedShotIxG` is summed in the worker at goal time: each primary
+  // assist picks up the exact empirical xG of the shot it set up. This
+  // replaces the old `primaryAssists × leagueIxGPerShot` approximation,
+  // which credited every A1 at an AVERAGE shot's xG regardless of the
+  // shot's actual location / strength / context.
+  //
+  // `playmakingAttribution` is derived in warTableService from the
+  // cross-skater correlation structure (A1/60 vs on-ice xGF/60 vs shot
+  // volume). Capped [0.3, 0.7]. When absent, we fall back to the legacy
+  // `A1 × leagueIxGPerShot` formula but emit a note so viewers know
+  // the artifact is missing the new field.
+  let playmaking = 0;
+  if (typeof row.assistedShotIxG === 'number' && typeof context.playmakingAttribution === 'number') {
+    playmaking = row.assistedShotIxG * context.playmakingAttribution;
+  } else if (typeof row.assistedShotIxG === 'number') {
+    // Field present, attribution missing — apply at full value and note.
+    playmaking = row.assistedShotIxG;
+    notes.push('Playmaking attribution fraction unavailable — full assistedShotIxG passed through.');
+  } else if (typeof context.leagueIxGPerShot === 'number' && context.leagueIxGPerShot > 0) {
+    // Legacy artifact path.
+    playmaking = row.primaryAssists * context.leagueIxGPerShot;
+    notes.push('Playmaking using legacy A1 × leagueIxGPerShot — worker artifact predates assistedShotIxG.');
+  } else if (row.primaryAssists > 0) {
+    notes.push('Playmaking unavailable — assistedShotIxG and leagueIxGPerShot both missing.');
   }
 
   // --- Component 3: Penalties
@@ -629,30 +650,22 @@ export function computeSkaterWAR(
     }
   }
 
-  // --- Raw GAR (vs average) — v5.1 INCLUDES individual finishing +
-  // primary-assist playmaking at full weight, consistent with
-  // Evolving-Hockey / Sprigings GAR composition.
+  // --- Raw GAR (vs average) — v5.4 finishing + playmaking are both
+  // included, each scaled by a league-derived, data-driven factor.
   //
-  // Research grounding:
-  //   • Finishing (iG − ixG) is a PERSONAL skill residual above the
-  //     empirical shot-quality model. The player's own ixG is counted
-  //     in on-ice xGF, so RAPM credits his base shot volume — but the
-  //     above-expected conversion is uniquely the shooter's skill and
-  //     is not in the RAPM coefficient.
-  //   • Playmaking (A1 × league ixG-per-shot) credits the creator of
-  //     a shot. Yes, the shot's xG also enters on-ice xGF and is split
-  //     among 5 skaters in RAPM — but the A1 specifically CREATED the
-  //     scoring chance, which is not separately isolated by RAPM's
-  //     equal-share attribution. The theoretical overlap is ~1/5 of
-  //     the playmaking bar (the A1's own share of the on-ice total) —
-  //     on the order of 0.05–0.10 WAR for top playmakers. Small
-  //     enough that discounting introduces more bias (rejecting real
-  //     creator skill) than it removes (double-counting the fifth).
-  //     Include at full weight, matching EH / Sprigings.
+  // Finishing: (iG − ixG) × context.finishingShrinkage
+  //   The shrinkage is the split-half Pearson r of per-skater finishing
+  //   rate across the season — a direct measure of how much of this
+  //   year's residual is repeatable skill vs shot-luck noise. No
+  //   literature constant. Computed in warTableService at load time.
   //
-  // Empirical calibration: Hughes (pacing 103 pts) gains ~+0.80 WAR
-  // from finishing + ~+0.34 WAR from playmaking → ~2.96 WAR/82 total,
-  // in line with public models for top-10 scoring forwards.
+  // Playmaking: row.assistedShotIxG × context.playmakingAttribution
+  //   The summed ixG of every shot primary-assisted, scaled by an
+  //   attribution fraction derived from the cross-skater correlation
+  //   structure (cor(A1/60, onIce-xGF/60) / (cor(A1) + cor(shots))).
+  //   Capped [0.3, 0.7]. Replaces the old `A1 × leagueIxGPerShot`,
+  //   which was dimensionally wrong and used the average shot's xG
+  //   instead of the actual assisted shot's xG.
   const rawGAR = finishing + playmaking
     + evOffense + evDefense
     + faceoffs + turnovers + micro + penalties + powerPlay + penaltyKill;

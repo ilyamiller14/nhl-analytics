@@ -224,6 +224,19 @@
   border: 1px solid rgba(239, 68, 68, 0.25);
 }
 
+/* FAIR VALUE — neutral slate/gray for surpluses inside model precision
+   (|surplus| < $1M). Prevents a $-0.5M single-season readout from
+   screaming "DEFICIT" when it's within documented RMSE. */
+.surplus-value.fair-value {
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.hero-stat-sub.hero-stat-sub-fair {
+  color: rgba(203, 213, 225, 0.85);
+}
+
 .surplus-pct {
   font-size: 0.75rem;
   font-weight: 500;

@@ -20,6 +20,21 @@ import type { WARResult } from '../services/warService';
 import { getTeamPrimaryColor } from '../constants/teams';
 import './PlayerAnalyticsCard.css';
 
+// Below this absolute dollar value, a surplus reading is inside the
+// documented model precision (±$1-2M at mid-tier per the v5.4 ratio
+// model; see surplusValueService.ts top-of-file comment + HANDOFF
+// "Known limitations"). We render these as a neutral "FAIR VALUE" band
+// rather than as red deficit / green surplus to avoid implying signal
+// where the model can only express noise. Tunable here.
+const SURPLUS_FAIR_VALUE_THRESHOLD = 1_000_000;
+
+// If the symmetric wins-accounting WAR (WAR_per_82) and the market-
+// clipped WAR (WAR_market_per_82) diverge by more than this, we
+// surface both on the share card so the reader can reconcile a
+// negative or small WAR with a large green surplus. 0.15 WAR is
+// roughly one tier of meaningful EV-defense drag.
+const WAR_MARKET_DIVERGENCE_THRESHOLD = 0.15;
+
 interface PlayerAnalyticsCardProps {
   playerId?: number;
   playerName: string;
@@ -326,7 +341,13 @@ export default function PlayerAnalyticsCard({
   teamSurplus,
   isELC,
   isRFA,
-  modelRmseDollars,
+  // modelRmseDollars was consumed by the v5.0/5.1 regression tooltip.
+  // The v5.4 ratio-based tooltip expresses precision qualitatively
+  // (±$1-2M mid-tier, ±$3M+ at the tails) rather than as a single
+  // residual number — RMSE from the ratio fit isn't meaningfully the
+  // same metric. Kept on the props interface for back-compat so
+  // existing callers don't have to change.
+  modelRmseDollars: _modelRmseDollars,
   warResult,
 }: PlayerAnalyticsCardProps) {
   // Get latest rolling metrics
@@ -432,39 +453,54 @@ export default function PlayerAnalyticsCard({
               {capHit != null && (
                 <div className="surplus-badge">
                   <span className="surplus-cap">{formatDollars(capHit)} AAV</span>
-                  {surplus != null && (
-                    <span
-                      className={`surplus-value ${surplus >= 0 ? 'bargain' : 'overpaid'}`}
-                      title={
-                        `SEASON market value (${season}): ${formatDollars(openMarketValue ?? 0)}\n` +
-                        `Actual cap hit: ${formatDollars(capHit)}\n` +
-                        `Gap: ${surplus >= 0 ? '+' : '−'}${formatDollars(Math.abs(surplus))}\n` +
-                        `\n` +
-                        `Method: open-market log(cap) regression on UFA-signed\n` +
-                        `contracts, applied to this season's WAR/82. Model R²\n` +
-                        `is low (~0.17) because multi-year term, NMC/NTC, and\n` +
-                        `cap-inflation at signing aren't captured.\n` +
-                        (modelRmseDollars
-                          ? `Typical residual error: ±${formatDollars(modelRmseDollars)}\n`
-                          : '') +
-                        `\n` +
-                        `A player with a below-average current season on a\n` +
-                        `multi-year deal can read as "overpriced" here even\n` +
-                        `if the contract is widely regarded as a bargain over\n` +
-                        `its full term — that's the single-season framing at\n` +
-                        `work, not a judgment of the deal.` +
-                        (earnedSurplus != null && earnedSurplus > 500_000
-                          ? `\n\nCBA-structural component: ${formatDollars(earnedSurplus)}`
-                          : '') +
-                        (teamSurplus != null && Math.abs(teamSurplus) > 250_000
-                          ? `\nTeam-negotiation component: ${teamSurplus >= 0 ? '+' : ''}${formatDollars(teamSurplus)}`
-                          : '')
-                      }
-                    >
-                      {formatDollars(Math.abs(surplus))}{' '}
-                      {surplus >= 0 ? '25-26 MKT SURPLUS' : '25-26 MKT DEFICIT'}
-                    </span>
-                  )}
+                  {surplus != null && (() => {
+                    const isFairValue = Math.abs(surplus) < SURPLUS_FAIR_VALUE_THRESHOLD;
+                    const badgeClass = isFairValue
+                      ? 'fair-value'
+                      : surplus >= 0 ? 'bargain' : 'overpaid';
+                    const label = isFairValue
+                      ? `25-26 FAIR VALUE (${surplus >= 0 ? '+' : '−'}${formatDollars(Math.abs(surplus))})`
+                      : `${formatDollars(Math.abs(surplus))} ${surplus >= 0 ? '25-26 MKT SURPLUS' : '25-26 MKT DEFICIT'}`;
+                    const tooltip =
+                      `Predicted market value (${season}): ${formatDollars(openMarketValue ?? 0)}\n` +
+                      `Actual cap hit: ${formatDollars(capHit)}\n` +
+                      `Surplus = predicted − actual: ${surplus >= 0 ? '+' : '−'}${formatDollars(Math.abs(surplus))}\n` +
+                      `\n` +
+                      `Method (v5.4, ratio-based; see surplusValueService.ts):\n` +
+                      `  predicted = WAR_market/82 × $/WAR × ageMult(age),\n` +
+                      `  floored at the $775K league minimum.\n` +
+                      `  WAR_market clips the negative tail of EV defense\n` +
+                      `  so offensive players on bad teams aren't penalized\n` +
+                      `  by drag the contract market doesn't actually price.\n` +
+                      `\n` +
+                      `  $/WAR is fit on UFA-signed contracts with WAR ≥ 0.5\n` +
+                      `  (separate anchors for F and D); ELC / RFA deals are\n` +
+                      `  excluded from the fit because they're CBA-suppressed.\n` +
+                      `\n` +
+                      `  Age curve (Desjardins/Brander, published): peak at\n` +
+                      `  26-30 (mult = 1.0), down to ~0.96 at 24 and ~0.5 at 38.\n` +
+                      `\n` +
+                      `Single-season framing: the surplus reflects THIS\n` +
+                      `season's WAR only — multi-year term value, cap-\n` +
+                      `inflation at signing, and NMC/NTC are not captured.\n` +
+                      `Precision is approximately ±$1-2M at mid-tier and\n` +
+                      `±$3M+ at the tails; treat any single number as a\n` +
+                      `band, not a point estimate.\n` +
+                      (isFairValue
+                        ? `\nThis player's surplus is inside the model's\nprecision band, so it's rendered as FAIR VALUE.`
+                        : '') +
+                      (earnedSurplus != null && earnedSurplus > 500_000
+                        ? `\n\nCBA-structural component: ${formatDollars(earnedSurplus)}`
+                        : '') +
+                      (teamSurplus != null && Math.abs(teamSurplus) > 250_000
+                        ? `\nTeam-negotiation component: ${teamSurplus >= 0 ? '+' : ''}${formatDollars(teamSurplus)}`
+                        : '');
+                    return (
+                      <span className={`surplus-value ${badgeClass}`} title={tooltip}>
+                        {label}
+                      </span>
+                    );
+                  })()}
                   {(isELC || isRFA) && (
                     <span className="surplus-pct" title="Contract status suppresses open-market value; most of the surplus is CBA-structural, not GM negotiation.">
                       {isELC ? 'ELC' : 'RFA'}
@@ -489,19 +525,37 @@ export default function PlayerAnalyticsCard({
               enough GP, no artifact), fall back to P/GP and +/-. */}
           <div className="hero-stats-row">
             <HeroStat label="PTS" value={points} sub={`${goals}G · ${assists}A`} />
-            {warResult && warResult.dataComplete ? (
-              <HeroStat
-                label="WAR / 82"
-                value={warResult.WAR_per_82 >= 0
-                  ? `+${warResult.WAR_per_82.toFixed(2)}`
-                  : warResult.WAR_per_82.toFixed(2)}
-                sub={`${warResult.WAR.toFixed(2)} cum · ${warResult.gamesPlayed} GP`}
-              />
-            ) : (
+            {warResult && warResult.dataComplete ? (() => {
+              // When a surplus number is displayed adjacent to WAR, show
+              // the WAR the surplus is actually computed from
+              // (WAR_market_per_82 — defense-floored variant used by
+              // surplusValueService). Otherwise show the symmetric
+              // wins-accounting WAR_per_82.
+              //
+              // Without this, a defense-negative offensive rookie like
+              // Bedard shows "WAR −0.20" next to "+$3.5M surplus" and
+              // the card reads as broken.
+              const useMarket = surplus != null;
+              const headline = useMarket
+                ? warResult.WAR_market_per_82
+                : warResult.WAR_per_82;
+              const diverges = Math.abs(
+                warResult.WAR_market_per_82 - warResult.WAR_per_82
+              ) > WAR_MARKET_DIVERGENCE_THRESHOLD;
+              const label = useMarket ? 'MKT WAR / 82' : 'WAR / 82';
+              const value = headline >= 0
+                ? `+${headline.toFixed(2)}`
+                : headline.toFixed(2);
+              const sub = useMarket && diverges
+                ? `Raw WAR: ${warResult.WAR_per_82 >= 0 ? '+' : ''}${warResult.WAR_per_82.toFixed(2)} · ${warResult.gamesPlayed} GP`
+                : `${warResult.WAR.toFixed(2)} cum · ${warResult.gamesPlayed} GP`;
+              return <HeroStat label={label} value={value} sub={sub} />;
+            })() : (
               <HeroStat label="P/GP" value={ppg.toFixed(2)} sub={`${gamesPlayed} GP`} />
             )}
             {surplus != null ? (
               (() => {
+                const isFairValue = Math.abs(surplus) < SURPLUS_FAIR_VALUE_THRESHOLD;
                 const valueStr = `${surplus >= 0 ? '+' : '−'}$${(Math.abs(surplus) / 1_000_000).toFixed(1)}M`;
                 const isStructural = (isELC || isRFA) &&
                   earnedSurplus != null &&
@@ -517,6 +571,18 @@ export default function PlayerAnalyticsCard({
                   // label can stay compact. 2025-26 specifically signals
                   // that this is single-season not multi-year.
                   subParts.push(`vs ${formatDollars(capHit)} AAV · single-season`);
+                }
+                // When the magnitude is inside model precision we render
+                // as a neutral FAIR VALUE hero so the reader doesn't
+                // misread noise as deficit/surplus signal.
+                if (isFairValue) {
+                  return (
+                    <HeroStat
+                      label="25-26 FAIR VALUE"
+                      value={valueStr}
+                      sub={subParts.join(' · ')}
+                    />
+                  );
                 }
                 return (
                   <HeroStat

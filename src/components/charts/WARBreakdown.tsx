@@ -266,11 +266,22 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
       <div className="war-headline">
         <div className={`war-number ${warClass}`}>
           <span className="war-value">{result.WAR.toFixed(2)}</span>
-          <span className="war-unit">WAR · cumulative</span>
+          {/*
+            Label disambiguates cumulative WAR from the 82-GP pace
+            number shown on the share card / HeroStat. Earlier copy
+            ("WAR · cumulative") was still ambiguous enough that two
+            different values both labelled "WAR" confused readers on
+            partial-season players (Hughes: 61 GP → 1.64 cumulative
+            vs 2.21 per-82). Explicitly stamping the GP count on the
+            headline anchors the number to its denominator, and the
+            82-GP pace sub-stat below makes the relationship explicit.
+          */}
+          <span className="war-unit">WAR · {result.gamesPlayed} GP</span>
+          <span className="war-pace-sub">82-GP pace: {result.WAR_per_82.toFixed(2)}</span>
         </div>
         <div className="war-meta">
           <div>
-            <span className="war-label">82-game pace</span>
+            <span className="war-label">82-GP pace</span>
             <span className="war-pace">{result.WAR_per_82.toFixed(2)}</span>
           </div>
           <div>

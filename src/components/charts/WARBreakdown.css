@@ -54,6 +54,17 @@
   color: var(--chart-muted);
   margin-top: 2px;
 }
+/* Pace-line under the big cumulative number. Kept small + muted so
+   the cumulative WAR stays the dominant visual (which matches the sum
+   of the bars below), while still surfacing the 82-GP pace inline to
+   disambiguate from the share-card HeroStat's per-82 number. */
+.war-pace-sub {
+  font-size: 0.7rem;
+  color: var(--chart-muted);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
 .war-meta {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

@@ -65,6 +65,21 @@ export interface WARSkaterRow {
   dzFaceoffLosses?: number;
   nzFaceoffWins?: number;
   nzFaceoffLosses?: number;
+  // v5.4: split-half aggregates for finishing reliability. Games are
+  // sorted by date and split even/odd-indexed into first vs second halves
+  // in the worker. Client computes the Pearson r of per-skater finishing
+  // rate (iG − ixG) / shots across halves and uses it as the
+  // `context.finishingShrinkage` factor on the finishing residual.
+  iGFirstHalf?: number;
+  iGSecondHalf?: number;
+  ixGFirstHalf?: number;
+  ixGSecondHalf?: number;
+  shotsFirstHalf?: number;
+  shotsSecondHalf?: number;
+  // v5.4: summed ixG of shots this skater primary-assisted on (real A1
+  // playmaking value). Replaces the `primaryAssists × leagueIxGPerShot`
+  // approximation with the exact xG of shots the passer created.
+  assistedShotIxG?: number;
 }
 
 export interface WARGoalieRow {
@@ -170,6 +185,19 @@ export interface LeagueContext {
    *  median delta) across every skater. Replaces the earlier hardcoded
    *  50/50 split. Weight on league-median = 1 − this value. */
   baselineBlendTeamWeight?: number;
+  /** v5.4: finishing shrinkage factor, max(0, r) where r is the Pearson
+   *  correlation of split-half per-skater finishing rate (iG − ixG) / shots.
+   *  Higher r = more repeatable skill = less shrinkage on the finishing
+   *  residual. Derived client-side at load time from the `*FirstHalf` /
+   *  `*SecondHalf` fields on each WARSkaterRow. Used by warService to
+   *  scale `finishing = (iG − ixG) × shrinkage` instead of summing the
+   *  raw residual at 1×. */
+  finishingShrinkage?: number;
+  /** v5.4: fraction of a primary-assisted shot's ixG credited to the
+   *  passer after accounting for the overlap with RAPM's on-ice xGF
+   *  coefficient. Derived from cross-skater correlation structure — see
+   *  loadWARTables. Capped to [0.3, 0.7] to prevent degenerate cases. */
+  playmakingAttribution?: number;
 }
 
 export interface WARTables {
@@ -185,7 +213,7 @@ const BASE = (() => {
   return base;
 })();
 
-const CACHE_KEY = 'war_tables_v1';
+const CACHE_KEY = 'war_tables_v2';
 
 let loaded: WARTables | null = null;
 let loadPromise: Promise<WARTables | null> | null = null;
@@ -285,10 +313,94 @@ export async function loadWARTables(): Promise<WARTables | null> {
       }
     }
 
+    // v5.4: finishing shrinkage factor. Pearson r between per-skater
+    // first-half and second-half finishing rates (iG − ixG) / shots.
+    // Qualified skaters only (>=50 shots per half). Higher r = more
+    // repeatable finishing skill → less shrinkage on the residual.
+    // Stored on the context as `finishingShrinkage = max(0, r)`.
+    const MIN_SHOTS_PER_HALF = 50;
+    const h1Rates: number[] = [];
+    const h2Rates: number[] = [];
+    for (const s of Object.values(skPayload.players)) {
+      const s1 = s.shotsFirstHalf || 0;
+      const s2 = s.shotsSecondHalf || 0;
+      if (s1 < MIN_SHOTS_PER_HALF || s2 < MIN_SHOTS_PER_HALF) continue;
+      const r1 = ((s.iGFirstHalf || 0) - (s.ixGFirstHalf || 0)) / s1;
+      const r2 = ((s.iGSecondHalf || 0) - (s.ixGSecondHalf || 0)) / s2;
+      h1Rates.push(r1);
+      h2Rates.push(r2);
+    }
+    const pearsonR = (a: number[], b: number[]): number => {
+      const n = Math.min(a.length, b.length);
+      if (n < 2) return 0;
+      let sa = 0, sb = 0;
+      for (let i = 0; i < n; i++) { sa += a[i]; sb += b[i]; }
+      const ma = sa / n, mb = sb / n;
+      let num = 0, da = 0, db = 0;
+      for (let i = 0; i < n; i++) {
+        const ax = a[i] - ma, bx = b[i] - mb;
+        num += ax * bx; da += ax * ax; db += bx * bx;
+      }
+      const denom = Math.sqrt(da * db);
+      return denom > 0 ? num / denom : 0;
+    };
+    let finishingShrinkage: number | undefined = undefined;
+    if (h1Rates.length >= 20) {
+      const r = pearsonR(h1Rates, h2Rates);
+      finishingShrinkage = Math.max(0, Math.min(1, r));
+    }
+
+    // v5.4: playmaking attribution fraction. Derivation:
+    //   attributionFraction = cor(A1/60, onIceXGF/60)
+    //                       / (cor(A1/60, onIceXGF/60)
+    //                          + cor(shots/60, onIceXGF/60))
+    //
+    // Intuition: the A1 and the shooter's own shot volume both correlate
+    // with on-ice xGF. Their relative correlation strengths provide an
+    // empirical split of credit. The shooter's half flows through the
+    // finishing residual + RAPM on-ice; the passer gets what's left,
+    // i.e. this fraction of the A1-shot's xG. Bounded [0.3, 0.7] to
+    // prevent degenerate cases when one correlation is noise-dominated.
+    // Inputs are all fields already on WARSkaterRow — no new data needed
+    // beyond the assistedShotIxG total that the worker now emits.
+    const MIN_TOI_HOURS_PLAYMAKING = 5; // ~300 minutes total; crude qualifier
+    const a1Per60: number[] = [];
+    const shotsPer60: number[] = [];
+    const onIceXgfPer60: number[] = [];
+    for (const s of Object.values(skPayload.players)) {
+      const totalHours = (s.toiTotalSeconds || 0) / 3600;
+      const onIceHours = (s.onIceTOIAllSec || 0) / 3600;
+      if (totalHours < MIN_TOI_HOURS_PLAYMAKING) continue;
+      if (onIceHours <= 0) continue;
+      if (s.onIceXGF == null) continue;
+      a1Per60.push((s.primaryAssists || 0) / totalHours);
+      shotsPer60.push((s.iShotsFenwick || 0) / totalHours);
+      onIceXgfPer60.push(s.onIceXGF / onIceHours);
+    }
+    let playmakingAttribution: number | undefined = undefined;
+    if (a1Per60.length >= 20) {
+      const corA1 = pearsonR(a1Per60, onIceXgfPer60);
+      const corShots = pearsonR(shotsPer60, onIceXgfPer60);
+      const sumAbs = Math.abs(corA1) + Math.abs(corShots);
+      if (sumAbs > 1e-6) {
+        const raw = Math.abs(corA1) / sumAbs;
+        // Cap to literature-safe band. Evolving-Hockey's published
+        // A1 attribution sits around 0.5; this derived value stays in
+        // the neighborhood for a healthy sample but can swing on noise.
+        playmakingAttribution = Math.max(0.3, Math.min(0.7, raw));
+      }
+    }
+
     const tables: WARTables = {
       skaters: skPayload.players,
       goalies: goPayload.players,
-      context: { ...ctx, leagueIxGPerShot, baselineBlendTeamWeight },
+      context: {
+        ...ctx,
+        leagueIxGPerShot,
+        baselineBlendTeamWeight,
+        finishingShrinkage,
+        playmakingAttribution,
+      },
       loadedAt: Date.now(),
     };
     CacheManager.set(CACHE_KEY, tables, CACHE_DURATION.ONE_DAY);
