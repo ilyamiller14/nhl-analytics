@@ -355,7 +355,12 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
           const cumAbs = Math.abs(wins);
           const projAbs = Math.abs(winsProj);
           const deltaAbs = Math.max(0, projAbs - cumAbs); // only tail; same sign as wins
-          const sign = wins >= 0 ? 1 : (winsProj >= 0 ? 1 : -1);
+          // Bar direction comes from the cumulative value's sign first.
+          // Earlier code used `wins >= 0 ? 1 : (winsProj >= 0 ? 1 : -1)` —
+          // but when SHOW_PROJECTION is false, winsProj is forced to 0,
+          // which is >= 0 in JS, so any negative cumulative bar rendered
+          // on the positive side. Affected every 80+ GP player.
+          const sign = wins > 0 ? 1 : wins < 0 ? -1 : (winsProj >= 0 ? 1 : -1);
           const cumW = cumAbs * pxPerWin;
           const deltaW = deltaAbs * pxPerWin;
           const barStartX = sign >= 0 ? zeroX : zeroX - cumW;
@@ -454,7 +459,7 @@ source: ${seg.sourceLabel}`}
           const cumAbs = Math.abs(cum);
           const projAbs = Math.abs(proj);
           const deltaAbs = Math.max(0, projAbs - cumAbs);
-          const sign = cum >= 0 ? 1 : (proj >= 0 ? 1 : -1);
+          const sign = cum > 0 ? 1 : cum < 0 ? -1 : (proj >= 0 ? 1 : -1);
           const cumW = cumAbs * pxPerWin;
           const deltaW = deltaAbs * pxPerWin;
           const barStartX = sign >= 0 ? zeroX : zeroX - cumW;
