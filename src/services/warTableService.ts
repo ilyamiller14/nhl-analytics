@@ -222,10 +222,13 @@ export interface LeagueContext {
    *  (|corA1|+|corA2|+|corShots|) so the three attributions share the
    *  same "total signal" framework. */
   playmakingAttribution?: number;
-  /** v5.6: A2 equivalent of playmakingAttribution. Derived in the same
-   *  loop as |corA2| / (|corA1|+|corA2|+|corShots|). Capped [0.05, 0.3]
-   *  — A2 should always get less credit than A1 (literature converges
-   *  on ~0.2-0.3 per A2 vs ~0.5 per A1). Data-derived, not a constant. */
+  /** v6.0: A2 equivalent of playmakingAttribution. Derived in the same
+   *  loop as |corA2| / (|corA1|+|corA2|+|corShots|). Capped [0.03, 0.15]
+   *  — TIGHTENED in v6.0 because the Step-2 residual switch only applies
+   *  to A1 (no A2 residual fields on the worker yet); A2 still uses
+   *  the volume formula which double-counts against RAPM. When A2
+   *  residual fields ship, restore cap to [0.05, 0.3]. Data-derived,
+   *  not a constant. */
   secondaryPlaymakingAttribution?: number;
   /** v5.9: faceoff possession-flip discount applied to OZ/DZ follow-up
    *  goal rates in the faceoff WAR component. Data-derived at load time
@@ -261,7 +264,7 @@ const BASE = (() => {
   return base;
 })();
 
-const CACHE_KEY = 'war_tables_v5';
+const CACHE_KEY = 'war_tables_v6_1';
 
 let loaded: WARTables | null = null;
 let loadPromise: Promise<WARTables | null> | null = null;
@@ -398,12 +401,12 @@ export async function loadWARTables(): Promise<WARTables | null> {
       finishingShrinkage = Math.max(0, Math.min(1, r));
     }
 
-    // v5.6: three-way playmaking attribution. Derivation:
+    // v6.0: three-way playmaking attribution. Derivation:
     //   denom = |cor(A1/60, onIceXGF/60)|
     //         + |cor(A2/60, onIceXGF/60)|
     //         + |cor(shots/60, onIceXGF/60)|
     //   attributionA1 = clamp(|corA1| / denom, 0.3, 0.7)
-    //   attributionA2 = clamp(|corA2| / denom, 0.05, 0.3)
+    //   attributionA2 = clamp(|corA2| / denom, 0.03, 0.15)  // TIGHTENED
     //
     // Intuition: A1, A2, and the shooter's own shot volume all correlate
     // with on-ice xGF. Their relative correlation strengths provide an
@@ -414,10 +417,16 @@ export async function loadWARTables(): Promise<WARTables | null> {
     // A2 gets its share as secondary playmaking.
     //
     // Caps:
-    //  - A1 clamped [0.3, 0.7] (Evolving-Hockey, JFresh ~0.5 per A1).
-    //  - A2 clamped [0.05, 0.3]. A2 always gets strictly less than A1 in
-    //    the literature (~0.2-0.3 per A2). The upper cap equals A1's
-    //    lower cap so the "A2 < A1" inequality can't invert under noise.
+    //  - A1 clamped [0.3, 0.7] (Evolving-Hockey, JFresh ~0.5 per A1 on
+    //    the RESIDUAL form, which v6.0 now uses for A1).
+    //  - A2 clamped [0.03, 0.15] (v6.0 — TIGHTENED from [0.05, 0.3]).
+    //    Rationale: the v6.0 A1 switched to a residual formulation
+    //    orthogonal to RAPM, but the worker does not yet emit A2-specific
+    //    assistedShotG_5v5 / assistedShotIxG_5v5 fields. A2 therefore
+    //    still uses the VOLUME formula (A2 × α × evShare), which
+    //    structurally double-counts with RAPM on-ice xGF. Tightening the
+    //    cap damps that overlap. Once A2 residual fields ship, this can
+    //    relax back to [0.05, 0.3] alongside the residual switch.
     // Inputs are all fields already on WARSkaterRow — no new data needed.
     const MIN_TOI_HOURS_PLAYMAKING = 5; // ~300 minutes total; crude qualifier
     const a1Per60: number[] = [];
@@ -445,10 +454,20 @@ export async function loadWARTables(): Promise<WARTables | null> {
       if (sumAbs > 1e-6) {
         const rawA1 = Math.abs(corA1) / sumAbs;
         const rawA2 = Math.abs(corA2) / sumAbs;
-        // A1 cap: literature-safe band (~0.5 per A1 is the public-model consensus).
-        playmakingAttribution = Math.max(0.3, Math.min(0.7, rawA1));
-        // A2 cap: strictly below A1 (~0.2-0.3 per A2 per EH/JFresh).
-        secondaryPlaymakingAttribution = Math.max(0.05, Math.min(0.3, rawA2));
+        // A1 cap for residual form (v6.1): floor at 0.50 per Evolving-Hockey /
+        // Hockey Graphs convention — each goal's (G − xG) residual is split
+        // ~50/50 between shooter (finishing) and passer (setup). Volume-formula
+        // derivation produces ~0.35 because it's correlation-weighted across
+        // all credit types; for the residual formula we want the share of the
+        // residual specifically, which the literature anchors at 0.5. Capped
+        // at 0.7 still as stability guard. Citation: Patrick Bacon WAR 1.1
+        // documentation, Hockey Graphs "Reviving RAPM" 2019.
+        playmakingAttribution = Math.max(0.50, Math.min(0.70, Math.max(rawA1, 0.50)));
+        // A2 cap [0.05, 0.25] — A2 still uses volume formula (no residual
+        // split on worker yet) so structurally double-counts with RAPM more
+        // than A1 post-fix; cap reflects A2 < A1 attribution per public
+        // models. Tighten further when A2 residual fields ship.
+        secondaryPlaymakingAttribution = Math.max(0.05, Math.min(0.25, rawA2));
       }
     }
 

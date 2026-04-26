@@ -775,10 +775,9 @@ function PlayerProfile() {
             {!isGoalie && (
               <Link
                 to={`/attack-dna/player/${playerId}`}
-                className="profile-tab attack-dna-link"
+                className="profile-tab"
               >
                 Attack DNA
-                <span className="new-badge">NEW</span>
               </Link>
             )}
           </div>

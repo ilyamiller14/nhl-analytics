@@ -225,100 +225,115 @@ export function computeSkaterWAR(
     return skaterPlaceholder(pos, 0, context, ['No games played yet.']);
   }
 
-  // --- Component 1: Finishing (GAX) — (iG − ixG) shrunk by the league
-  // split-half reliability of per-skater finishing rate. When the worker
-  // artifact exposes per-half iG/ixG/shots, the client (warTableService)
-  // computes Pearson r across halves; we multiply the raw residual by
-  // max(0, r) so unrepeatable variance is damped. No hardcoded shrinkage
-  // constant — the weight is this season's measured repeatability.
+  // --- Component 1: Finishing (GAX) — (iG_5v5 − ixG_5v5) shrunk by the
+  // league split-half reliability of per-skater finishing rate.
   //
-  // v5.9 audit: strip PP contribution via 5v5 TOI proxy. PP goals are
-  // already credited by the `powerPlay` component (rapm.ppXGF −
-  // expected). Including all-strength iG/ixG in the finishing residual
-  // would double-count the PP shooter share. Until the worker emits
-  // true per-strength iG/ixG, multiply the finishing residual by the EV
-  // share of total TOI (toiEvSeconds / toiTotalSeconds) as a proxy.
-  // This is a PROXY, not a true 5v5-only measurement — PP shot rate per
-  // minute is higher than EV, so this slightly over-discounts. Flagged
-  // in notes and documented in warTableService for the worker TODO.
+  // v6.0 (Step 2 residual fix): use the EXPLICIT 5v5 split from the
+  // worker (`iG_5v5`, `ixG_5v5`) instead of the prior
+  // `(iG − ixG) × (toiEv/toiTotal)` proxy. The proxy over-discounted
+  // for high-PP players because PP shot rate per minute is higher than
+  // EV. Now that the worker ships per-strength splits, use them
+  // directly — no proxy.
   //
-  // If the context lacks `finishingShrinkage` (legacy artifact that
-  // predates the split-half fields), we pass the raw residual through
-  // unshrunk and flag a note rather than substitute a guess.
-  const rawFinishing = row.iG - row.ixG;
-  // 5v5 share proxy: fraction of total TOI at EV. Guard zero denominator.
+  // Why 5v5-only: PP finishing is already credited via the `powerPlay`
+  // component (rapm.ppXGF − expected). Including PP iG/ixG in the
+  // finishing residual would double-count the PP shooter share.
+  //
+  // Shrinkage: context.finishingShrinkage = max(0, split-half r).
+  // Falls back to unshrunk residual with a note when unavailable
+  // (legacy artifact). Falls back to all-strength residual × EV-share
+  // proxy when per-strength splits are missing (legacy artifact).
   const evShareOfTOI =
     row.toiTotalSeconds > 0 && row.toiEvSeconds != null && row.toiEvSeconds > 0
       ? row.toiEvSeconds / row.toiTotalSeconds
       : 1;
-  let finishing = rawFinishing * evShareOfTOI;
+  let finishing: number;
+  if (typeof row.iG_5v5 === 'number' && typeof row.ixG_5v5 === 'number') {
+    finishing = row.iG_5v5 - row.ixG_5v5;
+  } else {
+    const rawFinishing = row.iG - row.ixG;
+    finishing = rawFinishing * evShareOfTOI;
+    notes.push('Finishing using legacy EV-share proxy — per-strength iG_5v5/ixG_5v5 missing on artifact.');
+  }
   if (typeof context.finishingShrinkage === 'number') {
     finishing = finishing * context.finishingShrinkage;
   } else {
     notes.push('Finishing shrinkage unavailable — worker artifact predates split-half fields. Raw (iG − ixG) passed through unshrunk.');
   }
 
-  // --- Component 2: Playmaking — A1 × playmakingAttribution.
+  // --- Component 2: Playmaking — RESIDUAL form at 5v5 (v6.0, Step 2 fix).
   //
-  // Each primary assist is, by definition, on an actual scored goal
-  // (worth 1 marginal goal). The passer's share of that outcome is
-  // `playmakingAttribution`, derived empirically in warTableService from
-  // cross-skater correlation structure: |cor(A1/60, onIceXGF/60)| /
-  // (|cor(A1/60, onIceXGF/60)| + |cor(shots/60, onIceXGF/60)|). Capped
-  // [0.3, 0.7] as a stability guard, not a methodological cap.
+  // Formula: `playmaking = (assistedShotG_5v5 − assistedShotIxG_5v5) × α`
   //
-  // Previously tried (v5.5-alpha): `assistedShotIxG × attribution`. That
-  // credits per expected-goal of the assisted shot — but the assist is
-  // on an actual goal scored, not on an expected-goal opportunity. The
-  // correct scale is per-goal. The `assistedShotIxG` field is retained
-  // on the row for diagnostic/context display but is not the multiplicand.
+  // Rationale — eliminating the Playmaking↔RAPM double-count:
+  // The prior volume formula (`A1 × α × evShare`) credited the passer
+  // with the full goal outcome of every assisted shot. But RAPM on-ice
+  // xGF already credits the passer for the expected-goal portion of
+  // those shots (they were on ice when the shot happened). Result: the
+  // passer's xG contribution gets counted twice — once in RAPM via
+  // on-ice xGF, once in playmaking via (A1 × α) on the full goal. This
+  // structurally inflated WAR for elite creators ~50-80% above
+  // EH/JFresh/MoneyPuck (McDavid 7.55 WAR, MacKinnon 8.24 WAR).
   //
-  // Known residual: RAPM on-ice xGF already absorbs some passer credit
-  // (team-level xGF while the player is on ice). There is structural
-  // double-count with this component. The attribution cap [0.3, 0.7]
-  // indirectly damps it; a proper regression-based decomposition is a
-  // deferred research task.
+  // The residual `(G − ixG)` on assisted shots is the FINISHING SURPRISE
+  // ABOVE xG — the part the xG model didn't predict. It splits between
+  // shooter (finishing skill) and passer (setup quality). RAPM does not
+  // absorb this residual (RAPM moves with xGF, not with goals − xGF).
+  // So crediting the passer with α × residual is orthogonal to RAPM.
   //
-  // v5.9 audit: strip PP contribution via 5v5 TOI proxy. PP assists are
-  // already credited through the `powerPlay` component. Multiply by
-  // evShareOfTOI so the playmaking term only reflects 5v5 assist value.
+  // Attribution α: reuse `context.playmakingAttribution` (derived in
+  // warTableService from cross-skater correlation of A1/60 against
+  // on-ice xGF/60). Literature: EH/JFresh converge on α ≈ 0.5 per A1 on
+  // the residual. Our derivation is capped [0.3, 0.7]; it's a
+  // defensible proxy for the residual form although it was originally
+  // designed for the volume form. A proper re-derivation of α against
+  // cross-skater (G_5v5 − ixG_5v5) residuals is a follow-up research
+  // task.
+  //
+  // Fallback (legacy artifact without assistedShotG_5v5): degrade to
+  // the old volume formula with a note. Do NOT use the (toiEv/toiTotal)
+  // proxy anymore when the 5v5 split is explicit on the row.
   let playmaking = 0;
-  if (typeof context.playmakingAttribution === 'number') {
+  if (
+    typeof row.assistedShotG_5v5 === 'number' &&
+    typeof row.assistedShotIxG_5v5 === 'number' &&
+    typeof context.playmakingAttribution === 'number'
+  ) {
+    const assistedFinishingResidual = row.assistedShotG_5v5 - row.assistedShotIxG_5v5;
+    playmaking = assistedFinishingResidual * context.playmakingAttribution;
+  } else if (typeof context.playmakingAttribution === 'number') {
+    // Legacy artifact — no 5v5 A1 split. Fall back to volume formula.
     playmaking = row.primaryAssists * context.playmakingAttribution * evShareOfTOI;
+    notes.push('Playmaking using legacy volume formula (A1 × α × evShare) — assistedShotG_5v5/assistedShotIxG_5v5 missing from artifact. Likely double-counts with RAPM on-ice xGF.');
   } else if (typeof context.leagueIxGPerShot === 'number' && context.leagueIxGPerShot > 0) {
-    // Legacy artifact path (attribution cannot be derived).
     playmaking = row.primaryAssists * context.leagueIxGPerShot * evShareOfTOI;
     notes.push('Playmaking using legacy A1 × leagueIxGPerShot — attribution fraction unavailable.');
   } else if (row.primaryAssists > 0) {
     notes.push('Playmaking unavailable — attribution and leagueIxGPerShot both missing.');
   }
 
-  // --- Component 2b: Secondary Playmaking (v5.6) —
-  // secondaryAssists × secondaryPlaymakingAttribution.
+  // --- Component 2b: Secondary Playmaking — VOLUME form, TIGHTER CAP
+  // (v6.0 interim).
   //
-  // A2 (the pass before the primary assist) is an earlier event in the
-  // offensive sequence that set up the opportunity that eventually became
-  // a goal. Public research (Evolving-Hockey, JFresh) consistently finds
-  // A2s carry repeatable, goal-differential-predictive signal — just
-  // less than A1s — and credits them ~0.2-0.3 goals per A2 vs ~0.5 per
-  // A1. Crediting zero (the v5.4/v5.5 formula did) under-values distribu-
-  // tor defensemen and breakout-pass centers.
+  // Why still volume: the worker does NOT yet emit A2-specific
+  // assistedShotG_5v5 / assistedShotIxG_5v5 equivalents. We only have
+  // per-A1 per-strength splits. Until that lands, we retain the
+  // volume × attribution × evShare formula but tighten the attribution
+  // cap from [0.05, 0.30] to [0.03, 0.15] (done in warTableService)
+  // because:
+  //   1. Without residual subtraction, this formula structurally double-
+  //      counts with RAPM on-ice xGF worse than primary did pre-fix.
+  //      Tighter cap damps the overlap.
+  //   2. A2 is inherently less causal than A1 — the passer two passes
+  //      before the shot is a weaker setup signal than the last pass.
+  //   3. Literature (EH/JFresh) converges ~0.2-0.3 per A2 on the RESIDUAL
+  //      form. Our volume × attribution scales per-A1-equivalent, so the
+  //      effective per-A2 goal credit at α=0.15 × evShare(0.8) ≈ 0.12 is
+  //      appropriately below residual-form literature values.
   //
-  // Attribution is data-derived in warTableService on the same shared
-  // denominator as primary playmaking (|corA1|+|corA2|+|corShots|) so
-  // the three terms don't double-count against the same "total signal"
-  // of on-ice xGF. Cap [0.05, 0.3] is a stability guard; the actual
-  // value tracks cross-skater correlation structure.
-  //
-  // No legacy fallback: secondary playmaking is new in v5.6, and a
-  // "legacy A2 × leagueIxGPerShot" equivalent would re-introduce the
-  // dimensionally-wrong per-shot framing we already removed. When
-  // secondaryPlaymakingAttribution is absent (very old artifacts), this
-  // component is zero and a note is emitted.
-  //
-  // v5.9 audit: strip PP contribution via 5v5 TOI proxy (same rationale
-  // as primary playmaking — A2s on PP are already credited through the
-  // powerPlay component).
+  // Future iteration: once the worker emits assistedShotG_5v5_A2 and
+  // assistedShotIxG_5v5_A2, switch this to residual form matching
+  // primary playmaking and restore the [0.05, 0.30] cap.
   let secondaryPlaymaking = 0;
   if (typeof context.secondaryPlaymakingAttribution === 'number') {
     secondaryPlaymaking = row.secondaryAssists * context.secondaryPlaymakingAttribution * evShareOfTOI;
@@ -747,22 +762,19 @@ export function computeSkaterWAR(
     }
   }
 
-  // --- Raw GAR (vs average) — v5.4 finishing + playmaking are both
-  // included, each scaled by a league-derived, data-driven factor.
+  // --- Raw GAR (vs average) — v6.0 finishing + playmaking both in 5v5
+  // residual form, orthogonal to RAPM on-ice xGF.
   //
-  // Finishing: (iG − ixG) × context.finishingShrinkage
-  //   The shrinkage is the split-half Pearson r of per-skater finishing
-  //   rate across the season — a direct measure of how much of this
-  //   year's residual is repeatable skill vs shot-luck noise. No
-  //   literature constant. Computed in warTableService at load time.
+  // Finishing: (iG_5v5 − ixG_5v5) × context.finishingShrinkage
+  //   Per-strength split shipped by the worker. Shrunk by split-half
+  //   Pearson r of per-skater finishing rate — a direct measure of
+  //   repeatability vs shot-luck noise.
   //
-  // Playmaking: row.assistedShotIxG × context.playmakingAttribution
-  //   The summed ixG of every shot primary-assisted, scaled by an
-  //   attribution fraction derived from the cross-skater correlation
-  //   structure (cor(A1/60, onIce-xGF/60) / (cor(A1) + cor(shots))).
-  //   Capped [0.3, 0.7]. Replaces the old `A1 × leagueIxGPerShot`,
-  //   which was dimensionally wrong and used the average shot's xG
-  //   instead of the actual assisted shot's xG.
+  // Playmaking: (assistedShotG_5v5 − assistedShotIxG_5v5) × α
+  //   Residual finishing surprise on 5v5 assisted shots × attribution.
+  //   RAPM on-ice xGF already credits the xG portion; the residual
+  //   (G − ixG) is the part the xG model didn't predict and that's
+  //   what the passer shares with the shooter. α capped [0.3, 0.7].
   const rawGAR = finishing + playmaking + secondaryPlaymaking
     + evOffense + evDefense
     + faceoffs + turnovers + micro + penalties + powerPlay + penaltyKill;

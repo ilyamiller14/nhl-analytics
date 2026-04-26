@@ -70,43 +70,18 @@ interface HedonicCoefficients {
   dDollarsPerWAR?: number;     // defensemen-specific $/WAR (separate fit)
 }
 
-/**
- * Age multiplier curve for contract MARKET value. This is distinct
- * from a production aging curve: what a team PAYS for a given WAR
- * changes with age because term-length and UFA leverage change.
- *
- * Published patterns (JFresh / Evolving-Hockey aging curves, plus
- * Desjardins/Brander production curves adapted for contract pricing):
- * young stars get 85–95% of peak market because teams still want
- * long-term lock-ins; 26–30 is peak because the player has both peak
- * production AND full UFA leverage; 32+ declines as term / risk
- * compresses AAV.
- */
-function ageMultiplier(age: number): number {
-  const curve: Array<[number, number]> = [
-    [18, 0.55], [20, 0.70], [22, 0.85], [23, 0.92],
-    [24, 0.96], [25, 0.98], [26, 1.00], [27, 1.00], [28, 1.00], [29, 1.00], [30, 1.00],
-    [31, 0.96], [32, 0.92], [33, 0.86],
-    [34, 0.78], [35, 0.70], [36, 0.62], [38, 0.50], [40, 0.40],
-  ];
-  if (age <= curve[0][0]) return curve[0][1];
-  if (age >= curve[curve.length - 1][0]) return curve[curve.length - 1][1];
-  for (let i = 0; i < curve.length - 1; i++) {
-    const [a0, m0] = curve[i];
-    const [a1, m1] = curve[i + 1];
-    if (age >= a0 && age <= a1) {
-      const t = (age - a0) / (a1 - a0);
-      return m0 + t * (m1 - m0);
-    }
-  }
-  return 1.0;
-}
+// v6.2: ageMultiplier function removed. Surplus is now a production-
+// value vs cost calculation, not a "predicted next AAV vs current cap"
+// projection. A 19yo phenom delivers the same on-ice value as a 28yo
+// at the same WAR; age-discounting current production conflates two
+// different questions. See comments in computePlayerSurplus for the
+// reframing rationale.
 
 // ============================================================================
 // Cache
 // ============================================================================
 
-const CACHE_KEY = 'surplus_ratio_market_war_v5_9';
+const CACHE_KEY = 'surplus_ratio_market_war_v6_2';
 let coeffCache: HedonicCoefficients | null = null;
 
 // ============================================================================
@@ -258,7 +233,9 @@ export async function fitHedonicModel(): Promise<HedonicCoefficients | null> {
     let sqResDollars = 0;
     for (const r of rows) {
       const rate = r.isDefense ? dDollarsPerWAR : leagueDollarsPerWAR;
-      const predicted = Math.max(0, r.war82 * rate * ageMultiplier(r.age));
+      // v6.2: age multiplier removed. Surplus is now production-value
+      // vs cost (WAR × $/WAR), not "predicted next AAV vs current cap".
+      const predicted = Math.max(0, r.war82 * rate);
       sqResDollars += (r.capHit - predicted) ** 2;
     }
     const rmseDollars = Math.sqrt(sqResDollars / rows.length);
@@ -371,15 +348,21 @@ export async function computePlayerSurplus(
   const isRFAFlag = expiry === 'RFA';
   const isDefense = contract.position === 'D';
 
-  // v5.2 ratio prediction:
-  //   openMarketValue = max(0, WAR × $/WAR × ageMultiplier)
-  // Floored at zero — a negative-WAR player's open-market value is
-  // conceptually "league minimum or less," not actually negative.
+  // v6.2 production-value framing:
+  //   openMarketValue = max($775K, WAR × $/WAR)
+  //
+  // No age multiplier. Surplus answers "how much production value above
+  // contract cost is this player providing?" — that's a production-vs-
+  // cost question, not a "what would teams pay for his next contract?"
+  // question. A 19yo phenom producing 3.8 WAR delivers the same on-ice
+  // value as a 28yo producing 3.8 WAR; age-discounting the young player's
+  // PREDICTED VALUE conflates next-contract market projection with
+  // current-season production accounting. JFresh / Evolving-Hockey use
+  // the same production-value framing for one-number surplus output.
   const rate = isDefense
     ? (coeffs.dDollarsPerWAR ?? coeffs.leagueDollarsPerWAR ?? 3_800_000)
     : (coeffs.leagueDollarsPerWAR ?? 3_500_000);
-  const ageMult = ageMultiplier(age);
-  const rawPrediction = war82 * rate * ageMult;
+  const rawPrediction = war82 * rate;
   // League minimum floor: even a negative-WAR UFA would get the
   // league minimum ($775K) from someone.
   const openMarketValue = Math.max(775_000, rawPrediction);
@@ -422,8 +405,9 @@ export async function computePlayerSurplus(
       const peerRate = isD
         ? (coeffs.dDollarsPerWAR ?? coeffs.leagueDollarsPerWAR ?? 3_800_000)
         : (coeffs.leagueDollarsPerWAR ?? 3_500_000);
-      const peerAgeMult = ageMultiplier(a);
-      const market = Math.max(775_000, w * peerRate * peerAgeMult);
+      // v6.2: no age multiplier — production-value framing.
+      void a;
+      const market = Math.max(775_000, w * peerRate);
       allTotals.push(market - player.capHit);
     }
   }

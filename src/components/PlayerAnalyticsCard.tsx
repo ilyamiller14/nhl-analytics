@@ -466,21 +466,29 @@ export default function PlayerAnalyticsCard({
                       `Actual cap hit: ${formatDollars(capHit)}\n` +
                       `Surplus = predicted − actual: ${surplus >= 0 ? '+' : '−'}${formatDollars(Math.abs(surplus))}\n` +
                       `\n` +
-                      `Method (v5.7, ratio-based; see surplusValueService.ts):\n` +
-                      `  predicted = WAR_market/82 × $/WAR × ageMult(age),\n` +
+                      `Method (v6.2, production-value framing; see surplusValueService.ts):\n` +
+                      `  predicted = WAR_market/82 × $/WAR,\n` +
                       `  floored at the $775K league minimum.\n` +
                       `\n` +
-                      `  WAR v5.7 is orthogonally decomposed so no two\n` +
+                      `  v6.2: age multiplier removed. Surplus = production\n` +
+                      `  value above contract cost, not "predicted next AAV".\n` +
+                      `  A 19yo phenom producing 4 WAR delivers the same\n` +
+                      `  on-ice value as a 28yo producing 4 WAR — age\n` +
+                      `  matters for projecting future market value, not\n` +
+                      `  for accounting current-season production.\n` +
+                      `\n` +
+                      `  WAR is orthogonally decomposed so no two\n` +
                       `  components credit the same source of value:\n` +
                       `   · RAPM captures on-ice team xG (EV O/D, PP, PK).\n` +
                       `   · Finishing credits only the EV above-expected\n` +
                       `     residual on shots you took (PP finishing is in\n` +
                       `     the PP component). Shrunk by split-half r.\n` +
-                      `   · Playmaking = A1 × data-derived attribution,\n` +
-                      `     not a literature constant. A2 credited separately\n` +
-                      `     at a strictly-smaller data-derived fraction.\n` +
-                      `   · Faceoffs + Turnovers are discounted (data-derived)\n` +
-                      `     because RAPM already captures the follow-up xG.\n` +
+                      `   · Playmaking (A1) = (assistedShotG_5v5 −\n` +
+                      `     assistedShotIxG_5v5) × attribution — RESIDUAL\n` +
+                      `     form, only credits the above-xG part not\n` +
+                      `     captured by RAPM. A2 credited at a tighter cap.\n` +
+                      `   · Faceoffs + Turnovers discounted (data-derived)\n` +
+                      `     because RAPM already captures follow-up xG.\n` +
                       `\n` +
                       `  WAR_market clips the negative tail of EV defense\n` +
                       `  so offensive players on bad teams aren't penalized\n` +
@@ -489,9 +497,6 @@ export default function PlayerAnalyticsCard({
                       `  $/WAR is fit on UFA-signed contracts with WAR ≥ 0.5\n` +
                       `  (separate anchors for F and D); ELC / RFA deals are\n` +
                       `  excluded from the fit because they're CBA-suppressed.\n` +
-                      `\n` +
-                      `  Age curve (Desjardins/Brander, published): peak at\n` +
-                      `  26-30 (mult = 1.0), down to ~0.96 at 24 and ~0.5 at 38.\n` +
                       `\n` +
                       `Single-season framing: the surplus reflects THIS\n` +
                       `season's WAR only — multi-year term value, cap-\n` +

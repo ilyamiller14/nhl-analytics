@@ -297,10 +297,9 @@ function TeamProfile() {
             </button>
             <Link
               to={`/attack-dna/team/${teamAbbrev}`}
-              className="team-tab attack-dna-link"
+              className="team-tab"
             >
               Attack DNA
-              <span className="new-badge">NEW</span>
             </Link>
           </div>
 
