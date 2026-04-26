@@ -240,14 +240,240 @@ over-interpret any individual number to the penny.
   would need per-position per-component distributions computed from
   `warTables.skaters`. Sign-driven color was the agent's top callout
   and that's done; percentile strip was #2 and is not.
-- Prior-informed RAPM (Bacon) to replace the hard `lowSample` cutoff.
-  Requires rebuilding the RAPM Node script.
+- ~~Prior-informed RAPM (Bacon) to replace the hard `lowSample` cutoff.~~
+  **Shipped April 2026 — see "Prior-informed RAPM (Bacon)" section below.**
 - YoY component validation artifact. Needs last-season artifact
   archived first.
 - Multi-year rolling WAR for surplus input (solves the Hughes case).
 - Convex superstar premium / cubic WAR fit (see research agent notes)
   for when an McDavid-class outlier needs the regression to bend at
   the tail; not needed on the ratio approach.
+
+---
+
+## Prior-informed RAPM (Bacon) — April 2026
+
+`scripts/build-rapm.cjs` (Phase 6 + Phase 4d) and `src/services/rapmService.ts`
+
+### Why
+
+Standard ridge regression `(X'WX + λI)β = X'Wy` pulls every coefficient
+toward zero with the same strength. That over-credits / over-debits
+players whose RAPM signal is dominated by team lineup context rather
+than individual play:
+
+- **Gritsyuk (NJD rookie, 8481721):** RAPM defense +0.40 xGA/60
+  → +6.15 EV-defense WAR component. Driven by NJD's defensive
+  teammates (Hughes, Hischier, Bratt), not individual contribution.
+- **Bedard (CHI, 8484144):** RAPM defense −0.56 xGA/60
+  → −1.73 EV-defense WAR. Reverse direction — Chicago is uniformly
+  bad and the model can't separate him from the team. WAR_market
+  was hack-clipping this.
+- **MacKinnon (COL, 8477492):** RAPM offense +1.19 xGF/60. Colorado
+  roster context inflates this above the JFresh-equivalent 0.7-0.9.
+
+### What changed (math)
+
+Patrick Bacon's WAR 1.1 (medium.com/data-science/wins-above-replacement-1-1...)
+replaces the uniform pull toward 0 with a Bayesian regression that has
+an informative prior on each coefficient:
+
+```
+minimize  ‖Y − Xβ‖²_W  +  λ · Σ_i ρ_i (β_i − μ_i)²
+       ↑                  ↑
+       weighted SSE       per-coefficient prior penalty (Tikhonov)
+
+closed-form normal equations:
+  (X'WX  +  λ·diag(ρ)) β  =  X'Wy  +  λ·diag(ρ)·μ
+```
+
+When ρ_i = 1 and μ_i = 0 for all i, this reproduces the standard ridge
+exactly — back-compat is built in.
+
+### Choice of prior
+
+Ideal prior: previous-season RAPM. We don't have an archived prior-
+season artifact (open follow-up on this list). **Fallback: position-
+cohort mean** — the standard Bacon recipe for cold-start seasons.
+
+- **First pass:** standard ridge at the CV-selected λ → β₀.
+- **Cohort:** F vs D. Per Tulsky / Hockey Graphs, C/L/R cohorts on the
+  forward side are statistically indistinguishable for both offense
+  and defense; splitting them adds noise to a fallback prior. Players
+  without a known position fall back to the F prior.
+- **μ_i = mean(β₀_j)** across players j in the same cohort (F or D)
+  with TOI ≥ 500 minutes. The 500min threshold excludes context-
+  dominated low-TOI players from contributing to the prior they're
+  about to be shrunk toward.
+- **ρ_i = c · (medianTOI / TOI_i)**, clamped so TOI is bounded between
+  0.25× and 4× the median (prevents denormalization for extreme low-
+  TOI scrubs and over-weak priors for outlier-high-TOI players).
+- **c = 1.0**: median-TOI player gets ρ = 1, so their effective ridge
+  strength matches the standard-ridge λ. The model degrades gracefully
+  toward standard ridge for typical players. Lower c (~0.5) softens
+  the prior; higher c (~2.0) crushes everyone toward the cohort.
+
+### Implementation diff
+
+`scripts/build-rapm.cjs`:
+
+1. `normalMatvec(X, v, w, lambda, ridgeDiag)` — added `ridgeDiag`
+   parameter. When null, uniform λ (back-compat). When supplied,
+   `(X'WX + λ·diag(ρ))v`.
+2. `conjugateGradient(X, w, b, lambda, { ridgeDiag })` — passes
+   `ridgeDiag` through to `normalMatvec`.
+3. `computeStandardErrors(X, w, lambda, sigma2Resid, ridgeDiag)` —
+   adds `λ·ρ_i` to the diagonal instead of uniform λ before the
+   inverse. SE shrinks for low-TOI players, which is correct (the
+   prior IS information).
+4. New helpers `buildPositionPrior`, `buildRidgeDiag`,
+   `fetchPositions` (uses worker `/cached/skater-ages` endpoint).
+5. New main pipeline phase 4d: standard-ridge first pass → fetch
+   positions → derive μ and ρ → solve prior-informed ridge with
+   `bPrior = b + λ·diag(ρ)·μ`.
+6. Schema bump 2 → 3. Prior-informed `offense` / `defense` are now
+   the default values; standard-ridge β₀ is preserved as
+   `offenseStandard` / `defenseStandard` per player for audit.
+   Top-level `prior` block records the cohort means, anchor count,
+   ρ calibration constants.
+7. `NO_PRIOR=1` env var disables the second pass and reverts to
+   standard-ridge output (schema v2). Use only for legacy
+   reproduction.
+
+`src/services/rapmService.ts`:
+
+- `RAPMPlayerEntry` extended with optional `offenseStandard`,
+  `defenseStandard`, `positionCohort` fields.
+- `RAPMArtifact.schemaVersion` widened to `1 | 2 | 3`; `prior` field
+  added.
+- New exported `RAPMPriorMetadata` type.
+
+### Effect (April 26 build, c=1.0)
+
+Build run 2026-04-26: 1312 games, 452,516 5v5 windows, 987 qualified
+skaters, λ=3 (CV-selected, unchanged), median TOI = 836 min.
+
+Cohort means (raw scale, before sign-flip; positive raw def = bad):
+- F: μ_off = +0.21, μ_def = +0.13   (anchors = 389 players ≥ 500 min)
+- D: μ_off = +0.30, μ_def = +0.30   (anchors = 213)
+
+Test-player coefficients, standard ridge → prior-informed:
+
+```
+Player              TOI    Off (v2 → v3)         Def (v2 → v3)        Δoff   Δdef
+Gritsyuk (NJD R)    920    +0.520 → +0.584      +0.401 → +0.491      +0.06  +0.09
+MacKinnon (COL C)  1377    +1.189 → +1.374      +0.022 → +0.146      +0.19  +0.12
+Bedard (CHI C)     1149    +0.171 → +0.224      −0.564 → −0.521      +0.05  +0.04
+McDavid (EDM C)    1452    +0.747 → +0.867      +0.006 → +0.097      +0.12  +0.09
+Hughes (VAN C)     1061    +0.478 → +0.542      −0.053 → +0.033      +0.06  +0.09
+Crosby (PIT C)     1091    +0.116 → +0.193      −0.062 → −0.020      +0.08  +0.04
+Makar (COL D)      1320    +0.216 → +0.209      −0.301 → −0.266      −0.01  +0.03
+```
+
+League-wide (all 987 skaters):
+- Offense: mean Δ = +0.080, range [−0.30, +0.46]
+- Defense: mean Δ = +0.019, range [−0.44, +0.45]
+
+### Honest assessment of the result
+
+**The prior at c=1.0 with the position-cohort-mean fallback is NOT
+producing the intended shrinkage.** The expected behavior was Gritsyuk
+shrinking from +0.40 toward 0 (cohort mean), McDavid mostly stable,
+Bedard rising toward 0 (less negative). Instead, almost every
+coefficient drifted upward. Why:
+
+The cohort μ is derived from the standard-ridge β₀, which is itself
+biased toward 0 by the L2 penalty at λ=3. So the F cohort mean of
++0.21 raw offense is "the average forward's standard-ridge β₀, after
+having been pulled toward 0". Substituting μ = +0.21 in place of the
+implicit ridge prior μ = 0 RELAXES the regularizer. The pull toward
++0.21 is weaker than the pull toward 0 was, so every player's β
+drifts upward toward where the data wanted it.
+
+The "right" prior — one that genuinely shrinks low-TOI / context-
+dominated players toward an UNBIASED cohort estimate — needs one of:
+
+1. **Prior-season RAPM (μ_i = β_i^{last-year}).** This is the
+   gold-standard form Bacon describes. Eliminates the self-reference
+   bias because last-year's β was estimated on independent data. We
+   don't archive prior-season artifacts yet, so this is blocked.
+2. **Re-CV inside the prior-informed system.** The CV-selected λ=3 is
+   tuned to the wrong (uniform-ridge) penalty. With the new penalty
+   structure the optimal λ is likely larger; with that λ the prior
+   would dominate low-TOI columns and produce real shrinkage. Cost:
+   each CV pass becomes 2× compute (standard pass + cohort + prior
+   pass per fold per λ). Doable, but the CV loop must be rewritten.
+3. **Cap c much higher (c = 30+).** Forces the prior to dominate even
+   when biased. Tested in the simulator (`/tmp/simulate-prior-c.mjs`)
+   — at c = 30 with the realistic per-coef Hessian scale, low-TOI
+   players move ~30-50% toward μ. Crude but effective for the next
+   iteration if (1) and (2) are blocked.
+
+### Build artifacts on disk
+
+- `public/data/rapm-20252026.bacon-c1.json` — the schema v3 prior-
+  informed build from this run (the inflated-coefficient one above).
+  Preserved for inspection / future comparison.
+- `public/data/rapm-20252026.json` — reverted to the previously
+  deployed schema v2 artifact (Apr 20 build) so the next casual
+  deploy doesn't push regressed coefficients live.
+- `/tmp/rapm-build.log` — full build log (CV trace, prior-informed
+  shifts on test players, completion).
+- `/tmp/simulate-prior.mjs`, `/tmp/simulate-prior-c.mjs` — standalone
+  simulators that apply the 1D-ridge approximation to the existing
+  artifact for sensitivity analysis without re-running the full
+  build.
+
+### Calibration sensitivity
+
+`/tmp/simulate-prior-c.mjs` runs c ∈ {1, 3, 10, 30} × hScale ∈ {1.0,
+0.1, 0.02} (Hessian-mass-per-TOI-minute) on the existing β₀. Use it
+to predict the coefficient shift before paying for a real RAPM
+rebuild. Real-RAPM hScale is closer to 0.02 than 1.0 (each shift
+contributes a 1 to 5 design columns and the cross-coupling matters).
+
+### What's still deferred
+
+- **Prior μ = previous-season RAPM** is the gold-standard form. Needs
+  an archived `rapm-20242025.json` artifact. Add an env var
+  `PRIOR_SEASON_ARTIFACT=path/to/last-year.json` and override
+  cohort μ with last-year β when a player has a prior-season entry.
+- **Per-component prior σ from the prior-season SE** (not just TOI).
+  Once we have prior-season data, weight ρ_i by the previous SE so
+  noisy prior coefficients don't dominate good current data.
+- **WAR_market clipping is now redundant for low-sample defensive
+  liabilities** — the prior already pulls Bedard toward the F-cohort
+  defense mean (≈ 0). After verifying the new artifact in production
+  for one rebuild cycle, consider removing the
+  `min(0, evDefense)` clip in `surplusValueService.ts`. Don't remove
+  it yet — let the new RAPM live in production for one daily
+  cron-rebuild cycle first.
+- **Hard `lowSample` (gp < 40) flag is now informational only.**
+  Downstream consumers in `warService.ts` still gate on
+  `rapmEntry.lowSample` to fall back to the team-relative blend; with
+  the prior in place that gate could be relaxed (the prior shrinks
+  thin-data players toward the cohort mean rather than letting them
+  keep an inflated coefficient). Recommended follow-up: change the
+  WAR fallback gate to `lowSample && gp < 25` or remove entirely
+  after one rebuild cycle of validation.
+
+### How to rerun
+
+```bash
+cd /Users/ilyamillwe/nhl-analytics
+node scripts/build-rapm.cjs
+# Output: public/data/rapm-20252026.json (schemaVersion: 3)
+
+# Disable the prior pass (legacy reproduction):
+NO_PRIOR=1 node scripts/build-rapm.cjs
+
+# Different season:
+SEASON=20262027 node scripts/build-rapm.cjs
+```
+
+The script uses `.cache/{pbp,shifts,schedule}/{season}/` for
+resumability; warm caches make a rerun ~3-6 minutes (regression solve
++ matrix inverse for SE), cold ~25-40 minutes.
 
 **Worker timeout.** `/cached/build-war` is single-shot and times out at
 ~1102 with the current xG lookup + WAR pipeline size. Always use the

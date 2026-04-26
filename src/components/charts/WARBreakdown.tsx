@@ -253,9 +253,15 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
   const plotW = width - pad.left - pad.right;
   const zeroX = pad.left + plotW / 2;
   const pxPerWin = plotW / 2 / maxAbs;
-  const rowHeight = compact ? 18 : 28;
-  const rowGap = compact ? 2 : 5;
-  const extraRows = compact ? 28 : 54;
+  // Compact mode: bumped from rowHeight 18 → 30 / rowGap 2 → 4 so the
+  // share-card export chart (1080×1080 with WAR filling the bottom half
+  // ~540px tall) actually USES the available vertical budget. At
+  // rowHeight 18 the SVG's viewBox aspect ratio (1080/320 ≈ 3.4) was
+  // letting the chart render only ~320px tall in a 540px container —
+  // making bars and labels barely visible on mobile share previews.
+  const rowHeight = compact ? 30 : 28;
+  const rowGap = compact ? 4 : 5;
+  const extraRows = compact ? 32 : 54;
   const height = pad.top + segments.length * (rowHeight + rowGap) + extraRows + pad.bottom;
 
   const warClass = result.WAR_per_82 > 1 ? 'pos' : result.WAR_per_82 < 0 ? 'neg' : 'neutral';
@@ -371,7 +377,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
           return (
             <g key={seg.key}>
               <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 3 : 4)}
-                textAnchor="end" fontSize={compact ? 10 : 12}
+                textAnchor="end" fontSize={compact ? 13 : 12}
                 fill={dim ? '#64748b' : '#cbd5f5'}>
                 {seg.label}
               </text>
@@ -439,7 +445,7 @@ source: ${seg.sourceLabel}`}
                       <text x={inside ? insideX : outsideX}
                         y={y + rowHeight / 2 + 4}
                         textAnchor={inside ? (sign >= 0 ? 'end' : 'start') : (sign >= 0 ? 'start' : 'end')}
-                        fontSize={compact ? 10 : 12}
+                        fontSize={compact ? 13 : 12}
                         fill={inside ? '#0f172a' : (wins > 0 ? '#34d399' : wins < 0 ? '#f87171' : '#64748b')}
                         fontWeight={600}>
                         {fmt(wins)}
@@ -474,7 +480,7 @@ source: ${seg.sourceLabel}`}
                 y1={y - 4} y2={y - 4}
                 stroke="rgba(148, 163, 184, 0.3)" />
               <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 3 : 4)}
-                textAnchor="end" fontSize={compact ? 11 : 13} fill="#f3f4f6" fontWeight={700}>Total WAR</text>
+                textAnchor="end" fontSize={compact ? 14 : 13} fill="#f3f4f6" fontWeight={700}>Total WAR</text>
               <rect x={barStartX} y={y} width={Math.max(cumW, 1)} height={rowHeight}
                 fill={mainColor} rx={2}>
                 <title>{`Total WAR — cumulative: ${fmt(cum)} wins · 82-GP pace: ${fmt(proj)} wins`}</title>
@@ -497,7 +503,7 @@ source: ${seg.sourceLabel}`}
               <text x={sign >= 0 ? barStartX + cumW + 6 : barStartX - 6}
                 y={y + rowHeight / 2 + (compact ? 3 : 4)}
                 textAnchor={sign >= 0 ? 'start' : 'end'}
-                fontSize={compact ? 11 : 13}
+                fontSize={compact ? 14 : 13}
                 fill={mainColor === posColor ? '#34d399' : '#f87171'}
                 fontWeight={700}>
                 {fmt(cum)}

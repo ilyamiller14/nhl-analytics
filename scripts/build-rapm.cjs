@@ -1164,19 +1164,33 @@ function stwmv(X, u, w) {
   return out;
 }
 
-// Sparse weighted matvec: out = (X^T W X + λI) v
-function normalMatvec(X, v, w, lambda) {
+// Sparse weighted matvec: out = (X^T W X + λ·diag(ρ)) v
+//
+// `ridgeDiag` is an optional Float64Array of per-coefficient ridge multipliers
+// ρ_i (length nCols). When null, behaves as standard ridge (ρ_i = 1 for all
+// i) — back-compat with earlier callers. When supplied, this implements the
+// Bacon prior-informed ridge LHS: each player's penalty is λ·ρ_i instead of
+// the uniform λ. Higher ρ_i = stronger pull toward the prior mean.
+function normalMatvec(X, v, w, lambda, ridgeDiag = null) {
   const Xv = smv(X, v);
   // Apply diag(w)
   for (let i = 0; i < Xv.length; i++) Xv[i] *= w[i];
   const out = stmv(X, Xv);
-  for (let j = 0; j < out.length; j++) out[j] += lambda * v[j];
+  if (ridgeDiag) {
+    for (let j = 0; j < out.length; j++) out[j] += lambda * ridgeDiag[j] * v[j];
+  } else {
+    for (let j = 0; j < out.length; j++) out[j] += lambda * v[j];
+  }
   return out;
 }
 
-// Conjugate gradient on (X^T W X + λI) β = b.
+// Conjugate gradient on (X^T W X + λ·diag(ρ)) β = b.
 // Well-conditioned because of the Tikhonov term; ~150-300 iters suffice.
-function conjugateGradient(X, w, b, lambda, { maxIter = 400, tol = 1e-7 } = {}) {
+//
+// `ridgeDiag` (Float64Array, length nCols) lets callers vary the ridge penalty
+// per-coefficient — used by the prior-informed second pass to apply heavier
+// shrinkage to low-TOI players (see selectPriorRidge). null = uniform ridge.
+function conjugateGradient(X, w, b, lambda, { maxIter = 400, tol = 1e-7, ridgeDiag = null } = {}) {
   const n = X.nCols;
   const beta = new Float64Array(n);
   let r = new Float64Array(n);
@@ -1189,7 +1203,7 @@ function conjugateGradient(X, w, b, lambda, { maxIter = 400, tol = 1e-7 } = {}) 
   const target = tol * tol * b2;
 
   for (let k = 0; k < maxIter; k++) {
-    const Ap = normalMatvec(X, p, w, lambda);
+    const Ap = normalMatvec(X, p, w, lambda, ridgeDiag);
     let pAp = 0;
     for (let i = 0; i < n; i++) pAp += p[i] * Ap[i];
     if (pAp <= 0) break;
@@ -1348,7 +1362,7 @@ function selectLambdaFiveFoldCV(X, weights, y, lambdaGrid) {
  * — cheap with ml-matrix. We build X^T W X densely here (columns are
  * pre-qualified, so the matrix is at most ~900×900 and fits fine in RAM).
  */
-function computeStandardErrors(X, w, lambda, sigma2Resid) {
+function computeStandardErrors(X, w, lambda, sigma2Resid, ridgeDiag = null) {
   const n = X.nCols;
   // Build X^T W X densely, column by column via stwmv applied to unit vectors.
   // For efficiency: directly accumulate by iterating non-zeros.
@@ -1366,8 +1380,13 @@ function computeStandardErrors(X, w, lambda, sigma2Resid) {
       }
     }
   }
-  // Add λI
-  for (let i = 0; i < n; i++) A[i * n + i] += lambda;
+  // Add λ·diag(ρ) — uniform when ridgeDiag is null (standard ridge),
+  // per-coefficient when passed in (Bacon prior-informed second pass).
+  if (ridgeDiag) {
+    for (let i = 0; i < n; i++) A[i * n + i] += lambda * ridgeDiag[i];
+  } else {
+    for (let i = 0; i < n; i++) A[i * n + i] += lambda;
+  }
 
   // Invert with ml-matrix. Build the Matrix from the flat Float64Array.
   const rows = [];
@@ -1384,6 +1403,164 @@ function computeStandardErrors(X, w, lambda, sigma2Resid) {
     se[i] = Math.sqrt(Math.max(0, diag) * sigma2Resid);
   }
   return se;
+}
+
+// ============================================================================
+// Phase 6 — Prior-informed ridge (Bacon WAR 1.1)
+// ============================================================================
+//
+// Standard ridge pulls every coefficient toward zero with the same strength
+// λ. That's fine for high-TOI veterans (their data dominates the prior) but
+// over-credits / over-debits players whose RAPM signal is dominated by team
+// lineup context. Prior-informed (Bacon) ridge replaces the uniform pull
+// toward 0 with:
+//
+//   minimize ‖Y - Xβ‖²_W + λ·Σ_i ρ_i (β_i - μ_i)²
+//
+// where μ_i is a per-coefficient prior mean and ρ_i is a per-coefficient
+// precision multiplier. Closed form:
+//
+//   (X'WX + λ·diag(ρ)) β = X'Wy + λ·diag(ρ)·μ
+//
+// Implementation here:
+//   • First pass: solve a STANDARD ridge at the CV-selected λ → β₀.
+//   • Build μ from β₀ as a position-cohort mean (F vs D), restricted to
+//     high-TOI anchors (TOI > MIN_ANCHOR_TOI) so the cohort prior reflects
+//     well-estimated coefficients only. Each player's offense column is
+//     pulled toward the cohort offense mean; each defense column toward the
+//     cohort defense mean. This is the "position-cohort fallback" Bacon
+//     describes when archived prior-season RAPM isn't available.
+//   • Build ρ inversely proportional to TOI: high-TOI players get a weak
+//     prior pull (the data is plenty); low-TOI players get a strong pull
+//     (the data is thin). Calibration: median-TOI player gets ρ = 1, so the
+//     model degrades gracefully toward standard ridge for typical players.
+//   • Second pass: solve the prior-informed system at the SAME λ.
+//
+// The hard `lowSample` cutoff (gp < 40) in the artifact is preserved as a
+// flag, but downstream consumers no longer need it for safety — the prior
+// shrinks low-sample players toward the cohort mean rather than letting
+// them keep a context-dominated coefficient.
+
+function buildPositionPrior({
+  betaStandard,
+  qualified,
+  playerIdx,
+  positions,
+  toiMap,
+  minAnchorTOISec,
+}) {
+  const nPlayers = qualified.length;
+
+  // 1) Cohort means from high-TOI anchors only. Cohort = F vs D. We use
+  //    F vs D (not C/L/R/D split) because the C/L/R offense/defense
+  //    distributions are statistically indistinguishable on the F side
+  //    (Tulsky, Hockey Graphs) and splitting them adds variance to a
+  //    prior that's already a fallback when prior-season data is
+  //    unavailable.
+  const cohortAccumulator = {
+    F: { offSum: 0, defSum: 0, count: 0 },
+    D: { offSum: 0, defSum: 0, count: 0 },
+  };
+
+  for (const pid of qualified) {
+    const i = playerIdx.get(pid);
+    const toi = toiMap.get(pid) || 0;
+    if (toi < minAnchorTOISec) continue;
+    const pos = positions.get(pid);
+    if (!pos) continue;
+    const cohortKey = pos === 'D' ? 'D' : 'F';
+    const cohort = cohortAccumulator[cohortKey];
+    cohort.offSum += betaStandard[i];
+    // Defense column in betaStandard layout is at i+nPlayers; the sign
+    // hasn't been flipped yet (raw "contribution to opponent xGF/60").
+    cohort.defSum += betaStandard[i + nPlayers];
+    cohort.count += 1;
+  }
+
+  const cohortMeans = {};
+  for (const key of ['F', 'D']) {
+    const c = cohortAccumulator[key];
+    cohortMeans[key] = {
+      offense: c.count > 0 ? c.offSum / c.count : 0,
+      defense: c.count > 0 ? c.defSum / c.count : 0,
+      anchorCount: c.count,
+    };
+  }
+
+  // 2) Build the μ vector (length 2·nPlayers — offense block then defense).
+  //    Players without a known position fall back to the F prior
+  //    (forwards are the majority cohort).
+  const mu = new Float64Array(2 * nPlayers);
+  for (const pid of qualified) {
+    const i = playerIdx.get(pid);
+    const pos = positions.get(pid);
+    const cohortKey = pos === 'D' ? 'D' : 'F';
+    const m = cohortMeans[cohortKey];
+    mu[i] = m.offense;             // offense column
+    mu[i + nPlayers] = m.defense;  // defense column (raw, unflipped)
+  }
+
+  return { mu, cohortMeans };
+}
+
+function buildRidgeDiag({
+  qualified,
+  playerIdx,
+  toiMap,
+  precisionScaleC = 1.0,
+  toiFloorRatio = 0.25,
+  toiCapRatio = 4.0,
+}) {
+  const nPlayers = qualified.length;
+  const n = 2 * nPlayers;
+
+  // Median TOI among QUALIFIED players (the same set we built the design
+  // matrix from). Calibration choice: a median-TOI player gets ρ = 1, so
+  // their effective ridge strength matches standard ridge — the model
+  // degrades gracefully toward the existing solver for typical players.
+  const tois = qualified.map(pid => toiMap.get(pid) || 0).filter(t => t > 0).sort((a, b) => a - b);
+  const medianTOI = tois.length > 0 ? tois[Math.floor(tois.length / 2)] : 1;
+  const minTOI = medianTOI * toiFloorRatio;  // bounds ρ above (max prior)
+  const maxTOI = medianTOI * toiCapRatio;    // bounds ρ below (min prior)
+
+  const ridgeDiag = new Float64Array(n);
+  for (const pid of qualified) {
+    const i = playerIdx.get(pid);
+    const rawTOI = toiMap.get(pid) || minTOI;
+    const clampedTOI = Math.max(minTOI, Math.min(maxTOI, rawTOI));
+    // ρ_i = c · medianTOI / TOI_i. Median player → ρ = c · 1 = c.
+    // Quarter-median TOI → ρ = c · 4 (4× ridge pull). 4×-median → ρ = c/4.
+    const rho = precisionScaleC * (medianTOI / clampedTOI);
+    ridgeDiag[i] = rho;             // offense column
+    ridgeDiag[i + nPlayers] = rho;  // defense column (same TOI)
+  }
+
+  return { ridgeDiag, medianTOI };
+}
+
+async function fetchPositions() {
+  // /cached/skater-ages returns { season, computedAt, players: { [id]: {age, position, ...} } }
+  // for every skater with a NHL Stats /skater/bios entry. Position is the
+  // single-letter code C/L/R/D. We use this rather than scraping NHL's
+  // /player/{id}/landing 940 times.
+  console.log('[rapm] Fetching skater positions from worker /cached/skater-ages...');
+  let resp;
+  try {
+    resp = await fetchJSON(`${WORKER_BASE}/cached/skater-ages`);
+  } catch (err) {
+    console.warn(`[rapm] WARNING: skater-ages fetch failed (${err.message}). Prior-informed pass will treat all players as forwards.`);
+    return new Map();
+  }
+  const players = (resp && resp.players) || {};
+  const out = new Map();
+  for (const [pid, info] of Object.entries(players)) {
+    const pos = info && info.position;
+    if (typeof pos === 'string' && pos.length > 0) {
+      out.set(Number(pid), pos);
+    }
+  }
+  console.log(`[rapm]   loaded positions for ${out.size} skaters`);
+  return out;
 }
 
 // ============================================================================
@@ -1713,12 +1890,117 @@ async function main() {
   const LAMBDA_GRID = [0.3, 1, 3, 10, 30, 100, 300, 1000, 3000, 10000];
   const { lambda, cvResults } = selectLambdaFiveFoldCV(X, weights, y, LAMBDA_GRID);
 
-  // -- Phase 4c: final full-data ridge solve at the chosen λ -------------
-  console.log('[rapm] Solving combined offense+defense ridge (CG) at λ=' + lambda + '...');
+  // -- Phase 4c: standard-ridge first pass at the chosen λ -------------
+  // This is also our diagnostic baseline. The previous version of the
+  // build stopped here and persisted these β. The Bacon prior-informed
+  // second pass uses these β to derive the position-cohort prior μ.
+  console.log('[rapm] Solving combined offense+defense ridge (CG) at λ=' + lambda + '... [pass 1: standard]');
   const b = stwmv(X, y, weights);
-  const beta = conjugateGradient(X, weights, b, lambda);
-  // β layout: first nPlayers = offense, next nPlayers = defense.
+  const betaStandard = conjugateGradient(X, weights, b, lambda);
   const nPlayers = qualified.length;
+
+  // -- Phase 4d: prior-informed (Bacon) ridge ---------------------------
+  // Default: enabled. Set NO_PRIOR=1 to disable for legacy reproduction.
+  const PRIOR_ENABLED = !process.env.NO_PRIOR;
+  // Anchor TOI for cohort-mean derivation: 500 minutes = 30000 seconds.
+  // Players above this threshold have well-estimated standard-ridge β
+  // (median TOI is ~700-900 min in a full season, so this is roughly the
+  // bottom ~30% cutoff and excludes context-dominated low-TOI players
+  // from the prior the same way they're excluded from a JFresh-style
+  // qualified leaderboard).
+  const MIN_ANCHOR_TOI_SEC = 500 * 60;
+  // ρ scaling: 1.0 means median-TOI player gets ridge strength = standard
+  // ridge λ. Higher values would crush the whole regression toward the
+  // prior; lower values would let it decay almost back to standard ridge.
+  const PRIOR_PRECISION_SCALE_C = 1.0;
+
+  let beta = betaStandard;
+  let priorMeta = null;
+  let ridgeDiag = null;
+  let mu = null;
+  let cohortMeans = null;
+  let positions = new Map();
+
+  if (PRIOR_ENABLED) {
+    positions = await fetchPositions();
+    const priorBuild = buildPositionPrior({
+      betaStandard,
+      qualified,
+      playerIdx,
+      positions,
+      toiMap,
+      minAnchorTOISec: MIN_ANCHOR_TOI_SEC,
+    });
+    mu = priorBuild.mu;
+    cohortMeans = priorBuild.cohortMeans;
+    console.log('[rapm]   cohort F: μ_off=' + cohortMeans.F.offense.toFixed(4) +
+                ' μ_def=' + cohortMeans.F.defense.toFixed(4) +
+                ' anchors=' + cohortMeans.F.anchorCount);
+    console.log('[rapm]   cohort D: μ_off=' + cohortMeans.D.offense.toFixed(4) +
+                ' μ_def=' + cohortMeans.D.defense.toFixed(4) +
+                ' anchors=' + cohortMeans.D.anchorCount);
+
+    const ridgeBuild = buildRidgeDiag({
+      qualified,
+      playerIdx,
+      toiMap,
+      precisionScaleC: PRIOR_PRECISION_SCALE_C,
+      toiFloorRatio: 0.25,
+      toiCapRatio: 4.0,
+    });
+    ridgeDiag = ridgeBuild.ridgeDiag;
+    console.log('[rapm]   median TOI for ρ calibration = ' + (ridgeBuild.medianTOI / 60).toFixed(1) + 'min');
+
+    // RHS for prior-informed ridge: b' = X'Wy + λ·diag(ρ)·μ
+    const bPrior = new Float64Array(b.length);
+    for (let i = 0; i < b.length; i++) {
+      bPrior[i] = b[i] + lambda * ridgeDiag[i] * mu[i];
+    }
+
+    console.log('[rapm] Solving combined offense+defense ridge (CG) at λ=' + lambda + '... [pass 2: prior-informed Bacon]');
+    beta = conjugateGradient(X, weights, bPrior, lambda, { ridgeDiag });
+
+    // Diagnostics — how much did the prior pull move the test players?
+    const TEST_PIDS = [8481721, 8477492, 8484144, 8478402, 8481559, 8477934, 8480039];
+    console.log('[rapm]   prior-informed shift on test players (pass1 → pass2):');
+    for (const pid of TEST_PIDS) {
+      const i = playerIdx.get(pid);
+      if (i === undefined) {
+        console.log(`[rapm]     ${pid}: not in qualified set`);
+        continue;
+      }
+      const o0 = betaStandard[i].toFixed(4);
+      const d0 = (-betaStandard[i + nPlayers]).toFixed(4);
+      const o1 = beta[i].toFixed(4);
+      const d1 = (-beta[i + nPlayers]).toFixed(4);
+      console.log(`[rapm]     ${pid}: off ${o0} → ${o1}   def ${d0} → ${d1}`);
+    }
+
+    priorMeta = {
+      method: 'position-cohort-mean (F vs D)',
+      anchorMinTOISec: MIN_ANCHOR_TOI_SEC,
+      precisionScaleC: PRIOR_PRECISION_SCALE_C,
+      toiFloorRatio: 0.25,
+      toiCapRatio: 4.0,
+      medianTOIMin: Number((ridgeBuild.medianTOI / 60).toFixed(2)),
+      cohortMeans: {
+        F: {
+          offense: Number(cohortMeans.F.offense.toFixed(6)),
+          defense: Number(-cohortMeans.F.defense.toFixed(6)), // sign-flipped to match artifact convention
+          anchorCount: cohortMeans.F.anchorCount,
+        },
+        D: {
+          offense: Number(cohortMeans.D.offense.toFixed(6)),
+          defense: Number(-cohortMeans.D.defense.toFixed(6)),
+          anchorCount: cohortMeans.D.anchorCount,
+        },
+      },
+    };
+  } else {
+    console.log('[rapm] Prior-informed pass DISABLED via NO_PRIOR=1 — keeping standard ridge β.');
+  }
+
+  // β layout: first nPlayers = offense, next nPlayers = defense.
   const betaOff = beta.subarray(0, nPlayers);
   // Defense β measures "contribution to OPPONENT xGF/60 while on ice" —
   // raw positive values mean the opponent scored more, which is BAD. We
@@ -1727,11 +2009,23 @@ async function main() {
   const betaDef = new Float64Array(nPlayers);
   for (let i = 0; i < nPlayers; i++) betaDef[i] = -betaDefRaw[i];
 
+  // Pre-prior coefficients persisted for diagnostics (lets readers
+  // audit how much shrinkage the prior applied to each player).
+  const betaOffStandard = new Float64Array(nPlayers);
+  const betaDefStandard = new Float64Array(nPlayers);
+  for (let i = 0; i < nPlayers; i++) {
+    betaOffStandard[i] = betaStandard[i];
+    betaDefStandard[i] = -betaStandard[i + nPlayers];
+  }
+
   // -- Phase 5: standard errors -------------------------------------------
   // SE is computed on the 2n×2n normal matrix; split the diag into
   // offense SE and defense SE halves. SE is unaffected by sign flip.
+  // When the prior is enabled, the per-coefficient ridge multiplier
+  // changes the inverse → SE shrinks for low-TOI players, which is what
+  // we want (the prior IS information).
   console.log('[rapm] Computing per-player standard errors...');
-  const seFull = computeStandardErrors(X, weights, lambda, sigma2Resid);
+  const seFull = computeStandardErrors(X, weights, lambda, sigma2Resid, ridgeDiag);
   const seOff = seFull.subarray(0, nPlayers);
   const seDef = seFull.subarray(nPlayers, 2 * nPlayers);
 
@@ -1779,7 +2073,7 @@ async function main() {
     const gp = (playerGames.get(pid) || new Set()).size;
     const pp = perPlayerPP.get(pid) || { xgf: 0, minutes: 0 };
     const pk = perPlayerPK.get(pid) || { xga: 0, minutes: 0 };
-    players[String(pid)] = {
+    const entry = {
       offense: Number(betaOff[idx].toFixed(4)),
       defense: Number(betaDef[idx].toFixed(4)),
       offenseSE: Number(seOff[idx].toFixed(4)),
@@ -1795,11 +2089,21 @@ async function main() {
       pkXGA: Number(pk.xga.toFixed(4)),
       pkMinutes: Number(pk.minutes.toFixed(2)),
     };
+    if (priorMeta) {
+      // Pre-prior (standard ridge) coefficients exposed for audit. Useful
+      // for downstream diagnostics — readers can compute the shrinkage
+      // applied to each player as (offense - offenseStandard) etc.
+      entry.offenseStandard = Number(betaOffStandard[idx].toFixed(4));
+      entry.defenseStandard = Number(betaDefStandard[idx].toFixed(4));
+      const pos = positions.get(pid);
+      entry.positionCohort = pos === 'D' ? 'D' : 'F';
+    }
+    players[String(pid)] = entry;
   }
 
   const output = {
     season: SEASON,
-    schemaVersion: 2,  // bumped for PP/PK fields
+    schemaVersion: priorMeta ? 3 : 2,  // v3 adds prior-informed (Bacon) ridge
     computedAt: new Date().toISOString(),
     gamesAnalyzed: shiftsFetched,
     shiftsAnalyzed: allWindows.length,
@@ -1812,6 +2116,9 @@ async function main() {
       lambda: r.lambda,
       mse: Number(r.mse.toFixed(6)),
     })),
+    // Bayesian prior metadata. Null when NO_PRIOR=1 disables the second
+    // pass. See Phase 6 comment block for the math + cohort derivation.
+    prior: priorMeta,
     leagueBaselineXGF60: Number(leagueBaselineXGF60.toFixed(4)),
     leagueBaselineXGA60: Number(leagueBaselineXGA60.toFixed(4)),
     // Special-teams league rate (SHARE-WEIGHTED to match the per-player

@@ -40,11 +40,32 @@ export interface RAPMPlayerEntry {
   ppMinutes?: number;  // PP minutes played
   pkXGA?: number;      // sum of opposing xGF while player on PK (share-weighted)
   pkMinutes?: number;  // PK minutes played
+  // Schema v3 (Bacon prior-informed) — pre-prior coefficients persisted
+  // for diagnostic audit. `offense`/`defense` are the prior-informed
+  // values; these `*Standard` fields are the standard-ridge first-pass
+  // values that the prior was applied on top of. positionCohort tells
+  // which prior cohort the player was placed in (F or D).
+  offenseStandard?: number;
+  defenseStandard?: number;
+  positionCohort?: 'F' | 'D';
+}
+
+export interface RAPMPriorMetadata {
+  method: string;             // human-readable description, e.g. "position-cohort-mean (F vs D)"
+  anchorMinTOISec: number;    // TOI threshold for "anchor" players whose β contribute to the cohort mean
+  precisionScaleC: number;    // scaling on per-coefficient ridge multiplier ρ
+  toiFloorRatio: number;      // ρ floor at this fraction of median TOI
+  toiCapRatio: number;        // ρ cap at this multiple of median TOI
+  medianTOIMin: number;       // median qualified-player TOI (minutes), for ρ calibration
+  cohortMeans: {
+    F: { offense: number; defense: number; anchorCount: number };
+    D: { offense: number; defense: number; anchorCount: number };
+  };
 }
 
 export interface RAPMArtifact {
   season: string;              // "20252026"
-  schemaVersion: 1 | 2;        // 2 adds PP/PK fields + league PP rate
+  schemaVersion: 1 | 2 | 3;    // v2 adds PP/PK fields; v3 adds prior-informed (Bacon) ridge
   computedAt: string;
   gamesAnalyzed: number;
   shiftsAnalyzed: number;
@@ -52,6 +73,7 @@ export interface RAPMArtifact {
   strength: '5v5';
   lambda: number;
   lambdaSelection: 'empirical-bayes' | '5fold-cv';
+  prior?: RAPMPriorMetadata | null;  // schema v3
   leagueBaselineXGF60: number;
   leagueBaselineXGA60: number;
   leaguePpXgfPerMin?: number;  // schema v2: league PP xG / team-minute of PP
@@ -106,7 +128,7 @@ function isValidArtifact(obj: unknown): obj is RAPMArtifact {
   const a = obj as Partial<RAPMArtifact>;
   return (
     typeof a.season === 'string' &&
-    (a.schemaVersion === 1 || a.schemaVersion === 2) &&
+    (a.schemaVersion === 1 || a.schemaVersion === 2 || a.schemaVersion === 3) &&
     typeof a.players === 'object' &&
     a.players !== null
   );
