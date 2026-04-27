@@ -14,7 +14,7 @@ import type { RollingMetrics } from '../services/rollingAnalytics';
 import type { SkaterAverages } from '../services/leagueAveragesService';
 import { computePercentile } from '../services/leagueAveragesService';
 import XGTimeSeriesChart from './charts/XGTimeSeriesChart';
-import MiniShotMap from './charts/MiniShotMap';
+import SpatialSignaturePanel from './charts/SpatialSignaturePanel';
 import WARBreakdown from './charts/WARBreakdown';
 import type { WARResult } from '../services/warService';
 import { getTeamPrimaryColor } from '../constants/teams';
@@ -707,16 +707,39 @@ export default function PlayerAnalyticsCard({
           cutting into the vertical budget for WAR.
           ============================================================ */}
       {warResult ? (
-        <div className="bottom-war-full">
-          <div className="share-war-breakdown">
-            <WARBreakdown
-              result={warResult}
-              title="Wins Above Replacement"
-              width={1080}
-              compact
-            />
-          </div>
-        </div>
+        // Two-column "value + signature" layout. CSS in
+        // PlayerAnalyticsCard.css owns the flex behavior so it can
+        // respond to viewport width (stack on mobile, side-by-side
+        // on desktop and during the 1080×1080 export capture).
+        (() => {
+          const shotsToShow = shotEvents || analytics?.playerShots;
+          const hasShots = !!(shotsToShow && shotsToShow.length > 0);
+          return (
+            <div className={`bottom-war-full${hasShots ? '' : ' bottom-war-full-solo'}`}>
+              <div className="share-war-breakdown">
+                {/* WARBreakdown sizes its SVG via viewBox; we pass a
+                    nominal width that the CSS overrides via the flex
+                    column + viewBox-driven SVG scale. */}
+                <WARBreakdown
+                  result={warResult}
+                  title="Wins Above Replacement"
+                  width={640}
+                  compact
+                />
+              </div>
+              {hasShots && (
+                <div className="share-spatial-panel">
+                  <SpatialSignaturePanel
+                    shots={shotsToShow!}
+                    width={400}
+                    height={340}
+                    smoothSigma={1.4}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })()
       ) : (
       <div className="bottom-columns">
         {/* Left Column: rolling + individual xG + on-ice xG */}
@@ -857,17 +880,26 @@ export default function PlayerAnalyticsCard({
                 )}
                 {(() => {
                   const shotsToShow = shotEvents || analytics?.playerShots;
-                  return shotsToShow && shotsToShow.length > 0 ? (
+                  if (!shotsToShow || shotsToShow.length === 0) return null;
+                  // HockeyViz-style xG-weighted, KDE-smoothed signature panel.
+                  // Replaces the old per-shot MiniShotMap because:
+                  //  - xG weighting reads "danger generation" instead of just
+                  //    "shot volume" — a slot tip outweighs a point shot.
+                  //  - KDE smoothing makes low-sample players (2nd-3rd line
+                  //    forwards, 5/6 D) look like coherent patterns rather
+                  //    than scatter noise.
+                  // The MiniShotMap component is still on disk for the
+                  // PlayerProfile page; the share card upgraded.
+                  return (
                     <div className="shot-map-container">
-                      <MiniShotMap
+                      <SpatialSignaturePanel
                         shots={shotsToShow}
                         width={380}
                         height={170}
-                        officialGoals={goals}
-                        officialSOG={shots}
+                        smoothSigma={1.2}
                       />
                     </div>
-                  ) : null;
+                  );
                 })()}
               </div>
             </>

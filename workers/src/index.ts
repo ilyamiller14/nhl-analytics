@@ -428,6 +428,80 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     });
   }
 
+  // League xG grid — 20×8 spatial baseline used by the share card's
+  // SpatialSignaturePanel to render isolated impact (player vs league).
+  if (url.pathname === '/cached/league-xg-grid') {
+    const cached = await env.NHL_CACHE.get(`league_xg_grid_${CURRENT_SEASON}`);
+    if (cached) {
+      return new Response(cached, {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'HIT' },
+      });
+    }
+    return new Response(JSON.stringify({
+      error: 'League xG grid not yet built',
+      message: 'Call /cached/build-league-xg-grid to trigger, or wait for the daily cron.',
+    }), {
+      status: 404,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+  if (url.pathname === '/cached/build-league-xg-grid') {
+    ctx.waitUntil(buildLeagueXgGrid(env));
+    return new Response(JSON.stringify({
+      message: 'League xG grid build started. Query /cached/league-xg-grid in ~30s.',
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+  // Chunked variants — for HTTP-triggered manual builds. The one-shot
+  // endpoint above suffices for cron (5min budget) but exceeds the 30s
+  // HTTP CPU budget when 32 teams' PBP must be parsed in one request.
+  // Orchestrate: /reset → 32× /chunk?team=XXX → /finalize.
+  if (url.pathname === '/cached/league-xg-grid-reset') {
+    await resetLeagueXgGridPartial(env);
+    return new Response(JSON.stringify({ message: 'League xG grid partial state cleared.' }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+  if (url.pathname === '/cached/league-xg-grid-chunk') {
+    const team = url.searchParams.get('team');
+    if (!team) {
+      return new Response(JSON.stringify({ error: 'Missing ?team=XXX' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    try {
+      await buildLeagueXgGridTeam(env, team.toUpperCase());
+      const partial = await loadLeagueGridPartial(env);
+      return new Response(JSON.stringify({
+        team: team.toUpperCase(),
+        teamsProcessed: partial.teamsProcessed.length,
+        totalShots: partial.totalShots,
+        totalXg: Number(partial.totalXg.toFixed(2)),
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+  if (url.pathname === '/cached/league-xg-grid-finalize') {
+    try {
+      await finalizeLeagueXgGrid(env);
+      const grid = await env.NHL_CACHE.get(`league_xg_grid_${CURRENT_SEASON}`, 'json') as any;
+      return new Response(JSON.stringify({
+        message: 'Finalized.',
+        games: grid?.gamesAnalyzed,
+        totalShots: grid?.totalShots,
+        baselineXgPerShot: grid?.baselineXgPerShot,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   // Chunked xG build — process one team per HTTP request to stay under
   // worker CPU budget. Orchestrate: reset → 32× chunk → finalize.
   if (url.pathname === '/cached/xg-reset') {
@@ -1568,6 +1642,12 @@ interface XgShotRecord {
   isRush: boolean;              // shot ≤ 4s after a non-shot event outside the offensive zone
   scoreState: 'leading' | 'trailing' | 'tied';
   prevEventType: 'faceoff' | 'hit' | 'takeaway' | 'giveaway' | 'blocked' | 'missed' | 'sog' | 'goal' | 'other';
+  // Raw NHL coordinates retained for spatial bucketing (league xG grid bake).
+  // The half-rink offensive-zone projection mirrors negative X to positive
+  // and flips Y, but we keep the raw coords here and let the consumer
+  // mirror — different consumers want different projections.
+  xCoord: number;
+  yCoord: number;
 }
 
 // Period length in seconds. Overtime is 5 minutes regular season; we treat
@@ -1695,6 +1775,8 @@ function extractShotsFromGame(game: any): XgShotRecord[] {
             isRush,
             scoreState,
             prevEventType,
+            xCoord: x,
+            yCoord: y,
           });
         }
       }
@@ -2495,6 +2577,238 @@ async function buildXgLookup(env: Env): Promise<void> {
 }
 
 // ============================================================================
+// LEAGUE xG GRID — 20×8 spatial baseline for the SpatialSignaturePanel
+// ============================================================================
+//
+// Walks every cached team PBP, mirrors each shot to the offensive half-rink,
+// and accumulates xG mass + shot count per cell on a 20×8 grid. Used by the
+// share card's SpatialSignaturePanel to render "isolated impact" — a
+// player's xG concentration relative to league shape, not to their own
+// median cell.
+//
+// xG per shot is computed via the same hierarchical empirical lookup the
+// client uses (xg_lookup KV). Falls back through key prefixes when finer
+// buckets are sparse (mirrors src/services/empiricalXgModel.ts hierarchy).
+//
+// Output layout:
+//   leagueXgPerCellPerGame[gx][gy]     — average xG mass per cell per game
+//   leagueShotsPerCellPerGame[gx][gy]  — average shot count per cell per game
+//   gridWidth / gridHeight, gamesAnalyzed, totalShots, baselineXgPerShot
+//
+// The "per-game" normalization is what consumers want: a player's
+// 76-game season xG mass divides by GP and is then comparable to this
+// grid. Per-cell *fraction* of total xG (player_frac − league_frac) is
+// the cleanest "shape isolation" derivation in the client.
+const LEAGUE_GRID_W = 20;
+const LEAGUE_GRID_H = 8;
+
+interface LeagueXgGridArtifact {
+  schemaVersion: 1;
+  season: string;
+  computedAt: string;
+  gamesAnalyzed: number;
+  totalShots: number;
+  totalXg: number;
+  baselineXgPerShot: number;
+  gridWidth: number;
+  gridHeight: number;
+  // 20×8 flattened row-major (gx*H + gy). Per-game means divide by gamesAnalyzed.
+  xgGrid: number[];
+  shotGrid: number[];
+}
+
+function lookupEmpiricalXg(
+  buckets: Record<string, { rate: number; shots: number }>,
+  rec: XgShotRecord,
+  minShotsPerBucket: number,
+): number {
+  const en = rec.isEmptyNet ? 'en1' : 'en0';
+  const db = distanceBin(rec.distance);
+  const ab = angleBin(rec.angle);
+  const r = rec.isRebound ? 'r1' : 'r0';
+  const ru = rec.isRush ? 'ru1' : 'ru0';
+  // Hierarchy: finest to coarsest, same as the client.
+  const keys = [
+    `${en}|${db}|${ab}|${rec.shotType}|${rec.strength}|${r}|${ru}`,
+    `${en}|${db}|${ab}|${rec.shotType}|${rec.strength}|${r}`,
+    `${en}|${db}|${ab}|${rec.shotType}|${rec.strength}`,
+    `${en}|${db}|${ab}|${rec.shotType}`,
+    `${en}|${db}|${ab}`,
+    `${en}|${db}`,
+    `${en}`,
+  ];
+  for (const k of keys) {
+    const b = buckets[k];
+    if (b && b.shots >= minShotsPerBucket) return b.rate;
+  }
+  return 0;
+}
+
+// Chunked variant — process one team per HTTP request so we stay under
+// the 30s CPU budget. Mirrors the buildXgLookupTeam pattern. Orchestrate
+// from the client: reset → 32× chunk → finalize.
+const LEAGUE_GRID_PARTIAL_KEY = () => `league_xg_grid_partial_${CURRENT_SEASON}`;
+
+interface LeagueGridPartial {
+  xgGrid: number[];
+  shotGrid: number[];
+  totalShots: number;
+  totalXg: number;
+  seenGameIds: number[];   // dedupe across team chunks (same game cached on both teams)
+  teamsProcessed: string[];
+}
+
+async function loadLeagueGridPartial(env: Env): Promise<LeagueGridPartial> {
+  const cached = await env.NHL_CACHE.get(LEAGUE_GRID_PARTIAL_KEY(), 'json') as LeagueGridPartial | null;
+  if (cached && Array.isArray(cached.xgGrid) && cached.xgGrid.length === LEAGUE_GRID_W * LEAGUE_GRID_H) {
+    return cached;
+  }
+  return {
+    xgGrid: new Array(LEAGUE_GRID_W * LEAGUE_GRID_H).fill(0),
+    shotGrid: new Array(LEAGUE_GRID_W * LEAGUE_GRID_H).fill(0),
+    totalShots: 0,
+    totalXg: 0,
+    seenGameIds: [],
+    teamsProcessed: [],
+  };
+}
+
+async function buildLeagueXgGridTeam(env: Env, team: string): Promise<void> {
+  const partial = await loadLeagueGridPartial(env);
+  if (partial.teamsProcessed.includes(team)) {
+    return;
+  }
+  const lookup = await env.NHL_CACHE.get(`xg_lookup_${CURRENT_SEASON}`, 'json') as
+    | { buckets?: Record<string, { rate: number; shots: number }>; minShotsPerBucket?: number }
+    | null;
+  if (!lookup || !lookup.buckets) throw new Error('xg lookup not built — run /cached/build-xg first');
+  const minShots = lookup.minShotsPerBucket || 30;
+  const buckets = lookup.buckets;
+  const games = await env.NHL_CACHE.get(`team_pbp_${team}_${CURRENT_SEASON}`, 'json') as any[] | null;
+  if (!Array.isArray(games)) {
+    partial.teamsProcessed.push(team);
+    await env.NHL_CACHE.put(LEAGUE_GRID_PARTIAL_KEY(), JSON.stringify(partial), { expirationTtl: 24 * 60 * 60 });
+    return;
+  }
+  const cellW = 100 / LEAGUE_GRID_W;
+  const cellH = 85 / LEAGUE_GRID_H;
+  const seen = new Set<number>(partial.seenGameIds);
+  for (const g of games) {
+    if (!g?.gameId || seen.has(g.gameId)) continue;
+    seen.add(g.gameId);
+    const recs = extractShotsFromGame(g);
+    for (const s of recs) {
+      const normX = Math.abs(s.xCoord);
+      const normY = s.xCoord < 0 ? -s.yCoord : s.yCoord;
+      const gx = Math.min(LEAGUE_GRID_W - 1, Math.max(0, Math.floor(normX / cellW)));
+      const gy = Math.min(LEAGUE_GRID_H - 1, Math.max(0, Math.floor((normY + 42.5) / cellH)));
+      const xg = lookupEmpiricalXg(buckets, s, minShots);
+      partial.xgGrid[gx * LEAGUE_GRID_H + gy] += xg;
+      partial.shotGrid[gx * LEAGUE_GRID_H + gy] += 1;
+      partial.totalXg += xg;
+      partial.totalShots += 1;
+    }
+  }
+  partial.seenGameIds = Array.from(seen);
+  partial.teamsProcessed.push(team);
+  await env.NHL_CACHE.put(LEAGUE_GRID_PARTIAL_KEY(), JSON.stringify(partial), { expirationTtl: 24 * 60 * 60 });
+}
+
+async function finalizeLeagueXgGrid(env: Env): Promise<void> {
+  const partial = await loadLeagueGridPartial(env);
+  const out: LeagueXgGridArtifact = {
+    schemaVersion: 1,
+    season: CURRENT_SEASON,
+    computedAt: new Date().toISOString(),
+    gamesAnalyzed: partial.seenGameIds.length,
+    totalShots: partial.totalShots,
+    totalXg: partial.totalXg,
+    baselineXgPerShot: partial.totalShots > 0 ? partial.totalXg / partial.totalShots : 0,
+    gridWidth: LEAGUE_GRID_W,
+    gridHeight: LEAGUE_GRID_H,
+    xgGrid: partial.xgGrid,
+    shotGrid: partial.shotGrid,
+  };
+  await env.NHL_CACHE.put(`league_xg_grid_${CURRENT_SEASON}`, JSON.stringify(out), {
+    expirationTtl: 7 * 24 * 60 * 60,
+  });
+}
+
+async function resetLeagueXgGridPartial(env: Env): Promise<void> {
+  await env.NHL_CACHE.delete(LEAGUE_GRID_PARTIAL_KEY());
+}
+
+async function buildLeagueXgGrid(env: Env): Promise<void> {
+  console.log('Building league xG grid (20×8 spatial baseline)...');
+  const startTime = Date.now();
+  const lookup = await env.NHL_CACHE.get(`xg_lookup_${CURRENT_SEASON}`, 'json') as
+    | { buckets?: Record<string, { rate: number; shots: number }>; baselineRate?: number; minShotsPerBucket?: number }
+    | null;
+  if (!lookup || !lookup.buckets) {
+    console.error('League xG grid: xg_lookup not built yet. Skipping.');
+    return;
+  }
+  const minShots = lookup.minShotsPerBucket || 30;
+  const buckets = lookup.buckets;
+
+  const xgGrid = new Float64Array(LEAGUE_GRID_W * LEAGUE_GRID_H);
+  const shotGrid = new Float64Array(LEAGUE_GRID_W * LEAGUE_GRID_H);
+  const cellW = 100 / LEAGUE_GRID_W;
+  const cellH = 85 / LEAGUE_GRID_H;
+  let totalShots = 0;
+  let totalXg = 0;
+  const seenGames = new Set<number>();
+
+  const BATCH = 4;
+  for (let i = 0; i < NHL_TEAMS.length; i += BATCH) {
+    const batch = NHL_TEAMS.slice(i, i + BATCH);
+    const pbps = await Promise.all(
+      batch.map(t => env.NHL_CACHE.get(`team_pbp_${t}_${CURRENT_SEASON}`, 'json') as Promise<any[] | null>)
+    );
+    for (const games of pbps) {
+      if (!Array.isArray(games)) continue;
+      for (const g of games) {
+        if (!g?.gameId || seenGames.has(g.gameId)) continue;
+        seenGames.add(g.gameId);
+        const recs = extractShotsFromGame(g);
+        for (const s of recs) {
+          // Mirror to offensive half (positive X) and flip Y when X<0 so
+          // the grid shows shots from the player's own offensive zone.
+          const normX = Math.abs(s.xCoord);
+          const normY = s.xCoord < 0 ? -s.yCoord : s.yCoord;
+          const gx = Math.min(LEAGUE_GRID_W - 1, Math.max(0, Math.floor(normX / cellW)));
+          const gy = Math.min(LEAGUE_GRID_H - 1, Math.max(0, Math.floor((normY + 42.5) / cellH)));
+          const xg = lookupEmpiricalXg(buckets, s, minShots);
+          xgGrid[gx * LEAGUE_GRID_H + gy] += xg;
+          shotGrid[gx * LEAGUE_GRID_H + gy] += 1;
+          totalXg += xg;
+          totalShots += 1;
+        }
+      }
+    }
+  }
+
+  const out: LeagueXgGridArtifact = {
+    schemaVersion: 1,
+    season: CURRENT_SEASON,
+    computedAt: new Date().toISOString(),
+    gamesAnalyzed: seenGames.size,
+    totalShots,
+    totalXg,
+    baselineXgPerShot: totalShots > 0 ? totalXg / totalShots : 0,
+    gridWidth: LEAGUE_GRID_W,
+    gridHeight: LEAGUE_GRID_H,
+    xgGrid: Array.from(xgGrid),
+    shotGrid: Array.from(shotGrid),
+  };
+  await env.NHL_CACHE.put(`league_xg_grid_${CURRENT_SEASON}`, JSON.stringify(out), {
+    expirationTtl: 7 * 24 * 60 * 60,
+  });
+  const dur = Math.round((Date.now() - startTime) / 1000);
+  console.log(`League xG grid built: ${seenGames.size} games, ${totalShots} shots, baseline ${out.baselineXgPerShot.toFixed(4)} xG/shot, in ${dur}s`);
+}
+
+// ============================================================================
 // WINS ABOVE REPLACEMENT — data-driven aggregators
 // ============================================================================
 //
@@ -2592,6 +2906,14 @@ interface WARSkaterRow {
   assistedShotG_5v5?: number;
   assistedShotIxG_5v5?: number;
   assistedShotG_total?: number;
+  // v6.2: per-strength SECONDARY-assist (A2) aggregates. Mirror the A1
+  // residual fields so warService can switch the secondaryPlaymaking
+  // component from the volume formula `A2 × α₂` (which structurally
+  // overlaps with RAPM on-ice xGF) to the residual form
+  // `(assistedShotG_5v5_A2 − assistedShotIxG_5v5_A2) × α₂`. Residual
+  // is orthogonal to RAPM by construction (RAPM regresses xGF, not GF).
+  assistedShotG_5v5_A2?: number;
+  assistedShotIxG_5v5_A2?: number;
 }
 
 interface WARGoalieRow {
@@ -2880,6 +3202,17 @@ async function buildWARTables(env: Env): Promise<{
                   let ra = skaters.get(a2);
                   if (!ra) { ra = blankSkaterRow(a2); skaters.set(a2, ra); }
                   ra.secondaryAssists += 1;
+                  // v6.2 — A2 residual fields. Mirror the A1 emission so
+                  // warService can switch secondaryPlaymaking from the
+                  // volume formula (A2 × α₂) to the residual form
+                  // (A2_assistedG_5v5 − A2_assistedIxG_5v5) × α₂. The
+                  // residual is orthogonal to RAPM by construction, which
+                  // closes the structural overlap audit flagged in
+                  // HANDOFF-RAPM-ROADMAP.md / the WAR double-counting audit.
+                  if (strength === '5v5') {
+                    ra.assistedShotG_5v5_A2 = (ra.assistedShotG_5v5_A2 || 0) + 1;
+                    ra.assistedShotIxG_5v5_A2 = (ra.assistedShotIxG_5v5_A2 || 0) + xg;
+                  }
                 }
               }
 
@@ -3381,7 +3714,16 @@ async function buildWARChunkTeam(env: Env, team: string): Promise<void> {
                   ra.assistedShotIxG_5v5 = (ra.assistedShotIxG_5v5 || 0) + xg;
                 }
               }
-              if (a2) getOrCreateSkater(a2).secondaryAssists += 1;
+              if (a2) {
+                const ra = getOrCreateSkater(a2);
+                ra.secondaryAssists += 1;
+                if (strength === '5v5') {
+                  // v6.2 A2 residual fields — see comment in the parallel
+                  // emit site above. Same fields, same purpose.
+                  ra.assistedShotG_5v5_A2 = (ra.assistedShotG_5v5_A2 || 0) + 1;
+                  ra.assistedShotIxG_5v5_A2 = (ra.assistedShotIxG_5v5_A2 || 0) + xg;
+                }
+              }
             }
             if (type === 'goal' || type === 'shot-on-goal') {
               const goalieId = d.goalieInNetId;
@@ -4077,6 +4419,18 @@ async function handleScheduled(event: ScheduledEvent, env: Env, ctx: ExecutionCo
     console.log(`xG lookup complete in ${xgDuration}s`);
   } catch (error) {
     console.error('xG lookup build failed:', error);
+  }
+
+  // Phase 3b: League xG grid (20×8 spatial baseline for the share card's
+  // SpatialSignaturePanel isolated-impact rendering). Depends on xg_lookup
+  // being built first — runs immediately after Phase 3.
+  console.log('Phase 3b: League xG grid (spatial baseline)...');
+  const gridStart = Date.now();
+  try {
+    await buildLeagueXgGrid(env);
+    console.log(`League xG grid complete in ${Math.round((Date.now() - gridStart) / 1000)}s`);
+  } catch (error) {
+    console.error('League xG grid build failed:', error);
   }
 
   // Phase 4: League-wide Attack DNA distribution (for percentile-rank axes)

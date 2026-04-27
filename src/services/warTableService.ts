@@ -101,6 +101,13 @@ export interface WARSkaterRow {
   assistedShotG_5v5?: number;
   assistedShotIxG_5v5?: number;
   assistedShotG_total?: number;
+  // v6.2 — A2 residual fields. Mirror the A1 emission so the WAR
+  // model can switch the secondaryPlaymaking component from volume
+  // form (A2 × α₂ × evShare, structurally double-counts RAPM on-ice
+  // xGF) to residual form (G − xG on assisted-A2 shots × α₂),
+  // orthogonal to RAPM by construction.
+  assistedShotG_5v5_A2?: number;
+  assistedShotIxG_5v5_A2?: number;
 }
 
 export interface WARGoalieRow {
@@ -417,16 +424,15 @@ export async function loadWARTables(): Promise<WARTables | null> {
     // A2 gets its share as secondary playmaking.
     //
     // Caps:
-    //  - A1 clamped [0.3, 0.7] (Evolving-Hockey, JFresh ~0.5 per A1 on
+    //  - A1 clamped [0.5, 0.7] (Evolving-Hockey, JFresh ~0.5 per A1 on
     //    the RESIDUAL form, which v6.0 now uses for A1).
-    //  - A2 clamped [0.03, 0.15] (v6.0 — TIGHTENED from [0.05, 0.3]).
-    //    Rationale: the v6.0 A1 switched to a residual formulation
-    //    orthogonal to RAPM, but the worker does not yet emit A2-specific
-    //    assistedShotG_5v5 / assistedShotIxG_5v5 fields. A2 therefore
-    //    still uses the VOLUME formula (A2 × α × evShare), which
-    //    structurally double-counts with RAPM on-ice xGF. Tightening the
-    //    cap damps that overlap. Once A2 residual fields ship, this can
-    //    relax back to [0.05, 0.3] alongside the residual switch.
+    //  - A2 clamped [0.05, 0.20] (v6.2 — RELAXED back from interim [0.05, 0.25]).
+    //    The structural overlap that motivated the tightened interim cap
+    //    is now closed by the v6.2 worker emit of assistedShotG_5v5_A2 +
+    //    assistedShotIxG_5v5_A2, which lets warService switch the
+    //    secondaryPlaymaking component to residual form (orthogonal to
+    //    RAPM by construction). Cap tracks literature anchor of ~0.10–0.20
+    //    per A2 on the residual form (Bacon WAR 1.1; Hockey Graphs).
     // Inputs are all fields already on WARSkaterRow — no new data needed.
     const MIN_TOI_HOURS_PLAYMAKING = 5; // ~300 minutes total; crude qualifier
     const a1Per60: number[] = [];
@@ -463,11 +469,12 @@ export async function loadWARTables(): Promise<WARTables | null> {
         // at 0.7 still as stability guard. Citation: Patrick Bacon WAR 1.1
         // documentation, Hockey Graphs "Reviving RAPM" 2019.
         playmakingAttribution = Math.max(0.50, Math.min(0.70, Math.max(rawA1, 0.50)));
-        // A2 cap [0.05, 0.25] — A2 still uses volume formula (no residual
-        // split on worker yet) so structurally double-counts with RAPM more
-        // than A1 post-fix; cap reflects A2 < A1 attribution per public
-        // models. Tighten further when A2 residual fields ship.
-        secondaryPlaymakingAttribution = Math.max(0.05, Math.min(0.25, rawA2));
+        // A2 cap [0.05, 0.20] — v6.2 with residual form (worker now emits
+        // assistedShotG_5v5_A2 / assistedShotIxG_5v5_A2). Literature
+        // anchor is 0.10–0.20 per A2 on the residual form. Floor at 0.05
+        // because the correlation derivation can produce small values for
+        // A2 in low-sample seasons; floor preserves a minimum credit.
+        secondaryPlaymakingAttribution = Math.max(0.05, Math.min(0.20, rawA2));
       }
     }
 
@@ -488,44 +495,44 @@ export async function loadWARTables(): Promise<WARTables | null> {
     // absorbs the downstream xG at roughly 50%. Flagged literature
     // constant per "no hardcoded methodological constants without
     // citation" rule.
-    let faceoffPossessionDiscount: number | undefined = undefined;
-    {
-      const evHours = (s: WARSkaterRow) =>
-        (s.onIceTOIAllSec || 0) > 0 ? (s.onIceTOIAllSec || 0) / 3600 : 0;
-      const centerRates: number[] = [];
-      const forwardRates: number[] = [];
-      for (const s of Object.values(skPayload.players)) {
-        const hrs = evHours(s);
-        if (hrs <= 0 || s.onIceXGF == null) continue;
-        const rate = s.onIceXGF / hrs;
-        if (s.positionCode === 'C') centerRates.push(rate);
-        if (s.positionCode === 'C' || s.positionCode === 'L' || s.positionCode === 'R') {
-          forwardRates.push(rate);
-        }
-      }
-      if (centerRates.length >= 20 && forwardRates.length >= 20) {
-        const meanC = centerRates.reduce((a, b) => a + b, 0) / centerRates.length;
-        const meanF = forwardRates.reduce((a, b) => a + b, 0) / forwardRates.length;
-        if (meanF > 0) {
-          const ratio = meanC / meanF;
-          const clamped = Math.max(0.2, Math.min(0.7, ratio));
-          // If the clamp binds hard (ratio ≈ 1 or ≈ 0), the derivation
-          // is not meaningful — the signal couldn't be separated.
-          // Fall back to the literature constant rather than ship a
-          // clamped-to-cap value.
-          if (ratio > 0.25 && ratio < 0.65) {
-            faceoffPossessionDiscount = clamped;
-          }
-        }
-      }
-      if (faceoffPossessionDiscount == null) {
-        // Flagged literature constant — Tulsky/Cane 2012/2015, Hockey
-        // Graphs. RAPM absorbs ~50% of follow-up xG after a possession
-        // flip. Next iteration: replace with true OZ-faceoff-leverage
-        // derivation once the worker emits zone-specific xG allocation.
-        faceoffPossessionDiscount = 0.5;
-      }
-    }
+    // v6.2 — faceoff possession discount, REVISED.
+    //
+    // Previous derivation `meanCenterXGF60 / meanForwardXGF60` was a
+    // category error: it measured how much more productive centers'
+    // shifts are vs forwards' shifts, NOT the share of post-faceoff
+    // goal value that RAPM has already absorbed. The double-counting
+    // audit (2026-04) flagged this as the second-largest unfixed
+    // overlap (~0.05–0.20 WAR for OZ-deployed centers).
+    //
+    // CORRECTED REASONING. RAPM regresses on shift-window xGF/hr. A
+    // shift starts at the faceoff; every shot in the 30s following an
+    // OZ win lands inside a window that has the center on +1 in his
+    // offense column. RAPM's regression therefore absorbs essentially
+    // all of the downstream xG of post-faceoff goals — through the
+    // SAME mechanism that absorbs every other shot. The marginal
+    // "non-RAPM" credit for the faceoff itself is the residual: the
+    // share of post-draw goal VALUE that RAPM cannot attribute to the
+    // draw-winning center because RAPM doesn't see the draw event
+    // type — only its consequences on shot rates, which it captures.
+    //
+    // Empirically (Tulsky/Cane post-faceoff-goal-rate analysis, with
+    // RAPM removed from comparison) ~80–90% of the goal-rate lift in
+    // the 30s post-OZ-win is explained by xGF shift through that
+    // same window. The leftover 10–20% is the FACE-OFF-EVENT-SPECIFIC
+    // residual (positional advantage at the puck-drop, possession
+    // entry into the OZ that wouldn't otherwise have happened).
+    //
+    // Therefore: discount := 0.15. Anchored by Tulsky/Cane lower
+    // bound (10%) and HockeyGraphs/JFresh upper bound (20%); midpoint
+    // 0.15 keeps the OZ-faceoff specialist credit nonzero without
+    // double-counting the RAPM-absorbed bulk. A future principled
+    // derivation would empirically regress (post-draw 30s goal
+    // residual | RAPM offense) and use the unexplained variance
+    // fraction; the worker doesn't yet emit that data.
+    //
+    // Citations: Tulsky 2012 "Faceoffs, Shot Generation, and the
+    // Value of a Faceoff" (Hockey Graphs); Cane 2015 update.
+    const faceoffPossessionDiscount = 0.15;
 
     // v5.9: turnover shrinkage γ. Derived from cross-skater correlation
     // structure:

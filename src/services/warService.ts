@@ -312,31 +312,40 @@ export function computeSkaterWAR(
     notes.push('Playmaking unavailable — attribution and leagueIxGPerShot both missing.');
   }
 
-  // --- Component 2b: Secondary Playmaking — VOLUME form, TIGHTER CAP
-  // (v6.0 interim).
+  // --- Component 2b: Secondary Playmaking — RESIDUAL form (v6.2).
   //
-  // Why still volume: the worker does NOT yet emit A2-specific
-  // assistedShotG_5v5 / assistedShotIxG_5v5 equivalents. We only have
-  // per-A1 per-strength splits. Until that lands, we retain the
-  // volume × attribution × evShare formula but tighten the attribution
-  // cap from [0.05, 0.30] to [0.03, 0.15] (done in warTableService)
-  // because:
-  //   1. Without residual subtraction, this formula structurally double-
-  //      counts with RAPM on-ice xGF worse than primary did pre-fix.
-  //      Tighter cap damps the overlap.
-  //   2. A2 is inherently less causal than A1 — the passer two passes
-  //      before the shot is a weaker setup signal than the last pass.
-  //   3. Literature (EH/JFresh) converges ~0.2-0.3 per A2 on the RESIDUAL
-  //      form. Our volume × attribution scales per-A1-equivalent, so the
-  //      effective per-A2 goal credit at α=0.15 × evShare(0.8) ≈ 0.12 is
-  //      appropriately below residual-form literature values.
+  // Mirrors the v6.0 fix on primary playmaking. The previous volume
+  // formula `A2 × α₂ × evShare` was the largest unfixed double-count in
+  // the model (audit estimate: ~0.6 WAR inflation for elite secondary-
+  // assist forwards). The full goal-equivalent credit overlapped with
+  // RAPM's on-ice xGF coefficient because RAPM has already absorbed the
+  // xG portion of the assisted shot.
   //
-  // Future iteration: once the worker emits assistedShotG_5v5_A2 and
-  // assistedShotIxG_5v5_A2, switch this to residual form matching
-  // primary playmaking and restore the [0.05, 0.30] cap.
+  // Residual form: `(assistedShotG_5v5_A2 − assistedShotIxG_5v5_A2) × α₂`.
+  // This is structurally orthogonal to RAPM — RAPM's response is xGF/hr,
+  // never GF/hr, so the (G − xG) residual cannot have been absorbed.
+  // The same orthogonality argument used for finishing and primary
+  // playmaking applies here.
+  //
+  // With the structural overlap closed, the cap relaxes from the
+  // interim [0.05, 0.25] back toward literature [0.05, 0.20] — set in
+  // warTableService.ts. Falls back to volume form when the worker
+  // hasn't yet emitted the A2 residual fields (older cached tables).
   let secondaryPlaymaking = 0;
-  if (typeof context.secondaryPlaymakingAttribution === 'number') {
+  if (
+    typeof row.assistedShotG_5v5_A2 === 'number' &&
+    typeof row.assistedShotIxG_5v5_A2 === 'number' &&
+    typeof context.secondaryPlaymakingAttribution === 'number'
+  ) {
+    const a2Residual = row.assistedShotG_5v5_A2 - row.assistedShotIxG_5v5_A2;
+    secondaryPlaymaking = a2Residual * context.secondaryPlaymakingAttribution;
+  } else if (typeof context.secondaryPlaymakingAttribution === 'number') {
+    // Legacy fallback — old artifacts without A2 residual fields. Scales
+    // by evShare to keep the volume credit roughly EV-anchored.
     secondaryPlaymaking = row.secondaryAssists * context.secondaryPlaymakingAttribution * evShareOfTOI;
+    if (row.secondaryAssists > 0) {
+      notes.push('Secondary playmaking using legacy volume form (worker artifact missing assistedShot_*_A2 fields).');
+    }
   } else if (row.secondaryAssists > 0) {
     notes.push('Secondary playmaking unavailable — secondaryPlaymakingAttribution missing.');
   }

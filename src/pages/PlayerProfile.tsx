@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toPng } from 'html-to-image';
 import { usePlayerStats } from '../hooks/usePlayerStats';
@@ -74,8 +74,20 @@ function formatSeasonDisplay(season: number): string {
 function PlayerProfile() {
   const { playerId } = useParams<{ playerId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { addPlayer } = useComparison();
-  const [activeTab, setActiveTab] = useState<'stats' | 'charts' | 'analytics' | 'advanced' | 'edge' | 'deep' | 'card'>('stats');
+  // Initial tab respects ?tab=card so deep links + cross-player nav
+  // from the share-card "Search Another Player" widget land directly
+  // on the card view. Without this, navigate(`/player/${id}`) followed
+  // by setActiveTab on the OLD component does nothing — the new
+  // component mounts with the default ('stats').
+  const initialTabFromQuery = (() => {
+    const t = searchParams.get('tab');
+    if (t === 'card' || t === 'stats' || t === 'charts' || t === 'analytics'
+        || t === 'advanced' || t === 'edge' || t === 'deep') return t;
+    return 'stats' as const;
+  })();
+  const [activeTab, setActiveTab] = useState<'stats' | 'charts' | 'analytics' | 'advanced' | 'edge' | 'deep' | 'card'>(initialTabFromQuery);
   const [isSharing, setIsSharing] = useState(false);
   const [warTables, setWarTables] = useState<WARTables | null>(null);
   const [rapm, setRapm] = useState<RAPMArtifact | null>(null);
@@ -109,22 +121,13 @@ function PlayerProfile() {
   }, []);
   const cardRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
-  const [cardZoom, setCardZoom] = useState(1);
-
-  // Dynamically compute zoom so the 900px card always fits the container.
-  // Depends on activeTab because previewRef.current is null until the card tab renders.
-  useEffect(() => {
-    const el = previewRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        const available = entry.contentRect.width;
-        setCardZoom(Math.min(1, available / 900));
-      }
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [activeTab]);
+  // (cardZoom removed) — PlayerAnalyticsCard.css uses container
+  // queries (`@container card`) to respond to its own width, so the
+  // card adapts its layout (stacking, font sizes, aspect-ratio) at
+  // narrow widths without needing a JS-driven CSS `zoom` hack. The
+  // share export still clones the card into a 1080×1080 wrapper, so
+  // the cloned card is over the 720px container-query breakpoint and
+  // keeps the desktop layout regardless of the user's viewport.
 
   const { data: player, isLoading, error } = usePlayerStats(
     playerId ? parseInt(playerId, 10) : null
@@ -140,10 +143,19 @@ function PlayerProfile() {
     return computeSkaterWAR(row, ctx, rapm);
   }, [warTables, player, rapm, rapmAdjustedContext]);
 
-  // Reset active tab when player changes
+  // Reset active tab when player changes — but respect ?tab=card so
+  // the share-card "Search Another Player" widget can land directly on
+  // the new player's card view. Without this, the unconditional reset
+  // to 'stats' killed the initial-state fix that read the query param.
   useEffect(() => {
-    setActiveTab('stats');
-  }, [playerId]);
+    const t = searchParams.get('tab');
+    if (t === 'card' || t === 'stats' || t === 'charts' || t === 'analytics'
+        || t === 'advanced' || t === 'edge' || t === 'deep') {
+      setActiveTab(t);
+    } else {
+      setActiveTab('stats');
+    }
+  }, [playerId, searchParams]);
 
 
   // Handle share functionality
@@ -1466,14 +1478,16 @@ function PlayerProfile() {
                   <PlayerSearch
                     placeholder="Search for a player..."
                     onPlayerSelect={(selectedPlayer) => {
-                      navigate(`/player/${selectedPlayer.playerId}`);
-                      setActiveTab('card');
+                      // ?tab=card so the new player profile mounts on
+                      // the card tab — setActiveTab here would just
+                      // mutate the OLD (about-to-unmount) component.
+                      navigate(`/player/${selectedPlayer.playerId}?tab=card`);
                     }}
                   />
                 </div>
 
                 <div className="card-preview" ref={previewRef}>
-                  <div ref={cardRef} style={{ zoom: cardZoom }}>
+                  <div ref={cardRef}>
                   <PlayerAnalyticsCard
                     playerId={player.playerId}
                     playerName={`${player.firstName.default} ${player.lastName.default}`}

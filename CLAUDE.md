@@ -6,6 +6,23 @@ NHL analytics dashboard with advanced stats, EDGE tracking, and Attack DNA profi
 
 ---
 
+## Read this first on any non-trivial run
+
+**`HANDOFF-RAPM-ROADMAP.md`** at the repo root is the authoritative,
+chronologically-updated record of what's been shipped to the WAR /
+RAPM / share-card pipeline. It documents the rookie-prior research,
+the Magnus 9 EV gap analysis, the WAR double-counting audit, the
+in-flight tier of structural fixes (T1a entry prior, T1c age-bell
+precision, T2b score-state covariates, A2 residual form, faceoff
+discount), and what's deferred. **If you're touching `warService.ts`,
+`build-rapm.cjs`, the share card, or the worker WAR pipeline, read
+that doc before making changes** — it'll save you from re-deriving
+methodology decisions or stepping on a structural firewall (the
+"RAPM regresses xGF/hr, not GF/hr" orthogonality argument is
+load-bearing for several components).
+
+---
+
 ## Hard Rules
 
 1. **NO MOCK DATA.** Every value displayed must come from a real API response or be computed from real data. No `Math.random()`, no synthetic events, no fabricated stats. If data isn't available, show an empty state.

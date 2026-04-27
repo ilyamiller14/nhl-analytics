@@ -48,6 +48,17 @@ export interface RAPMPlayerEntry {
   offenseStandard?: number;
   defenseStandard?: number;
   positionCohort?: 'F' | 'D';
+  // Schema v4 (Phase 2 rate/quality split) — auxiliary regressions on
+  // the same design. rateOffense / rateDefense are shot-rate impacts
+  // (shots/60 lift / suppressed); qualityOffense / qualityDefense are
+  // shot-quality impacts (xG-per-shot lift / suppressed). NOT summed
+  // into WAR — descriptive layer for /advanced leaderboards and the
+  // SpatialSignaturePanel. Defense fields are sign-flipped so
+  // "positive = good" matches the offense / defense convention.
+  rateOffense?: number;
+  rateDefense?: number;
+  qualityOffense?: number;
+  qualityDefense?: number;
 }
 
 export interface RAPMPriorMetadata {
@@ -61,11 +72,47 @@ export interface RAPMPriorMetadata {
     F: { offense: number; defense: number; anchorCount: number };
     D: { offense: number; defense: number; anchorCount: number };
   };
+  // T1a — McCurdy entry prior. Players with no prior-season NHL games
+  // get μ_offense = offenseFraction × leagueBaselineXGF60 and
+  // μ_defense = (sign-flipped) defenseFraction × leagueBaselineXGA60
+  // instead of the cohort mean. Null when the prior-season skater list
+  // wasn't available at build time (rookie detection disabled).
+  entryPrior?: {
+    priorSeason: string;            // e.g. "20242025"
+    priorSeasonSkaterCount: number; // size of the "veteran" set
+    rookieCount: number;            // # qualified players treated as rookies in this build
+    offenseFraction: number;        // McCurdy default −0.10
+    defenseFraction: number;        // McCurdy default +0.10 (raw); reported here sign-flipped
+    offense: number;                // resolved μ_offense in raw xGF/60 units
+    defense: number;                // resolved μ_defense in flipped (positive=good) xGA/60 units
+  } | null;
+  // T1c — age-bell × TOI prior precision multiplier. Multiplied onto the
+  // existing TOI-based ρ so 24-yo coefficients get the strongest prior
+  // pull (data dominates) and 18 / 32+ get the weakest (career edges →
+  // prior dominates). `ageMultipliedCount` is how many qualified players
+  // had a known age; the rest defaulted to multiplier 1.0.
+  ageBell?: {
+    peak: number;                   // typically 24
+    knots: Record<number, number>;  // age → multiplier knots, e.g. {18: 0.2, 24: 1.0, 32: 0.2}
+    ageMultipliedCount: number;
+    qualifiedCount: number;
+  };
+}
+
+// Phase 1 (T2b) — score-state and venue nuisance covariates regressed
+// out of the player coefficients. Player `offense` / `defense` are now
+// "score-tied, road-team residuals" rather than "average context".
+export interface RAPMCovariates {
+  // Per-period score-state lifts in xGF/60. 9 entries: 3 states ({trailing,
+  // tied, leading}) × 3 periods. OT (period 4) is folded into period 3.
+  scoreState: { state: 'trailing' | 'tied' | 'leading'; period: 1 | 2 | 3; lift: number }[];
+  // Home-team venue lift in xGF/60 (small but real shot-rate boost).
+  venue: number;
 }
 
 export interface RAPMArtifact {
   season: string;              // "20252026"
-  schemaVersion: 1 | 2 | 3;    // v2 adds PP/PK fields; v3 adds prior-informed (Bacon) ridge
+  schemaVersion: 1 | 2 | 3 | 4;    // v2: PP/PK; v3: Bacon ridge prior; v4: T2b covariates
   computedAt: string;
   gamesAnalyzed: number;
   shiftsAnalyzed: number;
@@ -74,6 +121,7 @@ export interface RAPMArtifact {
   lambda: number;
   lambdaSelection: 'empirical-bayes' | '5fold-cv';
   prior?: RAPMPriorMetadata | null;  // schema v3
+  covariates?: RAPMCovariates;       // schema v4
   leagueBaselineXGF60: number;
   leagueBaselineXGA60: number;
   leaguePpXgfPerMin?: number;  // schema v2: league PP xG / team-minute of PP
@@ -128,7 +176,7 @@ function isValidArtifact(obj: unknown): obj is RAPMArtifact {
   const a = obj as Partial<RAPMArtifact>;
   return (
     typeof a.season === 'string' &&
-    (a.schemaVersion === 1 || a.schemaVersion === 2 || a.schemaVersion === 3) &&
+    (a.schemaVersion === 1 || a.schemaVersion === 2 || a.schemaVersion === 3 || a.schemaVersion === 4) &&
     typeof a.players === 'object' &&
     a.players !== null
   );

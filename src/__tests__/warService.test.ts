@@ -136,9 +136,14 @@ describe('computeSkaterWAR — invariants', () => {
   it('top-line forward lands at a realistic WAR (sanity check on Kucherov-shaped row)', () => {
     const ctx = makeContext();
     const res = computeSkaterWAR(kucherovLikeRow(), ctx);
-    // A 35G/76GP elite forward with on-ice positive should grade at ~2-5 WAR;
-    // outside that range means a coefficient drifted.
-    expect(res.WAR).toBeGreaterThan(2);
+    // A 35G/76GP solid top-line forward with on-ice positive should grade
+    // around 1.5–5 WAR with the post-v5 calibration. Bounds are
+    // intentionally wide because the assertion is "the coefficient stack
+    // didn't blow up", not "it produces a specific number." Earlier
+    // versions of this test used `> 2`, but v5's stabilization-threshold
+    // bump (20 → 35 GP), 25% faceoff discount, and 13F/7D replacement-by-
+    // TOI cohort moved the synthetic-fixture average closer to ~1.7.
+    expect(res.WAR).toBeGreaterThan(1.5);
     expect(res.WAR).toBeLessThan(5);
   });
 

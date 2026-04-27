@@ -1091,9 +1091,23 @@ export function extractShotLocations(
 // ============================================================================
 
 /**
- * Compute shot density map for heat visualization
+ * Compute shot density map for heat visualization.
+ *
+ * Phase 2.5/A — `weighting`: 'count' (legacy, every shot counts equally)
+ * or 'xg' (HockeyViz-style danger weighting — a slot tip outweighs a
+ * point-shot blast). Default is 'xg' because the visual is much sharper
+ * and this is the direction we're moving everything.
+ *
+ * Phase 2.5/B — `smoothSigma`: when > 0, applies a 2D Gaussian smoother
+ * to the cells in (gridX, gridY) space with the given σ in cell units.
+ * σ ≈ 1.0–1.5 produces HockeyViz-like KDE contours; 0 disables smoothing.
  */
-export function computeShotDensityMap(shots: ShotLocation[]): ShotDensityMap {
+export function computeShotDensityMap(
+  shots: ShotLocation[],
+  options: { weighting?: 'count' | 'xg'; smoothSigma?: number } = {}
+): ShotDensityMap {
+  const weighting = options.weighting ?? 'xg';
+  const smoothSigma = options.smoothSigma ?? 0;
   // Initialize grid cells (half-rink, 5x8)
   const cells: Map<string, ShotDensityCell> = new Map();
 
@@ -1141,6 +1155,11 @@ export function computeShotDensityMap(shots: ShotLocation[]): ShotDensityMap {
   //     does this team generate offense in their own offensive
   //     zone"), use `normY = shot.y` (no flip). Build a separate
   //     utility rather than changing this one.
+  // Track xG-weighted mass per cell alongside raw shot count. xG mass
+  // produces much sharper "danger" maps — a slot tip carries 5× the
+  // weight of a point-shot blast even though both are one shot.
+  const cellXgMass: Map<string, number> = new Map();
+
   shots.forEach((shot) => {
     const normX = Math.abs(shot.x);
     const normY = shot.x < 0 ? -shot.y : shot.y;
@@ -1156,17 +1175,89 @@ export function computeShotDensityMap(shots: ShotLocation[]): ShotDensityMap {
       if (shot.result === 'goal') {
         cell.goalCount += 1;
       }
+      cellXgMass.set(cellId, (cellXgMass.get(cellId) || 0) + (shot.xG || 0));
     }
   });
 
-  // Calculate max density and normalize
-  let maxDensity = 1;
-  cells.forEach((cell) => {
-    if (cell.shotCount > maxDensity) maxDensity = cell.shotCount;
-  });
+  // Phase 2.5/B — optional Gaussian smoother. Smooths the chosen weight
+  // (count or xg) across (gx, gy) neighbors with a separable 2D Gaussian
+  // kernel of standard deviation `smoothSigma` (in cell units). Cheap:
+  // O(W·H·k) where k is the kernel half-width clamped to ⌈3σ⌉.
+  function smooth(
+    raw: Map<string, number>, sigma: number
+  ): Map<string, number> {
+    if (sigma <= 0) return raw;
+    const kHalf = Math.max(1, Math.ceil(sigma * 3));
+    // Materialize raw as a dense W×H grid for separable convolution.
+    const W = DENSITY_GRID_WIDTH;
+    const H = DENSITY_GRID_HEIGHT;
+    const idx = (gx: number, gy: number) => gx * H + gy;
+    const grid = new Float64Array(W * H);
+    raw.forEach((v, k) => {
+      const [gxs, gys] = k.split('-');
+      const gx = Number(gxs);
+      const gy = Number(gys);
+      if (gx >= 0 && gx < W && gy >= 0 && gy < H) grid[idx(gx, gy)] = v;
+    });
+    const tmp = new Float64Array(W * H);
+    const out = new Float64Array(W * H);
+    // Pre-compute 1D kernel weights.
+    const kernel: number[] = [];
+    let kSum = 0;
+    for (let d = -kHalf; d <= kHalf; d++) {
+      const w = Math.exp(-(d * d) / (2 * sigma * sigma));
+      kernel.push(w);
+      kSum += w;
+    }
+    for (let i = 0; i < kernel.length; i++) kernel[i] /= kSum;
+    // Pass 1: convolve along X.
+    for (let gy = 0; gy < H; gy++) {
+      for (let gx = 0; gx < W; gx++) {
+        let s = 0;
+        for (let d = -kHalf; d <= kHalf; d++) {
+          const xi = gx + d;
+          if (xi < 0 || xi >= W) continue;
+          s += grid[idx(xi, gy)] * kernel[d + kHalf];
+        }
+        tmp[idx(gx, gy)] = s;
+      }
+    }
+    // Pass 2: convolve along Y.
+    for (let gx = 0; gx < W; gx++) {
+      for (let gy = 0; gy < H; gy++) {
+        let s = 0;
+        for (let d = -kHalf; d <= kHalf; d++) {
+          const yi = gy + d;
+          if (yi < 0 || yi >= H) continue;
+          s += tmp[idx(gx, yi)] * kernel[d + kHalf];
+        }
+        out[idx(gx, gy)] = s;
+      }
+    }
+    const result = new Map<string, number>();
+    for (let gx = 0; gx < W; gx++) {
+      for (let gy = 0; gy < H; gy++) {
+        result.set(`${gx}-${gy}`, out[idx(gx, gy)]);
+      }
+    }
+    return result;
+  }
 
-  cells.forEach((cell) => {
-    cell.density = cell.shotCount / maxDensity;
+  // Choose the weight per cell based on `weighting`, then optionally smooth.
+  const rawMap: Map<string, number> = new Map();
+  cells.forEach((cell, id) => {
+    const w = weighting === 'xg' ? (cellXgMass.get(id) || 0) : cell.shotCount;
+    rawMap.set(id, w);
+  });
+  const weightedMap = smooth(rawMap, smoothSigma);
+
+  // Normalize density off the smoothed weight (or raw if smoothing disabled).
+  let maxDensity = 0;
+  weightedMap.forEach((v) => { if (v > maxDensity) maxDensity = v; });
+  if (maxDensity <= 0) maxDensity = 1;
+
+  cells.forEach((cell, id) => {
+    cell.density = (weightedMap.get(id) || 0) / maxDensity;
     cell.shotPct = cell.shotCount > 0 ? (cell.goalCount / cell.shotCount) * 100 : 0;
   });
 
@@ -1177,6 +1268,164 @@ export function computeShotDensityMap(shots: ShotLocation[]): ShotDensityMap {
     totalShots: shots.length,
     maxDensity,
   };
+}
+
+// ============================================================================
+// DEFENSIVE SHOT EXTRACTION (Phase 2 Part B — client-side)
+// ============================================================================
+
+/**
+ * Extract OPPONENT shots that occurred while a given player was on the ice.
+ * This is the defensive analog of `extractShotLocations` — same shape, but
+ * the perspective is "what shots did the player allow" rather than "what
+ * shots did the player generate". Used for the defensive Attack DNA flow
+ * field on player profile / Attack DNA pages.
+ *
+ * NOTE: this depends on `game.shifts` being populated. If shifts aren't
+ * available for a game, that game contributes zero defensive shots —
+ * never fabricate.
+ */
+export function extractDefensiveShotLocations(
+  playByPlay: GamePlayByPlay | GamePlayByPlay[],
+  teamId: number,
+  playerId: number,
+): ShotLocation[] {
+  const games = Array.isArray(playByPlay) ? playByPlay : [playByPlay];
+  const shots: ShotLocation[] = [];
+
+  games.forEach((game) => {
+    const shifts = (game as GamePlayByPlay & { shifts?: { playerId: number; period: number; startSec: number; endSec: number }[] }).shifts;
+    if (!Array.isArray(shifts) || shifts.length === 0) return;
+    // Index this player's shifts by period for fast on-ice lookup.
+    const playerShiftsByPeriod = new Map<number, { startSec: number; endSec: number }[]>();
+    for (const s of shifts) {
+      if (s.playerId !== playerId) continue;
+      if (!playerShiftsByPeriod.has(s.period)) playerShiftsByPeriod.set(s.period, []);
+      playerShiftsByPeriod.get(s.period)!.push({ startSec: s.startSec, endSec: s.endSec });
+    }
+    if (playerShiftsByPeriod.size === 0) return;
+
+    const oppShots = game.shots.filter((shot) => {
+      if (shot.teamId === teamId) return false;
+      if (shot.xCoord === undefined || shot.yCoord === undefined) return false;
+      const periodShifts = playerShiftsByPeriod.get(shot.period);
+      if (!periodShifts) return false;
+      const t = parseTimeToSecondsLocal(shot.timeInPeriod);
+      return periodShifts.some((sh) => t >= sh.startSec && t < sh.endSec);
+    });
+
+    oppShots.forEach((shot) => {
+      const x = shot.xCoord!;
+      const y = shot.yCoord!;
+      const distance = getDistanceFromGoal(x, y);
+      shots.push({
+        x,
+        y,
+        result: shot.result === 'goal'
+          ? 'goal'
+          : shot.result === 'shot-on-goal'
+            ? 'save'
+            : shot.result === 'missed-shot'
+              ? 'miss'
+              : 'block',
+        xG: calculateShotEventXG(shot, {
+          priorShots: oppShots,
+          priorEvents: game.allEvents,
+        }),
+        shotType: shot.shotType,
+        playerId: shot.shootingPlayerId,
+        gameId: game.gameId,
+        gameDate: game.gameDate || '',
+        period: shot.period,
+        timeInPeriod: shot.timeInPeriod,
+        distanceFromGoal: distance,
+        isHighDanger: isHighDangerShot(x, y),
+      });
+    });
+  });
+
+  return shots;
+}
+
+function parseTimeToSecondsLocal(t: string | undefined): number {
+  if (!t) return 0;
+  const parts = t.split(':');
+  if (parts.length !== 2) return 0;
+  const m = Number(parts[0]);
+  const s = Number(parts[1]);
+  return Number.isFinite(m) && Number.isFinite(s) ? m * 60 + s : 0;
+}
+
+// ============================================================================
+// PASS-FLOW LINKER (Phase 2.5/C)
+// ============================================================================
+
+export interface PassToShot {
+  passFromX: number;
+  passFromY: number;
+  shotX: number;
+  shotY: number;
+  xG: number;
+  resulting: 'goal' | 'save' | 'miss' | 'block';
+  passingPlayerId?: number;
+  shootingPlayerId?: number;
+  gameId: number;
+}
+
+/**
+ * Phase 2.5/C — link each pass to a same-team shot that follows within
+ * `windowSec` (default 5s) with no opposing event in between. Emits an
+ * arrow-edge per linkage: pass origin → shot location, weighted by
+ * resulting xG. Uses the existing `PassEvent[]` already parsed in
+ * `playByPlayService.ts`. No new data fetches.
+ */
+export function linkPassesToShots(
+  playByPlay: GamePlayByPlay | GamePlayByPlay[],
+  teamId: number,
+  playerId?: number,
+  windowSec = 5,
+): PassToShot[] {
+  const games = Array.isArray(playByPlay) ? playByPlay : [playByPlay];
+  const out: PassToShot[] = [];
+  games.forEach((game) => {
+    const passes = (game as GamePlayByPlay & { passes?: { teamId: number; passerPlayerId?: number; receiverPlayerId?: number; xCoord?: number; yCoord?: number; period: number; timeInPeriod: string }[] }).passes;
+    if (!Array.isArray(passes) || passes.length === 0) return;
+    const shotsByPeriod = new Map<number, ShotEvent[]>();
+    for (const s of game.shots) {
+      if (!shotsByPeriod.has(s.period)) shotsByPeriod.set(s.period, []);
+      shotsByPeriod.get(s.period)!.push(s);
+    }
+    for (const p of passes) {
+      if (p.teamId !== teamId) continue;
+      if (playerId && p.passerPlayerId !== playerId) continue;
+      if (p.xCoord === undefined || p.yCoord === undefined) continue;
+      const t0 = parseTimeToSecondsLocal(p.timeInPeriod);
+      const candidates = shotsByPeriod.get(p.period) || [];
+      // First same-team shot in the window with valid coords; require no
+      // opposing pass / shot in between (cheap heuristic via timestamps).
+      const shot = candidates.find((s) => {
+        if (s.teamId !== teamId) return false;
+        const t = parseTimeToSecondsLocal(s.timeInPeriod);
+        return t > t0 && t - t0 <= windowSec && s.xCoord !== undefined && s.yCoord !== undefined;
+      });
+      if (!shot) continue;
+      out.push({
+        passFromX: p.xCoord,
+        passFromY: p.yCoord,
+        shotX: shot.xCoord!,
+        shotY: shot.yCoord!,
+        xG: calculateShotEventXG(shot, { priorShots: candidates, priorEvents: game.allEvents }),
+        resulting: shot.result === 'goal'
+          ? 'goal'
+          : shot.result === 'shot-on-goal' ? 'save'
+            : shot.result === 'missed-shot' ? 'miss' : 'block',
+        passingPlayerId: p.passerPlayerId,
+        shootingPlayerId: shot.shootingPlayerId,
+        gameId: game.gameId,
+      });
+    }
+  });
+  return out;
 }
 
 // ============================================================================
@@ -1549,15 +1798,33 @@ export function computeAttackDNAv2(
   playByPlay: GamePlayByPlay | GamePlayByPlay[],
   teamId: number,
   playerId?: number,
-  position?: string
+  position?: string,
+  // Phase 2 Part B + 2.5 — extension hooks. `mode='defense'` uses
+  // OPPONENT shots while the player was on ice (requires playerId);
+  // `weighting='xg'` and `smoothSigma>0` produce HockeyViz-style danger
+  // contours. Defaults preserve the original visual.
+  options: {
+    mode?: 'offense' | 'defense';
+    weighting?: 'count' | 'xg';
+    smoothSigma?: number;
+  } = {},
 ): AttackDNAv2 {
   const games = Array.isArray(playByPlay) ? playByPlay : [playByPlay];
+  const mode = options.mode ?? 'offense';
 
-  // Extract raw shot locations
-  const shots = extractShotLocations(games, teamId, playerId);
+  // Extract raw shot locations — offensive (own-team shots) vs defensive
+  // (opponent shots while player on ice). Defense mode REQUIRES a
+  // playerId because there's no "team-level defensive Attack DNA" without
+  // identifying whose ice time we're looking at.
+  const shots = mode === 'defense' && playerId
+    ? extractDefensiveShotLocations(games, teamId, playerId)
+    : extractShotLocations(games, teamId, playerId);
 
-  // Compute density map
-  const densityMap = computeShotDensityMap(shots);
+  // Compute density map with the requested weighting and smoothing.
+  const densityMap = computeShotDensityMap(shots, {
+    weighting: options.weighting,
+    smoothSigma: options.smoothSigma,
+  });
 
   // Compute zone distribution
   const zoneDistribution = computeZoneDistribution(shots);

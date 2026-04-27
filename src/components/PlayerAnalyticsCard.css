@@ -16,7 +16,12 @@
 
   /* 1200×675 = Twitter 16:9 share target. Fluid width so the card
      renders responsively on the profile page, locked aspect-ratio so
-     every screenshot exports at the same platform-friendly shape. */
+     every screenshot exports at the same platform-friendly shape.
+     (Container-type for the @container queries below is on the parent
+     `.card-preview` wrapper, NOT on the card itself — putting it on
+     the card collapses its width because `inline-size` containment
+     prevents the `width:100%` declaration from resolving against the
+     parent's available space.) */
   width: 100%;
   max-width: 1200px;
   aspect-ratio: 16 / 9;
@@ -496,10 +501,17 @@
    we force the SVG + headline to fit inside a bounded height. Without
    this cap the natural SVG size (9 bars × 28px + headers) overflows
    into the footer area. */
+/* Two-column "value + signature" layout: WAR breakdown on the left,
+   xG-weighted spatial signature on the right. The ratio is tuned so
+   both fit inside the 1080×1080 export bounds (inner usable width ≈
+   992px after card padding). On narrow viewports (mobile preview)
+   they stack via the media query below. */
 .bottom-war-full {
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: stretch;
   width: 100%;
   padding: 0 0.5rem;
   flex: 1;
@@ -508,17 +520,28 @@
   overflow: hidden;
 }
 .bottom-war-full .share-war-breakdown {
-  width: 100%;
-  max-width: 1100px;
+  flex: 3 1 360px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-height: 0;
-  flex: 1;
+  min-width: 0;
 }
 .bottom-war-full .share-war-breakdown .war-break {
   flex: 1;
   min-height: 0;
+}
+.bottom-war-full .share-spatial-panel {
+  flex: 2 1 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding-right: 4px;
+}
+.bottom-war-full .share-spatial-panel svg {
+  max-width: 100%;
+  height: auto;
 }
 
 /* Card-wide WARBreakdown tweaks — aggressive hide list because
@@ -879,6 +902,70 @@
    RESPONSIVE — Card always renders at 900px for PNG export.
    On narrow screens, the CONTAINER scales it down via transform.
    ============================================================ */
+
+/* ============================================================
+   MOBILE PREVIEW (narrow CARD widths via container query)
+
+   Layout responds to the CARD'S own width, not the viewport. The
+   export clone (1080px) always gets the desktop layout; the
+   on-page preview at S23 (~393px card width) gets the stacked
+   mobile layout. Pre-existing card pages on tablets get the right
+   layout based on actual card-preview container width.
+   ============================================================ */
+@container card (max-width: 720px) {
+  .player-analytics-card {
+    aspect-ratio: auto;
+    height: auto;
+    padding: 1rem 1rem;
+  }
+  .card-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  .header-right {
+    width: 100%;
+  }
+  .bottom-war-full {
+    flex-direction: column;
+    max-height: none;
+    overflow: visible;
+  }
+  .bottom-war-full .share-war-breakdown {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+  .bottom-war-full .share-spatial-panel {
+    flex: 0 0 auto;
+    width: 100%;
+    padding-right: 0;
+  }
+  /* Cap spatial-panel height on narrow cards so it doesn't dominate
+     the stacked layout. SVG scales width-first via viewBox. */
+  .bottom-war-full .share-spatial-panel svg {
+    max-height: 280px;
+  }
+  /* WAR breakdown fits SVG to viewBox at any width; remove the
+     desktop max-height cap so all bars render. */
+  .share-war-breakdown svg {
+    max-height: none;
+  }
+}
+
+/* Tighter font scaling for very narrow cards (Galaxy S phones in
+   portrait typically report ~360–400px viewport, card preview a
+   touch narrower after parent padding). */
+@container card (max-width: 420px) {
+  .player-analytics-card {
+    padding: 0.75rem 0.75rem;
+  }
+  .player-name {
+    font-size: 1.4rem;
+  }
+  .hero-stat-value {
+    font-size: 1.6rem;
+  }
+}
 
 /* ============================================================
    PRINT / EXPORT

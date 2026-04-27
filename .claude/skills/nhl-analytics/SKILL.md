@@ -5,9 +5,15 @@ description: Domain knowledge for the NHL Analytics codebase at /Users/ilyamillw
 
 # NHL Analytics — how to work in this codebase
 
-React 19 + TypeScript + Vite on Cloudflare Pages. Cloudflare Worker proxies the NHL API and pre-bakes heavy aggregations (xG lookup, Attack DNA distributions) via a daily 5 UTC cron.
+React 19 + TypeScript + Vite on Cloudflare Pages. Cloudflare Worker proxies the NHL API and pre-bakes heavy aggregations (xG lookup, Attack DNA distributions, league xG grid) via a daily 5 UTC cron.
 
 Live: https://nhl-analytics.pages.dev
+
+---
+
+## Read first if you're touching WAR / RAPM / the share card
+
+**`HANDOFF-RAPM-ROADMAP.md`** at the repo root is the live record of what's been shipped to the WAR / RAPM / share-card pipeline — including the Magnus 9 EV gap analysis, the WAR double-counting audit (2026-04-27), tiered fixes (T1a/T1c priors, T2b covariates, A2 residual form, faceoff discount), and what's deferred. The structural firewall **"RAPM regresses xGF/hr, not GF/hr"** is load-bearing for several components — preserve it. Read the doc before changing `warService.ts`, `build-rapm.cjs`, or the worker WAR pipeline.
 
 ---
 

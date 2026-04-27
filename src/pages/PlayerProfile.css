@@ -610,6 +610,13 @@
   border-radius: 16px;
   margin-bottom: 1.5rem;
   overflow: hidden;
+  /* Container context for the share card. Layout breakpoints in
+     PlayerAnalyticsCard.css use `@container card (max-width: 720px)`
+     to switch to the stacked mobile layout based on the AVAILABLE
+     SLOT width — not the viewport, and not the card's own width
+     (which would collapse it via inline-size containment). */
+  container-type: inline-size;
+  container-name: card;
 }
 
 /*

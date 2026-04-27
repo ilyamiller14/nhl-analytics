@@ -102,6 +102,18 @@ function computeCurrentSeason() {
   return `${startYear}${startYear + 1}`;
 }
 const SEASON = computeCurrentSeason();
+
+// Prior season — used for rookie detection (T1a entry prior). A player
+// with zero NHL regular-season GP in the prior season is treated as a
+// "first-time player" and gets the McCurdy entry prior (-10% off, +10%
+// def) rather than the league cohort mean. Override via env if needed.
+function computePriorSeason(seasonStr) {
+  const start = parseInt(seasonStr.slice(0, 4), 10);
+  if (!Number.isFinite(start)) return null;
+  return `${start - 1}${start}`;
+}
+const PRIOR_SEASON = process.env.PRIOR_SEASON || computePriorSeason(SEASON);
+
 const WORKER_BASE = 'https://nhl-api-proxy.deepdivenhl.workers.dev';
 
 const NHL_TEAMS = [
@@ -630,11 +642,53 @@ async function ingestGames() {
  *   - Emit only windows where both sides have 5 skaters and 1 goalie
  *     (pure 5v5; empty-net or pulled-goalie windows are dropped)
  *
- * Returns an array of { homeSkaters[5], awaySkaters[5], period, start, end }
- * shift windows. Windows are in seconds-within-period.
+ * Returns an array of { homeSkaters[5], awaySkaters[5], period, start, end,
+ * homeScoreState, awayScoreState } shift windows. Windows are in
+ * seconds-within-period. Score states are derived at the window START
+ * time from the running goal count and reflect the perspective of each
+ * team (home/away score states are always mirror images: leading↔trailing
+ * with tied as the symmetric case).
  */
+function buildGameScoreTimeline(game) {
+  // Returns sorted [{ period, sec, homeMinusAway }] of cumulative
+  // home-minus-away goals AFTER each scoring play in the game.
+  const plays = Array.isArray(game.plays) ? game.plays : [];
+  const events = [];
+  let homeGoals = 0;
+  let awayGoals = 0;
+  for (const play of plays) {
+    if (play.typeDescKey !== 'goal') continue;
+    const period = play.periodDescriptor && play.periodDescriptor.number;
+    if (!INCLUDED_PERIODS.has(period)) continue;
+    const sec = parseTimeToSeconds(play.timeInPeriod || '');
+    const teamId = (play.details && play.details.eventOwnerTeamId);
+    if (teamId === game.homeTeamId) homeGoals++;
+    else if (teamId === game.awayTeamId) awayGoals++;
+    events.push({ period, sec, homeMinusAway: homeGoals - awayGoals });
+  }
+  return events;
+}
+
+function scoreStateAt(timeline, period, secInPeriod) {
+  // Walks the timeline and returns the home-perspective score state at
+  // the requested instant. Events at or before (period, sec) count.
+  let h_minus_a = 0;
+  for (const ev of timeline) {
+    if (ev.period < period || (ev.period === period && ev.sec <= secInPeriod)) {
+      h_minus_a = ev.homeMinusAway;
+    } else {
+      break;
+    }
+  }
+  if (h_minus_a > 0) return { home: 'leading', away: 'trailing' };
+  if (h_minus_a < 0) return { home: 'trailing', away: 'leading' };
+  return { home: 'tied', away: 'tied' };
+}
+
 function enumerateShiftWindows(game, shifts) {
   const windowsByGame = [];
+  // Score timeline is per-game; compute once and reuse for every window.
+  const scoreTimeline = buildGameScoreTimeline(game);
   // Index shifts by period
   const byPeriod = new Map();
   for (const s of shifts) {
@@ -684,6 +738,7 @@ function enumerateShiftWindows(game, shifts) {
       // window if the shot disagrees.
       if (homeSet.length !== 6 || awaySet.length !== 6) continue;
 
+      const score = scoreStateAt(scoreTimeline, period, start);
       windowsByGame.push({
         period,
         startSec: start,
@@ -694,6 +749,8 @@ function enumerateShiftWindows(game, shifts) {
         gameId: game.gameId,
         homeTeamId: game.homeTeamId,
         awayTeamId: game.awayTeamId,
+        homeScoreState: score.home,
+        awayScoreState: score.away,
       });
     }
   }
@@ -882,8 +939,10 @@ function attachShotsToWindows(windows, shots) {
       if (s.timeSec >= w.startSec && s.timeSec < w.endSec) {
         if (s.teamId === w.homeTeamId) {
           w.homeXGF = (w.homeXGF || 0) + s.xGoal;
+          w.homeShots = (w.homeShots || 0) + 1;        // Phase 2: rate-side accumulator
         } else if (s.teamId === w.awayTeamId) {
           w.awayXGF = (w.awayXGF || 0) + s.xGoal;
+          w.awayShots = (w.awayShots || 0) + 1;        // Phase 2: rate-side accumulator
         }
         break;
       }
@@ -1027,6 +1086,31 @@ function deriveMinToiSeconds(windows) {
 // Phase 4 — Sparse linear algebra for ridge regression via CG
 // ============================================================================
 
+// Phase 1 (T2b) — score-state and venue nuisance covariates. These
+// columns sit AFTER the player offense/defense blocks. Score-state lift
+// captures "trailing teams shoot more, leading teams sit back" patterns.
+// Venue captures the small but real home-ice shot-rate boost. Both are
+// regressed out so player coefficients are interpretable as score-tied,
+// road-team residuals (more honest than the current "average context").
+//
+// Column layout (after 2*n player columns):
+//   index 0..2  →  trailing × {P1, P2, P3}
+//   index 3..5  →  tied     × {P1, P2, P3}
+//   index 6..8  →  leading  × {P1, P2, P3}
+//   index 9     →  home-team-scoring venue lift
+const SCORE_STATES = ['trailing', 'tied', 'leading'];
+const N_SCORE_PERIOD_COLS = 9;       // 3 states × 3 periods
+const VENUE_COL_OFFSET = 9;
+const N_NUISANCE_COLS = 10;
+
+function scoreStatePeriodColOffset(state, period) {
+  const sIdx = SCORE_STATES.indexOf(state);
+  if (sIdx < 0) return -1;
+  // Periods 1-3 map to {0, 1, 2}; OT (period 4) is folded into period 3.
+  const pIdx = period <= 3 ? Math.max(0, period - 1) : 2;
+  return sIdx * 3 + pIdx;
+}
+
 /**
  * CSR sparse matrix for a RAPM design that lets offense and defense be
  * independent coefficients (not mirror images). Each shift window becomes
@@ -1037,15 +1121,21 @@ function deriveMinToiSeconds(windows) {
  *   Row A (home-scoring):   y = homeXGF/hr, w = hours
  *     • +1 in player i's OFFENSE column if i ∈ home skaters
  *     • +1 in player i's DEFENSE column if i ∈ away skaters (defenders)
+ *     • +1 in HOME's score-state-period nuisance column
+ *     • +1 in venue (home-scoring) nuisance column
  *   Row B (away-scoring):   y = awayXGF/hr, w = hours
  *     • +1 in player i's OFFENSE column if i ∈ away skaters
  *     • +1 in player i's DEFENSE column if i ∈ home skaters (defenders)
+ *     • +1 in AWAY's score-state-period nuisance column
  *
- * Column layout: [offense_0 .. offense_{n-1}, defense_0 .. defense_{n-1}]
+ * Column layout: [offense_0 .. offense_{n-1},
+ *                 defense_0 .. defense_{n-1},
+ *                 nuisance_0 .. nuisance_{N_NUISANCE_COLS-1}]
  * After the solve, β[i] is player i's offensive contribution to own-team
  * xGF/60. β[i+n] is player i's contribution to OPPONENT xGF/60 while on
  * ice — i.e., low is good defense. We sign-flip the defense output in
- * the artifact so "positive = good" holds for both metrics.
+ * the artifact so "positive = good" holds for both metrics. β[2n..] are
+ * nuisance lifts surfaced separately in the artifact's `covariates` block.
  */
 function buildSparseDesign(windows, playerIdx) {
   const n = playerIdx.size;
@@ -1059,15 +1149,16 @@ function buildSparseDesign(windows, playerIdx) {
     for (const pid of w.homePlayers) if (playerIdx.has(pid)) qualHome++;
     let qualAway = 0;
     for (const pid of w.awayPlayers) if (playerIdx.has(pid)) qualAway++;
-    // Row A (home scoring): offense on home + defense on away
-    rowPtr[2 * i + 1] = qualHome + qualAway;
-    // Row B (away scoring): offense on away + defense on home
-    rowPtr[2 * i + 2] = qualAway + qualHome;
-    nnz += 2 * (qualHome + qualAway);
+    // Row A (home scoring): offense on home + defense on away + 2 nuisance (state + venue)
+    rowPtr[2 * i + 1] = qualHome + qualAway + 2;
+    // Row B (away scoring): offense on away + defense on home + 1 nuisance (state)
+    rowPtr[2 * i + 2] = qualAway + qualHome + 1;
+    nnz += 2 * (qualHome + qualAway) + 3;
   }
   for (let i = 1; i < rowPtr.length; i++) rowPtr[i] += rowPtr[i - 1];
   const colIdx = new Int32Array(nnz);
   const vals = new Float64Array(nnz);
+  const NUISANCE_BASE = 2 * n;
   for (let i = 0; i < nWindows; i++) {
     const w = windows[i];
     // Row A — home scoring
@@ -1080,6 +1171,16 @@ function buildSparseDesign(windows, playerIdx) {
       const ci = playerIdx.get(pid);
       if (ci !== undefined) { colIdx[cursor] = n + ci; vals[cursor] = 1; cursor++; } // defense col
     }
+    // Score-state nuisance for HOME's perspective in this period.
+    const homeStateOff = scoreStatePeriodColOffset(w.homeScoreState, w.period);
+    colIdx[cursor] = NUISANCE_BASE + (homeStateOff >= 0 ? homeStateOff : 4); // fallback to tied×P2
+    vals[cursor] = 1;
+    cursor++;
+    // Venue nuisance: +1 only on home-scoring rows.
+    colIdx[cursor] = NUISANCE_BASE + VENUE_COL_OFFSET;
+    vals[cursor] = 1;
+    cursor++;
+
     // Row B — away scoring
     cursor = rowPtr[2 * i + 1];
     for (const pid of w.awayPlayers) {
@@ -1090,8 +1191,13 @@ function buildSparseDesign(windows, playerIdx) {
       const ci = playerIdx.get(pid);
       if (ci !== undefined) { colIdx[cursor] = n + ci; vals[cursor] = 1; cursor++; } // defense col
     }
+    // Score-state nuisance for AWAY's perspective in this period.
+    const awayStateOff = scoreStatePeriodColOffset(w.awayScoreState, w.period);
+    colIdx[cursor] = NUISANCE_BASE + (awayStateOff >= 0 ? awayStateOff : 4);
+    vals[cursor] = 1;
+    cursor++;
   }
-  return { rowPtr, colIdx, vals, nRows, nCols: 2 * n };
+  return { rowPtr, colIdx, vals, nRows, nCols: 2 * n + N_NUISANCE_COLS };
 }
 
 /**
@@ -1120,6 +1226,49 @@ function buildResponses(windows /* , isOffense (ignored) */) {
     const awayXGF = wn.awayXGF || 0;
     y[2 * i] = hours > 0 ? homeXGF / hours : 0;      // home-scoring row
     y[2 * i + 1] = hours > 0 ? awayXGF / hours : 0;  // away-scoring row
+  }
+  return { y, w };
+}
+
+// Phase 2 — rate response (shots per 60). Same X as buildResponses;
+// only the y vector differs. Weights are duration hours, identical to
+// the xG path so identical CG behavior.
+function buildResponsesRate(windows) {
+  const nRows = 2 * windows.length;
+  const y = new Float64Array(nRows);
+  const w = new Float64Array(nRows);
+  for (let i = 0; i < windows.length; i++) {
+    const wn = windows[i];
+    const hours = wn.durationSec / 3600;
+    w[2 * i] = hours;
+    w[2 * i + 1] = hours;
+    const homeShots = wn.homeShots || 0;
+    const awayShots = wn.awayShots || 0;
+    y[2 * i] = hours > 0 ? homeShots / hours : 0;
+    y[2 * i + 1] = hours > 0 ? awayShots / hours : 0;
+  }
+  return { y, w };
+}
+
+// Phase 2 — quality response (xG per shot). Per-row weight is the SHOT
+// COUNT (not hours): a window with 0 shots contributes nothing, a window
+// with 5 shots contributes 5× as much. This is the standard way to
+// regress a per-shot rate without inflating low-shot-count windows.
+// Windows with 0 shots in this side get y=0, w=0 → no contribution.
+function buildResponsesQuality(windows) {
+  const nRows = 2 * windows.length;
+  const y = new Float64Array(nRows);
+  const w = new Float64Array(nRows);
+  for (let i = 0; i < windows.length; i++) {
+    const wn = windows[i];
+    const homeShots = wn.homeShots || 0;
+    const awayShots = wn.awayShots || 0;
+    const homeXGF = wn.homeXGF || 0;
+    const awayXGF = wn.awayXGF || 0;
+    w[2 * i] = homeShots;
+    w[2 * i + 1] = awayShots;
+    y[2 * i] = homeShots > 0 ? homeXGF / homeShots : 0;
+    y[2 * i + 1] = awayShots > 0 ? awayXGF / awayShots : 0;
   }
   return { y, w };
 }
@@ -1448,6 +1597,18 @@ function buildPositionPrior({
   positions,
   toiMap,
   minAnchorTOISec,
+  // T1a — entry prior plumbing. When `priorSeasonPlayers` is provided,
+  // any qualified player NOT in the set is treated as a "first-time
+  // player" and gets the McCurdy entry prior instead of the cohort mean:
+  //   μ_offense = −0.10 × leagueBaselineXGF60   (rookies generate less)
+  //   μ_defense = +0.10 × leagueBaselineXGA60   (raw — positive = worse defense)
+  // When omitted (null / empty Set), behavior is unchanged: cohort mean
+  // applies to everyone.
+  priorSeasonPlayers = null,
+  leagueBaselineXGF60 = 0,
+  leagueBaselineXGA60 = 0,
+  entryPriorOffenseFraction = -0.10,
+  entryPriorDefenseFraction = +0.10,
 }) {
   const nPlayers = qualified.length;
 
@@ -1489,18 +1650,37 @@ function buildPositionPrior({
 
   // 2) Build the μ vector (length 2·nPlayers — offense block then defense).
   //    Players without a known position fall back to the F prior
-  //    (forwards are the majority cohort).
+  //    (forwards are the majority cohort). Rookies (T1a) get the entry
+  //    prior; everyone else gets cohort mean.
   const mu = new Float64Array(2 * nPlayers);
+  const rookieEntryOffense = entryPriorOffenseFraction * leagueBaselineXGF60;
+  const rookieEntryDefense = entryPriorDefenseFraction * leagueBaselineXGA60;
+  let rookieCount = 0;
   for (const pid of qualified) {
     const i = playerIdx.get(pid);
     const pos = positions.get(pid);
     const cohortKey = pos === 'D' ? 'D' : 'F';
     const m = cohortMeans[cohortKey];
-    mu[i] = m.offense;             // offense column
-    mu[i + nPlayers] = m.defense;  // defense column (raw, unflipped)
+    const isRookie = priorSeasonPlayers && priorSeasonPlayers.size > 0 && !priorSeasonPlayers.has(pid);
+    if (isRookie) {
+      mu[i] = rookieEntryOffense;
+      mu[i + nPlayers] = rookieEntryDefense;
+      rookieCount += 1;
+    } else {
+      mu[i] = m.offense;             // offense column
+      mu[i + nPlayers] = m.defense;  // defense column (raw, unflipped)
+    }
   }
 
-  return { mu, cohortMeans };
+  return {
+    mu,
+    cohortMeans,
+    rookieCount,
+    entryPrior: priorSeasonPlayers && priorSeasonPlayers.size > 0
+      ? { offense: rookieEntryOffense, defense: rookieEntryDefense,
+          offenseFraction: entryPriorOffenseFraction, defenseFraction: entryPriorDefenseFraction }
+      : null,
+  };
 }
 
 function buildRidgeDiag({
@@ -1510,6 +1690,13 @@ function buildRidgeDiag({
   precisionScaleC = 1.0,
   toiFloorRatio = 0.25,
   toiCapRatio = 4.0,
+  // T1c — age-bell × TOI precision. When `ages` is provided, ρ is
+  // multiplied by b(age) so 24-yo coefficients move slow (curve vertex,
+  // ability changes slowly) and 19/30-yo coefficients move faster (data
+  // dominates). Edges (≤17 / ≥32) get ρ × 0.2 so the prior dominates.
+  // Empty / missing ages → multiplier 1.0 (graceful degradation to the
+  // pure TOI-based ρ).
+  ages = null,
 }) {
   const nPlayers = qualified.length;
   const n = 2 * nPlayers;
@@ -1524,43 +1711,111 @@ function buildRidgeDiag({
   const maxTOI = medianTOI * toiCapRatio;    // bounds ρ below (min prior)
 
   const ridgeDiag = new Float64Array(n);
+  let ageMultipliedCount = 0;
   for (const pid of qualified) {
     const i = playerIdx.get(pid);
     const rawTOI = toiMap.get(pid) || minTOI;
     const clampedTOI = Math.max(minTOI, Math.min(maxTOI, rawTOI));
     // ρ_i = c · medianTOI / TOI_i. Median player → ρ = c · 1 = c.
     // Quarter-median TOI → ρ = c · 4 (4× ridge pull). 4×-median → ρ = c/4.
-    const rho = precisionScaleC * (medianTOI / clampedTOI);
+    let rho = precisionScaleC * (medianTOI / clampedTOI);
+    if (ages) {
+      const age = ages.get(pid);
+      const mult = ageBellMultiplier(age);
+      if (typeof age === 'number') ageMultipliedCount += 1;
+      rho *= mult;
+    }
     ridgeDiag[i] = rho;             // offense column
     ridgeDiag[i + nPlayers] = rho;  // defense column (same TOI)
   }
 
-  return { ridgeDiag, medianTOI };
+  return { ridgeDiag, medianTOI, ageMultipliedCount };
 }
 
-async function fetchPositions() {
-  // /cached/skater-ages returns { season, computedAt, players: { [id]: {age, position, ...} } }
+async function fetchSkaterMeta() {
+  // /cached/skater-ages returns { season, computedAt, players: { [id]: {age, position, birthDate} } }
   // for every skater with a NHL Stats /skater/bios entry. Position is the
-  // single-letter code C/L/R/D. We use this rather than scraping NHL's
-  // /player/{id}/landing 940 times.
-  console.log('[rapm] Fetching skater positions from worker /cached/skater-ages...');
+  // single-letter code C/L/R/D. Age is integer (computed at Oct 1 of season).
+  // We use this rather than scraping NHL's /player/{id}/landing 940 times.
+  console.log('[rapm] Fetching skater meta (positions + ages) from worker /cached/skater-ages...');
   let resp;
   try {
     resp = await fetchJSON(`${WORKER_BASE}/cached/skater-ages`);
   } catch (err) {
-    console.warn(`[rapm] WARNING: skater-ages fetch failed (${err.message}). Prior-informed pass will treat all players as forwards.`);
-    return new Map();
+    console.warn(`[rapm] WARNING: skater-ages fetch failed (${err.message}). Prior-informed pass will treat all players as forwards with unknown age.`);
+    return { positions: new Map(), ages: new Map() };
   }
   const players = (resp && resp.players) || {};
-  const out = new Map();
+  const positions = new Map();
+  const ages = new Map();
   for (const [pid, info] of Object.entries(players)) {
+    const id = Number(pid);
     const pos = info && info.position;
     if (typeof pos === 'string' && pos.length > 0) {
-      out.set(Number(pid), pos);
+      positions.set(id, pos);
+    }
+    const age = info && info.age;
+    if (typeof age === 'number' && Number.isFinite(age)) {
+      ages.set(id, age);
     }
   }
-  console.log(`[rapm]   loaded positions for ${out.size} skaters`);
-  return out;
+  console.log(`[rapm]   loaded ${positions.size} positions, ${ages.size} ages`);
+  return { positions, ages };
+}
+
+// T1a — fetch the set of player IDs that played at least one NHL regular-
+// season game in the prior season. Used to distinguish rookies (entry prior)
+// from veterans (cohort-mean prior or eventually a prior-season β archive).
+//
+// Source: NHL Stats /skater/summary, one call for the prior season. Disk
+// cached via the same `cacheRead` / `cacheWrite` helpers used elsewhere so
+// repeated builds don't re-pull this.
+async function fetchPriorSeasonNhlPlayers() {
+  if (!PRIOR_SEASON) {
+    console.warn('[rapm] WARNING: no prior season computable; rookie detection disabled.');
+    return new Set();
+  }
+  // Disk cache — prior-season list is immutable once the season is over.
+  const cached = cacheRead('prior_season_skaters', PRIOR_SEASON);
+  if (cached && Array.isArray(cached) && cached.length > 0) {
+    console.log(`[rapm]   prior-season (${PRIOR_SEASON}) NHL skaters: ${cached.length} (disk cache)`);
+    return new Set(cached);
+  }
+  console.log(`[rapm] Fetching prior-season (${PRIOR_SEASON}) NHL skater list for rookie detection...`);
+  const url = `https://api.nhle.com/stats/rest/en/skater/summary?limit=-1&cayenneExp=seasonId=${PRIOR_SEASON}%20and%20gameTypeId=2`;
+  let resp;
+  try {
+    resp = await fetchJSON(url, { retries: 3, timeoutMs: 30000 });
+  } catch (err) {
+    console.warn(`[rapm] WARNING: prior-season skater fetch failed (${err.message}). Rookie detection disabled — all players will use cohort prior.`);
+    return new Set();
+  }
+  const data = (resp && Array.isArray(resp.data)) ? resp.data : [];
+  const ids = [];
+  for (const row of data) {
+    if (row && typeof row.playerId === 'number' && (row.gamesPlayed || 0) > 0) {
+      ids.push(row.playerId);
+    }
+  }
+  cacheWrite('prior_season_skaters', PRIOR_SEASON, ids);
+  console.log(`[rapm]   prior-season (${PRIOR_SEASON}) NHL skaters: ${ids.length}`);
+  return new Set(ids);
+}
+
+// b(age) — McCurdy-style age-bell prior precision multiplier. Peaks 1.0 at
+// 24 (curve vertex; production change is slow), drops to 0.5 at 19/29
+// (data dominates), drops to 0.2 at 18 / 32+ (prior dominates because
+// shorter careers / steeper decline phases). Applied multiplicatively on
+// top of the existing TOI-based ρ. Returns 1.0 for unknown ages so missing
+// data degrades gracefully toward standard ridge.
+function ageBellMultiplier(age) {
+  if (typeof age !== 'number' || !Number.isFinite(age)) return 1.0;
+  if (age < 18) return 0.2;
+  if (age <= 19) return 0.2 + (age - 18) * 0.3;       // 18→0.2, 19→0.5
+  if (age <= 24) return 0.5 + (age - 19) * 0.1;       // 19→0.5, 24→1.0
+  if (age <= 29) return 1.0 - (age - 24) * 0.1;       // 24→1.0, 29→0.5
+  if (age <= 32) return 0.5 - (age - 29) * 0.1;       // 29→0.5, 32→0.2
+  return 0.2;
 }
 
 // ============================================================================
@@ -1920,9 +2175,16 @@ async function main() {
   let mu = null;
   let cohortMeans = null;
   let positions = new Map();
+  let ages = new Map();
+  let priorSeasonPlayers = new Set();
+  let entryPriorMeta = null;
 
   if (PRIOR_ENABLED) {
-    positions = await fetchPositions();
+    const meta = await fetchSkaterMeta();
+    positions = meta.positions;
+    ages = meta.ages;
+    priorSeasonPlayers = await fetchPriorSeasonNhlPlayers();
+
     const priorBuild = buildPositionPrior({
       betaStandard,
       qualified,
@@ -1930,15 +2192,26 @@ async function main() {
       positions,
       toiMap,
       minAnchorTOISec: MIN_ANCHOR_TOI_SEC,
+      priorSeasonPlayers,
+      leagueBaselineXGF60,
+      leagueBaselineXGA60,
     });
     mu = priorBuild.mu;
     cohortMeans = priorBuild.cohortMeans;
+    entryPriorMeta = priorBuild.entryPrior;
     console.log('[rapm]   cohort F: μ_off=' + cohortMeans.F.offense.toFixed(4) +
                 ' μ_def=' + cohortMeans.F.defense.toFixed(4) +
                 ' anchors=' + cohortMeans.F.anchorCount);
     console.log('[rapm]   cohort D: μ_off=' + cohortMeans.D.offense.toFixed(4) +
                 ' μ_def=' + cohortMeans.D.defense.toFixed(4) +
                 ' anchors=' + cohortMeans.D.anchorCount);
+    if (entryPriorMeta) {
+      console.log('[rapm]   T1a entry prior: μ_off=' + entryPriorMeta.offense.toFixed(4) +
+                  ' μ_def=' + entryPriorMeta.defense.toFixed(4) +
+                  ' (rookies=' + priorBuild.rookieCount + ')');
+    } else {
+      console.log('[rapm]   T1a entry prior: DISABLED (prior-season skater list empty)');
+    }
 
     const ridgeBuild = buildRidgeDiag({
       qualified,
@@ -1947,9 +2220,23 @@ async function main() {
       precisionScaleC: PRIOR_PRECISION_SCALE_C,
       toiFloorRatio: 0.25,
       toiCapRatio: 4.0,
+      ages,
     });
-    ridgeDiag = ridgeBuild.ridgeDiag;
+    // Phase 1 (T2b) — pad μ and ridgeDiag for nuisance covariates. Nuisance
+    // entries get μ=0 (no prior pull) and ρ=1.0 (uniform standard ridge),
+    // so their coefficients land at the data-driven minimum without bias.
+    const playerCols = 2 * nPlayers;
+    const totalCols = X.nCols;
+    const muFull = new Float64Array(totalCols);
+    muFull.set(mu);
+    mu = muFull;
+    const ridgeDiagFull = new Float64Array(totalCols);
+    ridgeDiagFull.set(ridgeBuild.ridgeDiag);
+    for (let j = playerCols; j < totalCols; j++) ridgeDiagFull[j] = 1.0;
+    ridgeDiag = ridgeDiagFull;
     console.log('[rapm]   median TOI for ρ calibration = ' + (ridgeBuild.medianTOI / 60).toFixed(1) + 'min');
+    console.log('[rapm]   T1c age-bell precision: applied to ' + ridgeBuild.ageMultipliedCount + '/' + qualified.length + ' players');
+    console.log('[rapm]   T2b nuisance columns: ' + (totalCols - playerCols) + ' (' + N_SCORE_PERIOD_COLS + ' score-state×period + 1 venue)');
 
     // RHS for prior-informed ridge: b' = X'Wy + λ·diag(ρ)·μ
     const bPrior = new Float64Array(b.length);
@@ -1977,7 +2264,9 @@ async function main() {
     }
 
     priorMeta = {
-      method: 'position-cohort-mean (F vs D)',
+      method: entryPriorMeta
+        ? 'position-cohort-mean (F vs D) + entry-prior for rookies (T1a) + age-bell precision (T1c)'
+        : 'position-cohort-mean (F vs D)',
       anchorMinTOISec: MIN_ANCHOR_TOI_SEC,
       precisionScaleC: PRIOR_PRECISION_SCALE_C,
       toiFloorRatio: 0.25,
@@ -1995,10 +2284,61 @@ async function main() {
           anchorCount: cohortMeans.D.anchorCount,
         },
       },
+      // T1a — entry prior. Null when prior-season skater list unavailable.
+      entryPrior: entryPriorMeta ? {
+        priorSeason: PRIOR_SEASON,
+        priorSeasonSkaterCount: priorSeasonPlayers.size,
+        rookieCount: priorBuild.rookieCount,
+        offenseFraction: entryPriorMeta.offenseFraction,
+        defenseFraction: entryPriorMeta.defenseFraction,
+        offense: Number(entryPriorMeta.offense.toFixed(6)),
+        // sign-flipped to match artifact convention (positive = good defense)
+        defense: Number((-entryPriorMeta.defense).toFixed(6)),
+      } : null,
+      // T1c — age-bell precision multiplier metadata. ageMultipliedCount
+      // is the number of qualified players for whom an age was available
+      // (others fell back to multiplier 1.0).
+      ageBell: {
+        peak: 24,
+        knots: { 18: 0.2, 19: 0.5, 24: 1.0, 29: 0.5, 32: 0.2 },
+        ageMultipliedCount: ridgeBuild.ageMultipliedCount,
+        qualifiedCount: qualified.length,
+      },
     };
   } else {
     console.log('[rapm] Prior-informed pass DISABLED via NO_PRIOR=1 — keeping standard ridge β.');
   }
+
+  // -- Phase 2: rate + quality auxiliary regressions ---------------------
+  // Same X (design + nuisance), same λ as the xG fit. The two extra
+  // solves split the xG signal into "shot rate" and "shot quality"
+  // per-player components. Standard ridge (no prior pull) — these are
+  // descriptive layers, not used for WAR, so we don't burden them with
+  // the cohort/entry priors. They're emitted alongside offense/defense
+  // for the leaderboards in `/advanced` and the SpatialSignaturePanel.
+  console.log('[rapm] Solving rate-side ridge (CG) for shots-per-60...');
+  const { y: yRate, w: wRate } = buildResponsesRate(allWindows);
+  const bRate = stwmv(X, yRate, wRate);
+  const betaRate = conjugateGradient(X, wRate, bRate, lambda);
+
+  console.log('[rapm] Solving quality-side ridge (CG) for xG-per-shot...');
+  const { y: yQuality, w: wQuality } = buildResponsesQuality(allWindows);
+  const bQuality = stwmv(X, yQuality, wQuality);
+  const betaQuality = conjugateGradient(X, wQuality, bQuality, lambda);
+
+  // Sign convention for the rate / quality outputs mirrors the existing
+  // offense / defense convention: offense is "contribution to own-team
+  // shots / shot quality" (raw, positive = good); defense is "contribution
+  // to opponent shots / shot quality" (raw positive = bad → sign-flip so
+  // positive = good).
+  const rateOff = betaRate.subarray(0, nPlayers);
+  const rateDefRaw = betaRate.subarray(nPlayers, 2 * nPlayers);
+  const rateDef = new Float64Array(nPlayers);
+  for (let i = 0; i < nPlayers; i++) rateDef[i] = -rateDefRaw[i];
+  const qualOff = betaQuality.subarray(0, nPlayers);
+  const qualDefRaw = betaQuality.subarray(nPlayers, 2 * nPlayers);
+  const qualDef = new Float64Array(nPlayers);
+  for (let i = 0; i < nPlayers; i++) qualDef[i] = -qualDefRaw[i];
 
   // β layout: first nPlayers = offense, next nPlayers = defense.
   const betaOff = beta.subarray(0, nPlayers);
@@ -2088,6 +2428,14 @@ async function main() {
       ppMinutes: Number(pp.minutes.toFixed(2)),
       pkXGA: Number(pk.xga.toFixed(4)),
       pkMinutes: Number(pk.minutes.toFixed(2)),
+      // Phase 2 — rate/quality split (auxiliary regressions, NOT summed
+      // into WAR). rateOffense = shots/60 lift over RAPM baseline;
+      // qualityOffense = xG-per-shot lift; defense are sign-flipped
+      // suppressions (positive = good).
+      rateOffense: Number(rateOff[idx].toFixed(4)),
+      rateDefense: Number(rateDef[idx].toFixed(4)),
+      qualityOffense: Number(qualOff[idx].toFixed(6)),
+      qualityDefense: Number(qualDef[idx].toFixed(6)),
     };
     if (priorMeta) {
       // Pre-prior (standard ridge) coefficients exposed for audit. Useful
@@ -2101,9 +2449,37 @@ async function main() {
     players[String(pid)] = entry;
   }
 
+  // Phase 1 (T2b) — extract nuisance covariate coefficients into the
+  // artifact. Schema v4 adds a `covariates` block reporting the score-state
+  // and venue lifts in xGF/60 units. Player offense/defense semantics are
+  // unchanged at the field level, but they're now interpretable as
+  // "score-tied, road-team residuals" rather than "average context".
+  const NUISANCE_BASE_OUT = 2 * nPlayers;
+  const covariates = {
+    scoreState: [],
+    venue: 0,
+  };
+  if (X.nCols > NUISANCE_BASE_OUT) {
+    for (let s = 0; s < SCORE_STATES.length; s++) {
+      for (let p = 0; p < 3; p++) {
+        const col = NUISANCE_BASE_OUT + s * 3 + p;
+        covariates.scoreState.push({
+          state: SCORE_STATES[s],
+          period: p + 1,
+          lift: Number(beta[col].toFixed(4)),
+        });
+      }
+    }
+    covariates.venue = Number(beta[NUISANCE_BASE_OUT + VENUE_COL_OFFSET].toFixed(4));
+  }
+  console.log('[rapm]   covariates: home venue lift = ' + covariates.venue.toFixed(4) + ' xGF/60');
+  for (const c of covariates.scoreState) {
+    console.log(`[rapm]     ${c.state.padEnd(9)} P${c.period} lift = ${c.lift.toFixed(4)}`);
+  }
+
   const output = {
     season: SEASON,
-    schemaVersion: priorMeta ? 3 : 2,  // v3 adds prior-informed (Bacon) ridge
+    schemaVersion: priorMeta ? 4 : 2,  // v4 adds T2b score-state + venue covariates
     computedAt: new Date().toISOString(),
     gamesAnalyzed: shiftsFetched,
     shiftsAnalyzed: allWindows.length,
@@ -2119,6 +2495,9 @@ async function main() {
     // Bayesian prior metadata. Null when NO_PRIOR=1 disables the second
     // pass. See Phase 6 comment block for the math + cohort derivation.
     prior: priorMeta,
+    // T2b — score-state-period and home venue nuisance lifts in xGF/60.
+    // Player offense/defense are residuals AFTER these are regressed out.
+    covariates,
     leagueBaselineXGF60: Number(leagueBaselineXGF60.toFixed(4)),
     leagueBaselineXGA60: Number(leagueBaselineXGA60.toFixed(4)),
     // Special-teams league rate (SHARE-WEIGHTED to match the per-player

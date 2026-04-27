@@ -219,9 +219,12 @@ export function calculatePairChemistry(
     const { shifts, shots, homeTeamId } = game;
     const opponentTeamId = homeTeamId === teamId ? game.awayTeamId : homeTeamId;
 
-    // Skip games without shift data — caller should pre-load shifts
+    // Shifts are optional — when absent, we fall back to the on-ice
+    // arrays embedded in each ShotEvent (cached data path). The
+    // shift-based TOI calculation is gated below; the shot-analysis
+    // loop runs unconditionally because `getPlayersOnIceForShot` knows
+    // how to use embedded `homePlayersOnIce`/`awayPlayersOnIce`.
     const hasShifts = shifts && shifts.length > 0;
-    if (!hasShifts) continue;
 
     // Calculate TOI in three mutually exclusive states from real shifts:
     //   both on, only-p1, only-p2. Same accounting as buildChemistryMatrix.
