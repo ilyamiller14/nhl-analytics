@@ -603,44 +603,44 @@
 }
 
 .card-preview {
-  display: flex;
-  justify-content: center;
-  padding: 2rem;
-  background: var(--gray-100);
+  /* Square slot that always renders the 1080×1080 share card. On
+     viewports narrower than 1080px the inner wrapper applies
+     `transform: scale(--card-scale)` (driven by ResizeObserver in
+     PlayerProfile.tsx) so the preview is a faithful scaled-down
+     version of the exported image — same layout, smaller. */
+  position: relative;
+  width: 100%;
+  max-width: 1080px;
+  aspect-ratio: 1 / 1;
+  margin: 0 auto 1.5rem;
+  padding: 0;
+  background: #0c0c1d;
   border-radius: 16px;
-  margin-bottom: 1.5rem;
   overflow: hidden;
-  /* Container context for the share card. Layout breakpoints in
-     PlayerAnalyticsCard.css use `@container card (max-width: 720px)`
-     to switch to the stacked mobile layout based on the AVAILABLE
-     SLOT width — not the viewport, and not the card's own width
-     (which would collapse it via inline-size containment). */
-  container-type: inline-size;
-  container-name: card;
 }
 
-/*
- * Card zoom is computed dynamically via ResizeObserver in PlayerProfile.tsx.
- * The wrapper div gets style={{ zoom: cardZoom }} which fits the card to the container.
- */
-@media (max-width: 960px) {
-  .card-preview {
-    padding: 0.5rem;
-  }
+.card-preview > div {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1080px;
+  height: 1080px;
+  transform: scale(var(--card-scale, 1));
+  transform-origin: top left;
 }
+
 @media (max-width: 768px) {
-  /* Hide clutter on mobile - go straight to the card */
+  /* Hide top-level title/description on mobile to give the card more
+     room — but KEEP the "Search another player" widget visible (it's
+     the primary way users navigate between players from the share
+     view). */
   .card-section .section-title,
-  .card-section .section-description,
-  .card-section .card-search-section {
+  .card-section .section-description {
     display: none;
   }
 
   .card-preview {
-    padding: 0;
     border-radius: 12px;
-    overflow: hidden;
-    background: transparent;
     margin-bottom: 1rem;
   }
 }

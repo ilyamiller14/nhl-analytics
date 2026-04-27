@@ -248,20 +248,24 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
   );
 
   const pad = compact
-    ? { top: 14, right: 36, bottom: 18, left: 130 }
+    ? { top: 14, right: 44, bottom: 18, left: 250 }
     : { top: 24, right: 44, bottom: 34, left: 150 };
   const plotW = width - pad.left - pad.right;
   const zeroX = pad.left + plotW / 2;
   const pxPerWin = plotW / 2 / maxAbs;
-  // Compact mode: bumped from rowHeight 18 → 30 / rowGap 2 → 4 so the
-  // share-card export chart (1080×1080 with WAR filling the bottom half
-  // ~540px tall) actually USES the available vertical budget. At
-  // rowHeight 18 the SVG's viewBox aspect ratio (1080/320 ≈ 3.4) was
-  // letting the chart render only ~320px tall in a 540px container —
-  // making bars and labels barely visible on mobile share previews.
-  const rowHeight = compact ? 30 : 28;
-  const rowGap = compact ? 4 : 5;
-  const extraRows = compact ? 32 : 54;
+  // Compact mode is sized for the 1080×1080 share-card export. The SVG
+  // is rendered into a flex column ~580×~700; preserveAspectRatio binds
+  // on width (scale ≈ 0.91), so a viewBox font of N pixels reads as
+  // N×0.91 in the PNG and N×0.91×(390/1080) on a phone-displayed share.
+  // Fonts are sized so component labels reach ~12px effective on a 390px
+  // mobile preview. Row height tracks the bigger fonts.
+  const rowHeight = compact ? 44 : 28;
+  const rowGap = compact ? 6 : 5;
+  // Compact extraRows must clear: Total WAR row (rowHeight 44) + axis
+  // line gap (16) + axis tick label height (~14). At 32 the axis ticks
+  // overlap the Total WAR value text — that was the "+0/66" / "0.96"
+  // bleed visible on share captures.
+  const extraRows = compact ? 90 : 54;
   const height = pad.top + segments.length * (rowHeight + rowGap) + extraRows + pad.bottom;
 
   const warClass = result.WAR_per_82 > 1 ? 'pos' : result.WAR_per_82 < 0 ? 'neg' : 'neutral';
@@ -342,10 +346,10 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
         <line x1={zeroX} x2={zeroX}
           y1={pad.top} y2={pad.top + segments.length * (rowHeight + rowGap) + 54}
           stroke="rgba(148,163,184,0.5)" strokeDasharray="3 3" />
-        <text x={zeroX} y={pad.top - 8} textAnchor="middle" fontSize={10} fill="#94a3b8">0</text>
+        <text x={zeroX} y={pad.top - 8} textAnchor="middle" fontSize={compact ? 16 : 10} fill="#94a3b8">0</text>
 
-        <text x={pad.left + 8} y={pad.top - 8} textAnchor="start" fontSize={10} fill="#f87171">← costs wins</text>
-        <text x={pad.left + plotW - 8} y={pad.top - 8} textAnchor="end" fontSize={10} fill="#34d399">earns wins →</text>
+        <text x={pad.left + 8} y={pad.top - 8} textAnchor="start" fontSize={compact ? 16 : 10} fill="#f87171">← costs wins</text>
+        <text x={pad.left + plotW - 8} y={pad.top - 8} textAnchor="end" fontSize={compact ? 16 : 10} fill="#34d399">earns wins →</text>
 
         {segments.map((seg, i) => {
           const wins = segValuesWin[i];
@@ -376,19 +380,19 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
           const dim = pendingPill || (cumAbs === 0 && deltaAbs === 0);
           return (
             <g key={seg.key}>
-              <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 3 : 4)}
-                textAnchor="end" fontSize={compact ? 13 : 12}
+              <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 7 : 4)}
+                textAnchor="end" fontSize={compact ? 22 : 12}
                 fill={dim ? '#64748b' : '#cbd5f5'}>
                 {seg.label}
               </text>
               {pendingPill ? (
                 <g>
-                  <rect x={zeroX - 39} y={y + rowHeight / 2 - 7}
-                    width={78} height={14} rx={7}
+                  <rect x={zeroX - (compact ? 60 : 39)} y={y + rowHeight / 2 - (compact ? 11 : 7)}
+                    width={compact ? 120 : 78} height={compact ? 22 : 14} rx={compact ? 11 : 7}
                     fill="rgba(71, 85, 105, 0.6)"
                     stroke="rgba(148, 163, 184, 0.4)" />
-                  <text x={zeroX} y={y + rowHeight / 2 + 3}
-                    textAnchor="middle" fontSize={9}
+                  <text x={zeroX} y={y + rowHeight / 2 + (compact ? 5 : 3)}
+                    textAnchor="middle" fontSize={compact ? 14 : 9}
                     fill="#e2e8f0" fontWeight={600}
                     data-pending="true">
                     data pending
@@ -408,12 +412,14 @@ ${seg.desc}
 source: ${seg.sourceLabel}`}
                     </title>
                   </rect>
-                  {/* Pace tick — single vertical mark at the projected
-                      82-GP endpoint. Cleaner than a faded tail (agent
-                      feedback: stacked fill invites readers to sum the
-                      two segments). The tick shows projection without
-                      claiming it as cumulative evidence. */}
-                  {SHOW_PROJECTION && deltaW > 0 && (
+                  {/* Pace tick — vertical mark at the projected 82-GP
+                      endpoint. Skipped in compact mode (share card)
+                      because per-segment ticks usually fall inside the
+                      value text on cards where cum ≈ proj, producing a
+                      readable-as-strikethrough overlap. The hero stat
+                      surfaces the 82-GP pace headline; per-row ticks
+                      add noise without value at share-card scale. */}
+                  {!compact && SHOW_PROJECTION && deltaW > 0 && (
                     <g>
                       <line
                         x1={deltaStartX + deltaW}
@@ -435,17 +441,18 @@ source: ${seg.sourceLabel}`}
                       the "bar says X, label says Y" disagreement the
                       faded-tail variant had. */}
                   {(() => {
-                    const valueTextWidth = 44;
-                    const outsideX = sign >= 0 ? barStartX + cumW + 6 : barStartX - 6;
+                    const valueTextWidth = compact ? 64 : 44;
+                    const gap = compact ? 12 : 6;
+                    const outsideX = sign >= 0 ? barStartX + cumW + gap : barStartX - gap;
                     const collidesLeft = sign < 0 && (outsideX - valueTextWidth) < pad.left + 4;
                     const collidesRight = sign > 0 && (outsideX + valueTextWidth) > pad.left + plotW;
                     const inside = collidesLeft || collidesRight;
-                    const insideX = sign >= 0 ? barStartX + cumW - 6 : barStartX + 6;
+                    const insideX = sign >= 0 ? barStartX + cumW - gap : barStartX + gap;
                     return (
                       <text x={inside ? insideX : outsideX}
-                        y={y + rowHeight / 2 + 4}
+                        y={y + rowHeight / 2 + (compact ? 7 : 4)}
                         textAnchor={inside ? (sign >= 0 ? 'end' : 'start') : (sign >= 0 ? 'start' : 'end')}
-                        fontSize={compact ? 13 : 12}
+                        fontSize={compact ? 22 : 12}
                         fill={inside ? '#0f172a' : (wins > 0 ? '#34d399' : wins < 0 ? '#f87171' : '#64748b')}
                         fontWeight={600}>
                         {fmt(wins)}
@@ -479,13 +486,13 @@ source: ${seg.sourceLabel}`}
               <line x1={pad.left - 20} x2={pad.left + plotW}
                 y1={y - 4} y2={y - 4}
                 stroke="rgba(148, 163, 184, 0.3)" />
-              <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 3 : 4)}
-                textAnchor="end" fontSize={compact ? 14 : 13} fill="#f3f4f6" fontWeight={700}>Total WAR</text>
+              <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 8 : 4)}
+                textAnchor="end" fontSize={compact ? 26 : 13} fill="#f3f4f6" fontWeight={700}>Total WAR</text>
               <rect x={barStartX} y={y} width={Math.max(cumW, 1)} height={rowHeight}
                 fill={mainColor} rx={2}>
                 <title>{`Total WAR — cumulative: ${fmt(cum)} wins · 82-GP pace: ${fmt(proj)} wins`}</title>
               </rect>
-              {SHOW_PROJECTION && deltaW > 0 && (
+              {!compact && SHOW_PROJECTION && deltaW > 0 && (
                 <g>
                   <line
                     x1={deltaStartX + deltaW}
@@ -500,10 +507,10 @@ source: ${seg.sourceLabel}`}
                   <title>{`82-GP pace marker at ${fmt(proj)} WAR`}</title>
                 </g>
               )}
-              <text x={sign >= 0 ? barStartX + cumW + 6 : barStartX - 6}
-                y={y + rowHeight / 2 + (compact ? 3 : 4)}
+              <text x={sign >= 0 ? barStartX + cumW + (compact ? 14 : 6) : barStartX - (compact ? 14 : 6)}
+                y={y + rowHeight / 2 + (compact ? 8 : 4)}
                 textAnchor={sign >= 0 ? 'start' : 'end'}
-                fontSize={compact ? 14 : 13}
+                fontSize={compact ? 26 : 13}
                 fill={mainColor === posColor ? '#34d399' : '#f87171'}
                 fontWeight={700}>
                 {fmt(cum)}
@@ -518,7 +525,7 @@ source: ${seg.sourceLabel}`}
           return (
             <g key={`tick-${i}`}>
               <line x1={x} x2={x} y1={yAxis - 6} y2={yAxis} stroke="rgba(148,163,184,0.4)" />
-              <text x={x} y={yAxis + 12} textAnchor="middle" fontSize={10} fill="#94a3b8">
+              <text x={x} y={yAxis + 12} textAnchor="middle" fontSize={compact ? 16 : 10} fill="#94a3b8">
                 {t >= 0 ? '+' : ''}{t.toFixed(2)}
               </text>
             </g>

@@ -94,14 +94,23 @@ try {
 // nightly Action run after Sep 1 each year auto-bumps the season — no
 // manual edit needed. Override via env: SEASON=20262027 npm run build-rapm
 function computeCurrentSeason() {
-  if (process.env.SEASON) return process.env.SEASON;
   const now = new Date();
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth();
   const startYear = month >= 8 ? year : year - 1;
   return `${startYear}${startYear + 1}`;
 }
-const SEASON = computeCurrentSeason();
+function computeRunSeason() {
+  if (process.env.SEASON) return process.env.SEASON;
+  return computeCurrentSeason();
+}
+const CURRENT_SEASON = computeCurrentSeason();
+const SEASON = computeRunSeason();
+// When SEASON != CURRENT_SEASON the worker's cached endpoints
+// (/cached/team/{ABBREV}/pbp, /cached/xg-lookup) only contain
+// CURRENT-season data. Skipping the worker entirely on prior-season
+// runs forces direct NHL fetches so the build sees the right season.
+const SKIP_WORKER_CACHE = SEASON !== CURRENT_SEASON;
 
 // Prior season — used for rookie detection (T1a entry prior). A player
 // with zero NHL regular-season GP in the prior season is treated as a
@@ -571,14 +580,17 @@ async function ingestGames() {
   let recoveredFromNHL = 0;
   for (const abbrev of NHL_TEAMS) {
     fetched++;
-    const url = `${WORKER_BASE}/cached/team/${abbrev}/pbp`;
     process.stdout.write(`[rapm] (${fetched}/${NHL_TEAMS.length}) PBP ${abbrev}...`);
     let teamGames = null;
-    try {
-      teamGames = await fetchJSON(url);
-    } catch (err) {
-      // Worker 404 or error — fall through to NHL direct fallback below.
-      teamGames = null;
+    if (!SKIP_WORKER_CACHE) {
+      // Worker only caches CURRENT season's PBP. For prior-season builds
+      // we go straight to NHL direct (slower but season-correct).
+      const url = `${WORKER_BASE}/cached/team/${abbrev}/pbp`;
+      try {
+        teamGames = await fetchJSON(url);
+      } catch (err) {
+        teamGames = null;
+      }
     }
 
     if (!Array.isArray(teamGames) || teamGames.length === 0) {
@@ -1609,6 +1621,19 @@ function buildPositionPrior({
   leagueBaselineXGA60 = 0,
   entryPriorOffenseFraction = -0.10,
   entryPriorDefenseFraction = +0.10,
+  // T2a — Bacon prior-informed RAPM (the per-player "daisy chain" anchor).
+  // When `priorSeasonRAPM` is provided (a `Record<playerId, {offense, defense}>`
+  // typically loaded from `public/data/rapm-{prevSeason}.json`), each
+  // qualified player gets their PRIOR-SEASON coefficient as μ instead of
+  // the position cohort mean. This addresses the partner-collinearity
+  // failure mode (Makar/Toews, Heiskanen/Lindell) by anchoring each
+  // partner toward their OWN prior-season ability — ridge can no longer
+  // arbitrarily redistribute credit because the quadratic μ-penalty
+  // pulls each partner back toward their personal anchor.
+  // Defense is sign-flipped from the artifact convention back to raw
+  // (artifact has positive=good; ridge solves on raw "opponent xGF/60"
+  // where positive=bad).
+  priorSeasonRAPM = null,
 }) {
   const nPlayers = qualified.length;
 
@@ -1649,26 +1674,38 @@ function buildPositionPrior({
   }
 
   // 2) Build the μ vector (length 2·nPlayers — offense block then defense).
-  //    Players without a known position fall back to the F prior
-  //    (forwards are the majority cohort). Rookies (T1a) get the entry
-  //    prior; everyone else gets cohort mean.
+  //    Priority order:
+  //      a. PRIOR-SEASON RAPM (Bacon T2a) — per-player anchor when available
+  //      b. Rookie entry prior (T1a) — when player has no prior-season NHL GP
+  //      c. Cohort mean (F vs D) — fallback for everyone else
   const mu = new Float64Array(2 * nPlayers);
   const rookieEntryOffense = entryPriorOffenseFraction * leagueBaselineXGF60;
   const rookieEntryDefense = entryPriorDefenseFraction * leagueBaselineXGA60;
   let rookieCount = 0;
+  let priorRAPMCount = 0;
+  let cohortFallbackCount = 0;
   for (const pid of qualified) {
     const i = playerIdx.get(pid);
     const pos = positions.get(pid);
     const cohortKey = pos === 'D' ? 'D' : 'F';
     const m = cohortMeans[cohortKey];
+    const priorEntry = priorSeasonRAPM ? priorSeasonRAPM[pid] : null;
     const isRookie = priorSeasonPlayers && priorSeasonPlayers.size > 0 && !priorSeasonPlayers.has(pid);
-    if (isRookie) {
+    if (priorEntry) {
+      // Bacon T2a — use prior-season RAPM directly. Sign-flip defense
+      // back to raw "opponent xGF/60" (positive = worse) since the
+      // artifact stores it sign-flipped (positive = good).
+      mu[i] = priorEntry.offense ?? 0;
+      mu[i + nPlayers] = -(priorEntry.defense ?? 0);
+      priorRAPMCount += 1;
+    } else if (isRookie) {
       mu[i] = rookieEntryOffense;
       mu[i + nPlayers] = rookieEntryDefense;
       rookieCount += 1;
     } else {
       mu[i] = m.offense;             // offense column
       mu[i + nPlayers] = m.defense;  // defense column (raw, unflipped)
+      cohortFallbackCount += 1;
     }
   }
 
@@ -1676,11 +1713,50 @@ function buildPositionPrior({
     mu,
     cohortMeans,
     rookieCount,
+    priorRAPMCount,
+    cohortFallbackCount,
     entryPrior: priorSeasonPlayers && priorSeasonPlayers.size > 0
       ? { offense: rookieEntryOffense, defense: rookieEntryDefense,
           offenseFraction: entryPriorOffenseFraction, defenseFraction: entryPriorDefenseFraction }
       : null,
   };
+}
+
+function loadPriorSeasonRAPM(season) {
+  // Bacon T2a — load `public/data/rapm-{season}.json` if it exists, return
+  // a `Record<playerId, { offense, defense }>` for use as ridge prior μ.
+  // Returns null when the file isn't present (graceful degradation —
+  // build will fall back to cohort mean).
+  const fsLocal = require('fs');
+  const pathLocal = require('path');
+  const file = pathLocal.join(__dirname, '..', 'public', 'data', `rapm-${season}.json`);
+  if (!fsLocal.existsSync(file)) {
+    console.log(`[rapm]   Bacon prior: no prior-season artifact at ${file} — falling back to cohort prior`);
+    return null;
+  }
+  try {
+    const raw = JSON.parse(fsLocal.readFileSync(file, 'utf-8'));
+    const players = raw && raw.players;
+    if (!players || typeof players !== 'object') return null;
+    const out = {};
+    for (const [pidStr, entry] of Object.entries(players)) {
+      const pid = parseInt(pidStr, 10);
+      if (!Number.isFinite(pid)) continue;
+      // Skip low-sample prior-season entries — their coefficients are noisy
+      // and would inject noise into the prior. lowSample flag is the
+      // builder's own gp<40 cutoff which is the right signal.
+      if (entry.lowSample) continue;
+      const offense = typeof entry.offense === 'number' ? entry.offense : null;
+      const defense = typeof entry.defense === 'number' ? entry.defense : null;
+      if (offense == null || defense == null) continue;
+      out[pid] = { offense, defense };
+    }
+    console.log(`[rapm]   Bacon prior: loaded ${Object.keys(out).length} prior-season anchors from rapm-${season}.json`);
+    return out;
+  } catch (err) {
+    console.warn(`[rapm]   Bacon prior: failed to load ${file}: ${err.message}`);
+    return null;
+  }
 }
 
 function buildRidgeDiag({
@@ -1808,14 +1884,15 @@ async function fetchPriorSeasonNhlPlayers() {
 // shorter careers / steeper decline phases). Applied multiplicatively on
 // top of the existing TOI-based ρ. Returns 1.0 for unknown ages so missing
 // data degrades gracefully toward standard ridge.
-function ageBellMultiplier(age) {
-  if (typeof age !== 'number' || !Number.isFinite(age)) return 1.0;
-  if (age < 18) return 0.2;
-  if (age <= 19) return 0.2 + (age - 18) * 0.3;       // 18→0.2, 19→0.5
-  if (age <= 24) return 0.5 + (age - 19) * 0.1;       // 19→0.5, 24→1.0
-  if (age <= 29) return 1.0 - (age - 24) * 0.1;       // 24→1.0, 29→0.5
-  if (age <= 32) return 0.5 - (age - 29) * 0.1;       // 29→0.5, 32→0.2
-  return 0.2;
+function ageBellMultiplier(_age) {
+  // DISABLED — WAR/82 is a single-season production metric. Comparing
+  // a 22yo to a 27yo on this season's actual ice production should not
+  // bias toward either via prior strength. Returning 1.0 makes the
+  // prior precision purely TOI-based (the ρ_i = c · medianTOI / TOI_i
+  // term in computeRidgeDiagonal), which is the principled non-age
+  // form. We keep the function signature so call sites don't churn,
+  // but neutralize the multiplier.
+  return 1.0;
 }
 
 // ============================================================================
@@ -2185,6 +2262,11 @@ async function main() {
     ages = meta.ages;
     priorSeasonPlayers = await fetchPriorSeasonNhlPlayers();
 
+    // Bacon T2a — load the prior-season RAPM artifact (per-player μ
+    // anchor). Falls back gracefully to cohort prior when the artifact
+    // doesn't exist for the requested season.
+    const priorSeasonRAPM = loadPriorSeasonRAPM(PRIOR_SEASON);
+
     const priorBuild = buildPositionPrior({
       betaStandard,
       qualified,
@@ -2195,10 +2277,16 @@ async function main() {
       priorSeasonPlayers,
       leagueBaselineXGF60,
       leagueBaselineXGA60,
+      priorSeasonRAPM,
     });
     mu = priorBuild.mu;
     cohortMeans = priorBuild.cohortMeans;
     entryPriorMeta = priorBuild.entryPrior;
+    if (priorBuild.priorRAPMCount > 0) {
+      console.log('[rapm]   T2a Bacon prior: ' + priorBuild.priorRAPMCount + ' players anchored to prior-season RAPM, ' +
+                  priorBuild.cohortFallbackCount + ' fell back to cohort mean, ' +
+                  priorBuild.rookieCount + ' rookies got entry prior');
+    }
     console.log('[rapm]   cohort F: μ_off=' + cohortMeans.F.offense.toFixed(4) +
                 ' μ_def=' + cohortMeans.F.defense.toFixed(4) +
                 ' anchors=' + cohortMeans.F.anchorCount);
@@ -2263,10 +2351,15 @@ async function main() {
       console.log(`[rapm]     ${pid}: off ${o0} → ${o1}   def ${d0} → ${d1}`);
     }
 
+    const baconCount = priorBuild.priorRAPMCount || 0;
     priorMeta = {
-      method: entryPriorMeta
-        ? 'position-cohort-mean (F vs D) + entry-prior for rookies (T1a) + age-bell precision (T1c)'
-        : 'position-cohort-mean (F vs D)',
+      method: baconCount > 0
+        ? `Bacon prior-informed (T2a) — per-player anchor from rapm-${PRIOR_SEASON}.json (${baconCount} players); fallback to cohort mean for new entries; entry prior for rookies (T1a)`
+        : entryPriorMeta
+          ? 'position-cohort-mean (F vs D) + entry-prior for rookies (T1a) + age-bell precision (T1c)'
+          : 'position-cohort-mean (F vs D)',
+      baconPriorAnchorCount: baconCount,
+      baconPriorSeason: baconCount > 0 ? PRIOR_SEASON : null,
       anchorMinTOISec: MIN_ANCHOR_TOI_SEC,
       precisionScaleC: PRIOR_PRECISION_SCALE_C,
       toiFloorRatio: 0.25,
@@ -2341,13 +2434,18 @@ async function main() {
   for (let i = 0; i < nPlayers; i++) qualDef[i] = -qualDefRaw[i];
 
   // β layout: first nPlayers = offense, next nPlayers = defense.
-  const betaOff = beta.subarray(0, nPlayers);
-  // Defense β measures "contribution to OPPONENT xGF/60 while on ice" —
-  // raw positive values mean the opponent scored more, which is BAD. We
-  // sign-flip for the artifact so positive = good defense (suppression).
-  const betaDefRaw = beta.subarray(nPlayers, 2 * nPlayers);
+  // We materialize two flipped Float64Arrays (`betaOff`, `betaDef`) where
+  // positive = good for both, then apply partner-pair shrinkage in place
+  // before downstream consumers (artifact emit, SE computation) see them.
+  const betaOff = new Float64Array(nPlayers);
   const betaDef = new Float64Array(nPlayers);
-  for (let i = 0; i < nPlayers; i++) betaDef[i] = -betaDefRaw[i];
+  for (let i = 0; i < nPlayers; i++) {
+    betaOff[i] = beta[i];
+    // Defense β measures "contribution to OPPONENT xGF/60 while on ice" —
+    // raw positive values mean the opponent scored more, which is BAD. We
+    // sign-flip for the artifact so positive = good defense (suppression).
+    betaDef[i] = -beta[i + nPlayers];
+  }
 
   // Pre-prior coefficients persisted for diagnostics (lets readers
   // audit how much shrinkage the prior applied to each player).
@@ -2357,6 +2455,174 @@ async function main() {
     betaOffStandard[i] = betaStandard[i];
     betaDefStandard[i] = -betaStandard[i + nPlayers];
   }
+
+  // -- Phase 4e: partner-pair shrinkage -----------------------------------
+  // The ridge solver redistributes coefficient mass between players who
+  // share heavy 5v5 minutes — a well-known RAPM pathology. Failure mode:
+  // elite top-pair D's individual contribution is undervalued because his
+  // partner (also strong, also playing the same minutes) absorbs some of
+  // the credit. Symptom: Cale Makar pre-shrink off=0.222 vs partner Devon
+  // Toews 0.785; consensus sees Makar > Toews. Same pattern hits
+  // Heiskanen+Lindell, McAvoy+Carlo, Hedman+Forsling, Josi+Skjei.
+  //
+  // Fix: for every pair (a, b) of qualified players who share above a TOI
+  // threshold AND whose shared TOI dominates each player's individual TOI
+  // (bidirectional dependence), blend offense AND defense coefficients
+  // toward their TOI-weighted joint average. The blend strength saturates
+  // at `BLEND_STRENGTH` for infinite shared time and decays via
+  //   shrinkBlend = BLEND_STRENGTH × pairTOI / (pairTOI + TAU).
+  //
+  // All deltas are computed from ORIGINAL betaOff/betaDef before any are
+  // applied, so the result is order-independent regardless of how many
+  // pair-prior obligations a single player participates in.
+  const PAIR_MIN_TOI_MIN = 800;        // pair must share at least this many 5v5 minutes
+  const PAIR_TAU_MIN = 1500;           // half-life: pairTOI = TAU → shrinkBlend = BLEND/2
+  const PAIR_BLEND_STRENGTH = 0.5;     // max blend even for infinitely-paired (no full collapse)
+  const PAIR_OVERLAP_THRESHOLD = 0.4;  // require sharedTOI / max(toi[a], toi[b]) > this
+  console.log('[rapm] Computing pair-TOI matrix from 5v5 windows for partner-shrinkage...');
+  // pairTOI map keyed by `${minId}|${maxId}` so each unordered pair is
+  // counted exactly once. Built only over QUALIFIED players (the set we
+  // solved for) — anyone outside `playerIdx` is irrelevant downstream.
+  const pairTOIminutes = new Map();
+  for (const w of allWindows) {
+    const minutes = w.durationSec / 60;
+    if (minutes <= 0) continue;
+    // Home-team co-occurrence (5 skaters + 1 G; only qualified survive).
+    const homeQ = [];
+    for (const pid of w.homePlayers) if (playerIdx.has(pid)) homeQ.push(pid);
+    for (let a = 0; a < homeQ.length; a++) {
+      for (let b = a + 1; b < homeQ.length; b++) {
+        const lo = homeQ[a] < homeQ[b] ? homeQ[a] : homeQ[b];
+        const hi = homeQ[a] < homeQ[b] ? homeQ[b] : homeQ[a];
+        const k = lo + '|' + hi;
+        pairTOIminutes.set(k, (pairTOIminutes.get(k) || 0) + minutes);
+      }
+    }
+    // Away-team co-occurrence.
+    const awayQ = [];
+    for (const pid of w.awayPlayers) if (playerIdx.has(pid)) awayQ.push(pid);
+    for (let a = 0; a < awayQ.length; a++) {
+      for (let b = a + 1; b < awayQ.length; b++) {
+        const lo = awayQ[a] < awayQ[b] ? awayQ[a] : awayQ[b];
+        const hi = awayQ[a] < awayQ[b] ? awayQ[b] : awayQ[a];
+        const k = lo + '|' + hi;
+        pairTOIminutes.set(k, (pairTOIminutes.get(k) || 0) + minutes);
+      }
+    }
+  }
+  console.log(`[rapm]   pair-TOI entries: ${pairTOIminutes.size}`);
+
+  // Snapshot pre-shrink coefficients for diagnostic logging + per-player
+  // delta accumulators (sum of weighted shifts across all pairs).
+  const betaOffPreShrink = new Float64Array(betaOff);
+  const betaDefPreShrink = new Float64Array(betaDef);
+  const offDelta = new Float64Array(nPlayers);
+  const defDelta = new Float64Array(nPlayers);
+  const triggeredPairs = [];
+
+  for (const [key, pairTOI] of pairTOIminutes) {
+    if (pairTOI < PAIR_MIN_TOI_MIN) continue;
+    const sep = key.indexOf('|');
+    const pidA = Number(key.slice(0, sep));
+    const pidB = Number(key.slice(sep + 1));
+    const ia = playerIdx.get(pidA);
+    const ib = playerIdx.get(pidB);
+    if (ia === undefined || ib === undefined) continue;
+    const toiA = (toiMap.get(pidA) || 0) / 60;  // minutes
+    const toiB = (toiMap.get(pidB) || 0) / 60;
+    if (toiA <= 0 || toiB <= 0) continue;
+    // Bidirectional dependence: shared minutes must dominate the LARGER
+    // of the two individual totals. This filters out merely-frequent
+    // teammates (e.g. Makar–MacKinnon, who play together a lot but each
+    // also plays a lot apart) and isolates structural pairs (top-D
+    // partners who almost never separate).
+    const overlap = pairTOI / Math.max(toiA, toiB);
+    if (overlap <= PAIR_OVERLAP_THRESHOLD) continue;
+
+    const shrinkBlend = PAIR_BLEND_STRENGTH * pairTOI / (pairTOI + PAIR_TAU_MIN);
+    // TOI-weighted joint average — preserves the pair's combined production
+    // total (mass conservation: w_a × off_a + w_b × off_b before == after
+    // when both are pulled to the same combinedOff).
+    const totalTOI = toiA + toiB;
+    const combinedOff = (betaOffPreShrink[ia] * toiA + betaOffPreShrink[ib] * toiB) / totalTOI;
+    const combinedDef = (betaDefPreShrink[ia] * toiA + betaDefPreShrink[ib] * toiB) / totalTOI;
+    offDelta[ia] += shrinkBlend * (combinedOff - betaOffPreShrink[ia]);
+    offDelta[ib] += shrinkBlend * (combinedOff - betaOffPreShrink[ib]);
+    defDelta[ia] += shrinkBlend * (combinedDef - betaDefPreShrink[ia]);
+    defDelta[ib] += shrinkBlend * (combinedDef - betaDefPreShrink[ib]);
+    triggeredPairs.push({
+      pidA, pidB, pairTOI, toiA, toiB, overlap, shrinkBlend,
+      offA: betaOffPreShrink[ia], offB: betaOffPreShrink[ib],
+      defA: betaDefPreShrink[ia], defB: betaDefPreShrink[ib],
+      combinedOff, combinedDef,
+    });
+  }
+  // Apply the accumulated deltas. A player who participates in two pairs
+  // gets both pulls summed; in practice a top-pair D in one structural
+  // pairing rarely qualifies for a second (the >0.4 overlap requirement
+  // makes simultaneous structural memberships near-impossible).
+  for (let i = 0; i < nPlayers; i++) {
+    betaOff[i] += offDelta[i];
+    betaDef[i] += defDelta[i];
+  }
+  console.log(`[rapm]   partner-shrinkage triggered on ${triggeredPairs.length} pairs ` +
+              `(thresholds: ≥${PAIR_MIN_TOI_MIN}min shared, overlap > ${PAIR_OVERLAP_THRESHOLD}, ` +
+              `τ=${PAIR_TAU_MIN}min, blendMax=${PAIR_BLEND_STRENGTH})`);
+
+  // Diagnostic 1: top 20 players by abs(off_post − off_pre).
+  const offMoves = [];
+  for (let i = 0; i < nPlayers; i++) {
+    const delta = betaOff[i] - betaOffPreShrink[i];
+    if (Math.abs(delta) > 1e-9) {
+      offMoves.push({ idx: i, delta, pre: betaOffPreShrink[i], post: betaOff[i] });
+    }
+  }
+  offMoves.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  // pid lookup: we have playerIdx (pid → idx); invert.
+  const idxToPid = new Array(nPlayers);
+  for (const [pid, i] of playerIdx.entries()) idxToPid[i] = pid;
+  console.log('[rapm]   top 20 offense shifts (|Δ| desc):');
+  for (let k = 0; k < Math.min(20, offMoves.length); k++) {
+    const m = offMoves[k];
+    const pid = idxToPid[m.idx];
+    const sign = m.delta > 0 ? '+' : '';
+    console.log(`[rapm]     ${pid}  off ${m.pre.toFixed(4)} → ${m.post.toFixed(4)} (Δ ${sign}${m.delta.toFixed(4)})`);
+  }
+  // Diagnostic 2: named player before/after table for the partner pairs
+  // we know are pathological + a few elite forwards as sanity-check.
+  const NAMED = [
+    ['Cale Makar', 8480069], ['Devon Toews', 8478038],
+    ['Miro Heiskanen', 8480036], ['Esa Lindell', 8476902],
+    ['Charlie McAvoy', 8479325], ['Brandon Carlo', 8478443],
+    ['Victor Hedman', 8475167], ['Gustav Forsling', 8478055],
+    ['Roman Josi', 8474600], ['Brady Skjei', 8476869],
+    ['Quinn Hughes', 8480800], ['Adam Fox', 8479323],
+    ['Luke Hughes', 8482684],
+    ['Connor McDavid', 8478402], ['Nathan MacKinnon', 8477492],
+  ];
+  console.log('[rapm]   named-player partner-shrinkage diagnostic:');
+  console.log('[rapm]     player                    pre-off  post-off  pre-def  post-def');
+  for (const [name, pid] of NAMED) {
+    const i = playerIdx.get(pid);
+    if (i === undefined) {
+      console.log(`[rapm]     ${name.padEnd(24)} (not in qualified set)`);
+      continue;
+    }
+    const offPre = betaOffPreShrink[i].toFixed(3).padStart(7);
+    const offPost = betaOff[i].toFixed(3).padStart(7);
+    const defPre = betaDefPreShrink[i].toFixed(3).padStart(7);
+    const defPost = betaDef[i].toFixed(3).padStart(7);
+    console.log(`[rapm]     ${name.padEnd(24)} ${offPre}  ${offPost}  ${defPre}  ${defPost}`);
+  }
+
+  // Persist partner-shrinkage metadata for the artifact (schema v5).
+  const partnerShrinkMeta = {
+    minPairTOIMin: PAIR_MIN_TOI_MIN,
+    tauMin: PAIR_TAU_MIN,
+    blendStrength: PAIR_BLEND_STRENGTH,
+    overlapThreshold: PAIR_OVERLAP_THRESHOLD,
+    triggeredPairCount: triggeredPairs.length,
+  };
 
   // -- Phase 5: standard errors -------------------------------------------
   // SE is computed on the 2n×2n normal matrix; split the diag into
@@ -2479,7 +2745,13 @@ async function main() {
 
   const output = {
     season: SEASON,
-    schemaVersion: priorMeta ? 4 : 2,  // v4 adds T2b score-state + venue covariates
+    // v5 adds partner-pair shrinkage post-pass on top of v4's covariates.
+    // Players' `offense` / `defense` are now shrunk toward TOI-weighted
+    // pair averages for high-overlap structural pairs. The pre-shrink
+    // (and pre-prior) values remain available as `offenseStandard` /
+    // `defenseStandard` per player; the prior-informed-but-pre-shrink
+    // values are not separately persisted (would need a third snapshot).
+    schemaVersion: priorMeta ? 5 : 2,
     computedAt: new Date().toISOString(),
     gamesAnalyzed: shiftsFetched,
     shiftsAnalyzed: allWindows.length,
@@ -2498,6 +2770,10 @@ async function main() {
     // T2b — score-state-period and home venue nuisance lifts in xGF/60.
     // Player offense/defense are residuals AFTER these are regressed out.
     covariates,
+    // v5 partner-pair shrinkage metadata. Documents the threshold
+    // structure so consumers can audit which pairs were shrunk toward
+    // their joint mean and how aggressive the blend was.
+    partnerShrink: partnerShrinkMeta,
     leagueBaselineXGF60: Number(leagueBaselineXGF60.toFixed(4)),
     leagueBaselineXGA60: Number(leagueBaselineXGA60.toFixed(4)),
     // Special-teams league rate (SHARE-WEIGHTED to match the per-player

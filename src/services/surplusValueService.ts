@@ -300,6 +300,14 @@ export async function computePlayerSurplus(
   position: string,
   gamesPlayed: number,
 ): Promise<PlayerSurplusDetailed | null> {
+  // Goalie surplus is DEFERRED until a goalie UFA $/WAR ratio is fit.
+  // The current $/WAR anchor is computed from skater UFA contracts only
+  // (see fitHedonicModel — it gates on positionCode !== 'G'). Applying
+  // a skater $/WAR to a goalie WAR/82 would be apples-to-oranges; the
+  // goalie market clears at a different rate. Until the worker emits a
+  // goalie-specific UFA cohort + ratio, the goalie share card shows
+  // cap hit + WAR/82 in the surplus slot rather than a derived number
+  // that would mislead. See `GoalieAnalyticsCard.tsx` for the UI fallback.
   if (position === 'G' || gamesPlayed < 5) return null;
 
   const coeffs = await fitHedonicModel();

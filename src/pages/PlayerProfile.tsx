@@ -13,6 +13,9 @@ import IceChartsPanel from '../components/IceChartsPanel';
 import RollingAnalyticsChart from '../components/charts/RollingAnalyticsChart';
 import XGFlowChart from '../components/charts/XGFlowChart';
 import PlayerAnalyticsCard from '../components/PlayerAnalyticsCard';
+import GoalieAnalyticsCard from '../components/GoalieAnalyticsCard';
+import { useGoalieShotsAgainst } from '../hooks/useGoalieShotsAgainst';
+import { getGoalieAnalytics } from '../services/goalieAnalytics';
 import { useComparison } from '../context/ComparisonContext';
 import PlayerSearch from '../components/PlayerSearch';
 import ProfileHero from '../components/ProfileHero';
@@ -27,10 +30,11 @@ import GoalsAboveExpectedCard from '../components/charts/GoalsAboveExpectedCard'
 import HotColdZoneRadial from '../components/charts/HotColdZoneRadial';
 import RollingFinishingTrajectory from '../components/charts/RollingFinishingTrajectory';
 import WARBreakdown from '../components/charts/WARBreakdown';
+import WARHistoryStrip from '../components/charts/WARHistoryStrip';
 import RAPMImpactCard from '../components/charts/RAPMImpactCard';
 import LinemateWithWithout from '../components/charts/LinemateWithWithout';
 import { usePlayerLinemateChemistry } from '../hooks/usePlayerLinemateChemistry';
-import { computeSkaterWAR } from '../services/warService';
+import { computeSkaterWAR, computeGoalieWAR } from '../services/warService';
 import { loadWARTables, recomputeQuantilesWithRAPM, type WARTables } from '../services/warTableService';
 import { loadRAPM, type RAPMArtifact } from '../services/rapmService';
 import { edgeTrackingService } from '../services/edgeTrackingService';
@@ -121,17 +125,34 @@ function PlayerProfile() {
   }, []);
   const cardRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
-  // (cardZoom removed) — PlayerAnalyticsCard.css uses container
-  // queries (`@container card`) to respond to its own width, so the
-  // card adapts its layout (stacking, font sizes, aspect-ratio) at
-  // narrow widths without needing a JS-driven CSS `zoom` hack. The
-  // share export still clones the card into a 1080×1080 wrapper, so
-  // the cloned card is over the 720px container-query breakpoint and
-  // keeps the desktop layout regardless of the user's viewport.
+  // The card always renders at the 1080×1080 desktop layout. On narrow
+  // viewports we scale the cardRef wrapper down via CSS transform so
+  // the on-page preview is a faithful smaller version of the exported
+  // share image. `--card-scale` = previewSlotWidth / 1080. The actual
+  // ResizeObserver hook is set up below, after `player` is declared.
 
   const { data: player, isLoading, error } = usePlayerStats(
     playerId ? parseInt(playerId, 10) : null
   );
+
+  // Drive the share-card preview's `--card-scale` via ResizeObserver.
+  // Re-runs when the card tab opens AND when player data first arrives
+  // (the card-preview JSX is gated on `currentSeasonStats`, so the refs
+  // aren't attached until player data loads).
+  useEffect(() => {
+    if (activeTab !== 'card' || !player) return;
+    const slot = previewRef.current;
+    const wrapper = cardRef.current;
+    if (!slot || !wrapper) return;
+    const apply = () => {
+      const w = slot.clientWidth;
+      if (w > 0) wrapper.style.setProperty('--card-scale', String(w / 1080));
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(slot);
+    return () => ro.disconnect();
+  }, [activeTab, playerId, player?.playerId]);
 
   // Computed WAR result for the current player — used by both the deep-
   // tab breakdown and the shareable card's right column.
@@ -142,6 +163,21 @@ function PlayerProfile() {
     const ctx = rapmAdjustedContext ?? warTables.context;
     return computeSkaterWAR(row, ctx, rapm);
   }, [warTables, player, rapm, rapmAdjustedContext]);
+
+  // Goalie WAR result — analogous to shareWarResult but uses the
+  // war-goalies artifact + computeGoalieWAR. Gated on isGoalie below
+  // so we don't waste a computeGoalieWAR call for every skater.
+  // RAPM is skater-only (5v5 ridge over shift-level shooter/defender
+  // dummies); goalies aren't in the RAPM artifact, so no rapm/context
+  // adjustment is needed here — the worker-baked goalie quantiles in
+  // warTables.context.goalies are already the right baseline.
+  const shareGoalieWarResult = useMemo(() => {
+    if (!warTables || !player) return undefined;
+    if (player.position !== 'G') return undefined;
+    const row = warTables.goalies[player.playerId];
+    if (!row) return undefined;
+    return computeGoalieWAR(row, warTables.context);
+  }, [warTables, player]);
 
   // Reset active tab when player changes — but respect ?tab=card so
   // the share-card "Search Another Player" widget can land directly on
@@ -422,6 +458,27 @@ function PlayerProfile() {
     player?.currentTeamId || null,
     player?.featuredStats?.season?.toString() || getCurrentSeason()
   );
+
+  // Goalie-specific data sources. usePlayerGameData walks games filtered
+  // by `shootingPlayerId === playerId`, which never matches a goalie —
+  // so for goalies we use a parallel hook that filters by
+  // `goalieInNetId === playerId` instead. Analogously goalieAnalytics
+  // is the goalie-equivalent of skaterAverages: real computed
+  // distributions from /goalie/summary + /goalie/advanced.
+  const isGoalieEarly = player?.position === 'G';
+  const { data: goalieShots } = useGoalieShotsAgainst(
+    isGoalieEarly && player?.playerId ? player.playerId : null,
+    player?.featuredStats?.season?.toString() || getCurrentSeason()
+  );
+  const { data: goalieAnalyticsBundle } = useQuery({
+    queryKey: ['goalie-analytics', player?.featuredStats?.season],
+    queryFn: () => getGoalieAnalytics(
+      player?.featuredStats?.season?.toString() || getCurrentSeason()
+    ),
+    enabled: !!player && isGoalieEarly,
+    staleTime: ANALYTICS_CACHE.LEAGUE_STATS,
+    retry: 1,
+  });
 
   // Fetch advanced analytics data - must be called before any conditional returns
   const {
@@ -1398,6 +1455,25 @@ function PlayerProfile() {
                     );
                   })()}
 
+                  {/* 3-Year WAR History — full size. Renders for both
+                      skaters and goalies. Component handles its own
+                      loading / empty states + position-aware row content
+                      (skaters: EV/PP/PK/Other; goalies: Save/Repl). */}
+                  <div className="deep-panel">
+                    <WARHistoryStrip
+                      playerId={player.playerId}
+                      position={
+                        isGoalie
+                          ? 'G'
+                          : (player.position === 'D' ? 'D' : 'F')
+                      }
+                      currentSeasonResult={
+                        isGoalie ? shareGoalieWarResult : shareWarResult
+                      }
+                      title="3-Year WAR History"
+                    />
+                  </div>
+
                   <div className="deep-panel">
                     <RAPMImpactCard
                       playerId={player.playerId}
@@ -1488,6 +1564,44 @@ function PlayerProfile() {
 
                 <div className="card-preview" ref={previewRef}>
                   <div ref={cardRef}>
+                  {isGoalie ? (
+                    // Goalie share card. The skater card was silently
+                    // broken for goalies (P/GP=0, surplus null,
+                    // skater-shaped xG-trend fallback). The goalie
+                    // card is sibling-shaped: shares chrome class
+                    // names so PlayerProfile.tsx's handleShare clone
+                    // pipeline works unmodified, but the data sources
+                    // are goalie-specific (computeGoalieWAR,
+                    // goalieAnalytics, useGoalieShotsAgainst).
+                    (() => {
+                      const goalieRow = goalieAnalyticsBundle?.goalies.find(
+                        g => g.playerId === player.playerId
+                      ) ?? null;
+                      return (
+                        <GoalieAnalyticsCard
+                          playerId={player.playerId}
+                          playerName={`${player.firstName.default} ${player.lastName.default}`}
+                          playerNumber={player.sweaterNumber}
+                          position={formatPosition(player.position)}
+                          teamName={player.fullTeamName?.default || player.currentTeamAbbrev || ''}
+                          teamAbbrev={player.currentTeamAbbrev || ''}
+                          teamLogo={player.teamLogo}
+                          headshot={player.headshot}
+                          season={formatSeasonId(player.featuredStats?.season || 0)}
+                          gamesPlayed={currentSeasonStats.gamesPlayed}
+                          goalieAnalytics={goalieRow}
+                          goalieWarResult={shareGoalieWarResult}
+                          shotsFaced={goalieShots?.shots.map(s => ({
+                            x: s.x,
+                            y: s.y,
+                            result: s.type,
+                            xGoal: s.xGoal,
+                          }))}
+                          capHit={contractData?.contract.capHit}
+                        />
+                      );
+                    })()
+                  ) : (
                   <PlayerAnalyticsCard
                     playerId={player.playerId}
                     playerName={`${player.firstName.default} ${player.lastName.default}`}
@@ -1535,6 +1649,7 @@ function PlayerProfile() {
                     modelRmseDollars={surplusData?.modelRmseDollars}
                     warResult={shareWarResult}
                   />
+                  )}
                   </div>
                 </div>
                 <div className="card-actions">

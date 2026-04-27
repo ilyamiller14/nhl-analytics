@@ -547,6 +547,9 @@ export interface ShotAttempt {
   xGoal?: number; // Expected goals probability (0-1)
   shooterId?: number; // NHL playerId of the shooter — attached when the
                       // upstream source has it (e.g. team-level aggregation).
+  goalieInNetId?: number; // NHL playerId of the goalie facing the shot.
+                      // Used by the goalie share card to filter "shots
+                      // this goalie faced" out of a game's PBP.
   scoreState?: 'leading' | 'trailing' | 'tied'; // Shooter-perspective score
                       // state at the time of the shot. Attached by
                       // aggregators that walk goals in order.
@@ -641,6 +644,7 @@ export function convertToShotAttempt(
     rushShot: ctx.isRushShot ?? false,
     xGoal: xgPrediction.xGoal,
     shooterId: shotEvent.shootingPlayerId,
+    goalieInNetId: shotEvent.goalieInNetId,
   };
 }
 

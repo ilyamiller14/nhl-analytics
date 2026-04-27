@@ -96,6 +96,29 @@ function safeComputeSeason(): string {
 }
 const CURRENT_SEASON = safeComputeSeason();
 
+/**
+ * Parse and validate a season query parameter (8-digit format like "20242025").
+ * Returns CURRENT_SEASON if missing. Throws on malformed values so we never
+ * silently write 1969 data into KV (matches the computeCurrentSeason guard).
+ *
+ * Valid range: 19171918 .. 20502051. The lower bound is the inaugural NHL
+ * season; the upper bound is a generous future cap to keep typos from
+ * polluting KV with implausible season ids.
+ */
+function parseSeasonParam(url: URL): string {
+  const raw = url.searchParams.get('season');
+  if (!raw) return CURRENT_SEASON;
+  if (!/^\d{8}$/.test(raw)) {
+    throw new Error(`Invalid season format: "${raw}" (expected 8 digits like 20242025)`);
+  }
+  const start = parseInt(raw.slice(0, 4), 10);
+  const end = parseInt(raw.slice(4), 10);
+  if (start < 1917 || start > 2050 || end !== start + 1) {
+    throw new Error(`Implausible season: "${raw}" (must be NNNN(NNNN+1) within 1917-2050)`);
+  }
+  return raw;
+}
+
 function getCacheTTL(path: string): number {
   for (const [pattern, ttl] of Object.entries(CACHE_TTLS)) {
     if (path.includes(pattern)) {
@@ -398,7 +421,14 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 
   // Special endpoint: Serve empirical xG lookup (built from all cached PBP)
   if (url.pathname === '/cached/xg-lookup') {
-    const cached = await env.NHL_CACHE.get(`xg_lookup_${CURRENT_SEASON}`);
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const cached = await env.NHL_CACHE.get(`xg_lookup_${season}`);
     if (cached) {
       return new Response(cached, {
         headers: {
@@ -410,8 +440,8 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
       });
     }
     return new Response(JSON.stringify({
-      error: 'xG lookup not yet built',
-      message: 'Call /cached/build-xg to trigger a build, or wait for the daily cron.',
+      error: `xG lookup not yet built for season ${season}`,
+      message: `Call /cached/build-xg?season=${season} to trigger a build, or wait for the daily cron.`,
     }), {
       status: 404,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -420,9 +450,17 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 
   // Special endpoint: Manually trigger xG lookup build from cached PBP
   if (url.pathname === '/cached/build-xg') {
-    ctx.waitUntil(buildXgLookup(env));
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    ctx.waitUntil(buildXgLookup(env, season));
     return new Response(JSON.stringify({
-      message: 'xG lookup build started. Runs in background; query /cached/xg-lookup in ~30s.',
+      message: `xG lookup build started for ${season}. Runs in background; query /cached/xg-lookup?season=${season} in ~30s.`,
+      season,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -505,8 +543,15 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   // Chunked xG build — process one team per HTTP request to stay under
   // worker CPU budget. Orchestrate: reset → 32× chunk → finalize.
   if (url.pathname === '/cached/xg-reset') {
-    ctx.waitUntil(resetXgPartial(env));
-    return new Response(JSON.stringify({ message: 'xG partial state cleared.' }), {
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    ctx.waitUntil(resetXgPartial(env, season));
+    return new Response(JSON.stringify({ message: `xG partial state cleared for ${season}.`, season }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -517,13 +562,21 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     // Synchronous handling — orchestrator waits for each chunk so they
     // never race on the shared partial state in KV.
     try {
-      await buildXgLookupTeam(env, team.toUpperCase());
-      const partial = await loadXgPartial(env);
+      await buildXgLookupTeam(env, team.toUpperCase(), season);
+      const partial = await loadXgPartial(env, season);
       return new Response(JSON.stringify({
         team: team.toUpperCase(),
+        season,
         teamsProcessed: partial.teamsProcessed.length,
         totalShots: partial.totalShots,
         gamesSeen: partial.seenGameIds.length,
@@ -535,11 +588,19 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     }
   }
   if (url.pathname === '/cached/xg-finalize') {
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     try {
-      await finalizeXgLookup(env);
-      const lookup = await env.NHL_CACHE.get(`xg_lookup_${CURRENT_SEASON}`, 'json') as any;
+      await finalizeXgLookup(env, season);
+      const lookup = await env.NHL_CACHE.get(`xg_lookup_${season}`, 'json') as any;
       return new Response(JSON.stringify({
         message: 'Finalized.',
+        season,
         games: lookup?.gamesAnalyzed,
         shots: lookup?.totalShots,
         buckets: lookup?.buckets ? Object.keys(lookup.buckets).length : 0,
@@ -552,38 +613,60 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   }
 
   // WAR artifacts — skater table, goalie table, league context.
+  // All accept ?season=YYYYYYYY (8-digit) — defaults to CURRENT_SEASON.
   if (url.pathname === '/cached/war-skaters') {
-    const cached = await env.NHL_CACHE.get(`war_skaters_${CURRENT_SEASON}`);
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const cached = await env.NHL_CACHE.get(`war_skaters_${season}`);
     if (cached) {
       return new Response(cached, {
         headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'HIT' },
       });
     }
-    return new Response(JSON.stringify({ error: 'WAR skaters table not yet built. Call /cached/build-war.' }), {
+    return new Response(JSON.stringify({ error: `WAR skaters table not yet built for ${season}. Call /cached/build-war?season=${season}.` }), {
       status: 404,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
   if (url.pathname === '/cached/war-goalies') {
-    const cached = await env.NHL_CACHE.get(`war_goalies_${CURRENT_SEASON}`);
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const cached = await env.NHL_CACHE.get(`war_goalies_${season}`);
     if (cached) {
       return new Response(cached, {
         headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'HIT' },
       });
     }
-    return new Response(JSON.stringify({ error: 'WAR goalies table not yet built. Call /cached/build-war.' }), {
+    return new Response(JSON.stringify({ error: `WAR goalies table not yet built for ${season}. Call /cached/build-war?season=${season}.` }), {
       status: 404,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
   if (url.pathname === '/cached/league-context') {
-    const cached = await env.NHL_CACHE.get(`league_context_${CURRENT_SEASON}`);
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const cached = await env.NHL_CACHE.get(`league_context_${season}`);
     if (cached) {
       return new Response(cached, {
         headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'HIT' },
       });
     }
-    return new Response(JSON.stringify({ error: 'League context not yet built. Call /cached/build-war.' }), {
+    return new Response(JSON.stringify({ error: `League context not yet built for ${season}. Call /cached/build-war?season=${season}.` }), {
       status: 404,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -627,9 +710,17 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   }
 
   if (url.pathname === '/cached/build-war') {
-    ctx.waitUntil(buildWAR(env));
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    ctx.waitUntil(buildWAR(env, season));
     return new Response(JSON.stringify({
-      message: 'WAR pipeline started. Runs in background; query /cached/war-skaters, /cached/war-goalies, /cached/league-context in ~60s.',
+      message: `WAR pipeline started for ${season}. Runs in background; query /cached/war-skaters?season=${season}, /cached/war-goalies?season=${season}, /cached/league-context?season=${season} in ~60s.`,
+      season,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -638,8 +729,15 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   // Chunked WAR build — one team per HTTP request, synchronous so the
   // orchestrator can sequence properly (no racing partial writes).
   if (url.pathname === '/cached/war-reset') {
-    ctx.waitUntil(resetWARPartial(env));
-    return new Response(JSON.stringify({ message: 'WAR partial state cleared.' }), {
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    ctx.waitUntil(resetWARPartial(env, season));
+    return new Response(JSON.stringify({ message: `WAR partial state cleared for ${season}.`, season }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -650,11 +748,19 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     try {
-      await buildWARChunkTeam(env, team.toUpperCase());
-      const partial = await loadWARPartial(env);
+      await buildWARChunkTeam(env, team.toUpperCase(), season);
+      const partial = await loadWARPartial(env, season);
       return new Response(JSON.stringify({
         team: team.toUpperCase(),
+        season,
         teamsProcessed: partial.teamsProcessed.length,
         gamesSeen: partial.seenGameIds.length,
         skaters: Object.keys(partial.skaters).length,
@@ -710,21 +816,29 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
   }
 
   if (url.pathname === '/cached/war-finalize') {
-    try {
-      await finalizeWARTables(env);
-      const ctx = await env.NHL_CACHE.get(`league_context_${CURRENT_SEASON}`, 'json') as any;
-      return new Response(JSON.stringify({
-        message: 'Finalized.',
-        marginalGoalsPerWin: ctx?.marginalGoalsPerWin,
-        fCount: ctx?.skaters?.F?.count,
-        dCount: ctx?.skaters?.D?.count,
-        gCount: ctx?.goalies?.count,
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    } catch (err: any) {
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
       return new Response(JSON.stringify({ error: String(err?.message || err) }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    // Finalize can exceed the 30s HTTP CPU budget at full league scale
+    // (32 teams × ~82 games × ~1000 skaters split-half merge), so push it
+    // to background via ctx.waitUntil and let the caller poll the
+    // /cached/league-context endpoint to confirm completion.
+    ctx.waitUntil((async () => {
+      try {
+        await finalizeWARTables(env, season);
+        console.log(`war-finalize ${season}: done`);
+      } catch (err) {
+        console.error(`war-finalize ${season} failed:`, err);
+      }
+    })());
+    return new Response(JSON.stringify({
+      message: `WAR finalize started for ${season}. Runs in background; poll /cached/league-context?season=${season} in ~30s to confirm.`,
+      season,
+    }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
   // Refill PBP for a single team (on-demand, to work within one request's
@@ -739,16 +853,25 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     ctx.waitUntil((async () => {
       try {
-        const count = await cacheTeamPBP(team.toUpperCase(), env);
-        console.log(`refill-team-pbp ${team}: cached ${count} games`);
+        const count = await cacheTeamPBP(team.toUpperCase(), env, season);
+        console.log(`refill-team-pbp ${team} (${season}): cached ${count} games`);
       } catch (err) {
-        console.error(`refill-team-pbp ${team} failed:`, err);
+        console.error(`refill-team-pbp ${team} (${season}) failed:`, err);
       }
     })());
     return new Response(JSON.stringify({
-      message: `Refilling PBP cache for ${team.toUpperCase()}. Runs in background.`,
+      message: `Refilling PBP cache for ${team.toUpperCase()} (${season}). Runs in background.`,
+      team: team.toUpperCase(),
+      season,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -1447,10 +1570,10 @@ async function cacheTeamShifts(teamAbbrev: string, env: Env): Promise<number> {
   return done;
 }
 
-async function fetchTeamGameIds(teamAbbrev: string): Promise<number[]> {
+async function fetchTeamGameIds(teamAbbrev: string, season: string = CURRENT_SEASON): Promise<number[]> {
   try {
     const response = await fetch(
-      `https://api-web.nhle.com/v1/club-schedule-season/${teamAbbrev}/${CURRENT_SEASON}`,
+      `https://api-web.nhle.com/v1/club-schedule-season/${teamAbbrev}/${season}`,
       {
         headers: {
           'User-Agent': 'NHL-Analytics-CacheWarmer/1.0',
@@ -1460,7 +1583,7 @@ async function fetchTeamGameIds(teamAbbrev: string): Promise<number[]> {
     );
 
     if (!response.ok) {
-      console.error(`Failed to fetch schedule for ${teamAbbrev}: ${response.status}`);
+      console.error(`Failed to fetch schedule for ${teamAbbrev} (${season}): ${response.status}`);
       return [];
     }
 
@@ -1473,7 +1596,7 @@ async function fetchTeamGameIds(teamAbbrev: string): Promise<number[]> {
       )
       .map((g: any) => g.id);
   } catch (error) {
-    console.error(`Error fetching schedule for ${teamAbbrev}:`, error);
+    console.error(`Error fetching schedule for ${teamAbbrev} (${season}):`, error);
     return [];
   }
 }
@@ -1482,12 +1605,12 @@ async function fetchTeamGameIds(teamAbbrev: string): Promise<number[]> {
  * Cache play-by-play data for a team
  * Uses individual game cache - only fetches games not already in KV
  */
-async function cacheTeamPBP(teamAbbrev: string, env: Env): Promise<number> {
-  console.log(`Building cache for ${teamAbbrev}...`);
+async function cacheTeamPBP(teamAbbrev: string, env: Env, season: string = CURRENT_SEASON): Promise<number> {
+  console.log(`Building cache for ${teamAbbrev} (${season})...`);
 
-  // Get current game IDs from schedule
-  const gameIds = await fetchTeamGameIds(teamAbbrev);
-  console.log(`Found ${gameIds.length} completed games for ${teamAbbrev}`);
+  // Get game IDs from the schedule for this season.
+  const gameIds = await fetchTeamGameIds(teamAbbrev, season);
+  console.log(`Found ${gameIds.length} completed games for ${teamAbbrev} (${season})`);
 
   if (gameIds.length === 0) {
     return 0;
@@ -1518,7 +1641,7 @@ async function cacheTeamPBP(teamAbbrev: string, env: Env): Promise<number> {
   allGames.sort((a, b) => new Date(a.gameDate).getTime() - new Date(b.gameDate).getTime());
 
   // Store team index (just game IDs, not full data)
-  const teamKey = `team_index_${teamAbbrev}_${CURRENT_SEASON}`;
+  const teamKey = `team_index_${teamAbbrev}_${season}`;
   await env.NHL_CACHE.put(teamKey, JSON.stringify({
     gameIds: allGames.map(g => g.gameId),
     lastUpdated: new Date().toISOString(),
@@ -1531,12 +1654,12 @@ async function cacheTeamPBP(teamAbbrev: string, env: Env): Promise<number> {
   // nightly cron rotate through all 32 teams across several runs even
   // when a single cron tick times out after ~8 teams (CPU budget). With
   // 24h TTL that rotation never converged; with 7d it does.
-  const cacheKey = `team_pbp_${teamAbbrev}_${CURRENT_SEASON}`;
+  const cacheKey = `team_pbp_${teamAbbrev}_${season}`;
   await env.NHL_CACHE.put(cacheKey, JSON.stringify(allGames), {
     expirationTtl: 7 * 24 * 60 * 60,
   });
 
-  console.log(`Cached ${allGames.length} games for ${teamAbbrev}`);
+  console.log(`Cached ${allGames.length} games for ${teamAbbrev} (${season})`);
   return allGames.length;
 }
 
@@ -2400,10 +2523,10 @@ interface XgPartial {
   teamsProcessed: string[];
 }
 
-const XG_PARTIAL_KEY = () => `xg_partial_${CURRENT_SEASON}`;
+const XG_PARTIAL_KEY = (season: string = CURRENT_SEASON) => `xg_partial_${season}`;
 
-async function loadXgPartial(env: Env): Promise<XgPartial> {
-  const cached = await env.NHL_CACHE.get(XG_PARTIAL_KEY(), 'json') as XgPartial | null;
+async function loadXgPartial(env: Env, season: string = CURRENT_SEASON): Promise<XgPartial> {
+  const cached = await env.NHL_CACHE.get(XG_PARTIAL_KEY(season), 'json') as XgPartial | null;
   return cached || {
     buckets: {},
     seenGameIds: [],
@@ -2413,21 +2536,21 @@ async function loadXgPartial(env: Env): Promise<XgPartial> {
   };
 }
 
-async function storeXgPartial(env: Env, partial: XgPartial): Promise<void> {
-  await env.NHL_CACHE.put(XG_PARTIAL_KEY(), JSON.stringify(partial), {
+async function storeXgPartial(env: Env, partial: XgPartial, season: string = CURRENT_SEASON): Promise<void> {
+  await env.NHL_CACHE.put(XG_PARTIAL_KEY(season), JSON.stringify(partial), {
     expirationTtl: 24 * 60 * 60,
   });
 }
 
 // Process a single team's cached PBP into the partial xG state.
-async function buildXgLookupTeam(env: Env, team: string): Promise<void> {
-  const partial = await loadXgPartial(env);
+async function buildXgLookupTeam(env: Env, team: string, season: string = CURRENT_SEASON): Promise<void> {
+  const partial = await loadXgPartial(env, season);
   if (partial.teamsProcessed.includes(team)) {
-    console.log(`xG chunk ${team}: already processed`);
+    console.log(`xG chunk ${team} (${season}): already processed`);
     return;
   }
-  const games = await env.NHL_CACHE.get(`team_pbp_${team}_${CURRENT_SEASON}`, 'json') as any[] | null;
-  if (!Array.isArray(games)) { console.log(`xG chunk ${team}: no PBP cache`); return; }
+  const games = await env.NHL_CACHE.get(`team_pbp_${team}_${season}`, 'json') as any[] | null;
+  if (!Array.isArray(games)) { console.log(`xG chunk ${team} (${season}): no PBP cache`); return; }
 
   const seen = new Set(partial.seenGameIds);
   let shotsAdded = 0, goalsAdded = 0;
@@ -2465,13 +2588,13 @@ async function buildXgLookupTeam(env: Env, team: string): Promise<void> {
   partial.totalShots += shotsAdded;
   partial.totalGoals += goalsAdded;
   partial.teamsProcessed.push(team);
-  await storeXgPartial(env, partial);
-  console.log(`xG chunk ${team}: +${shotsAdded} shots (+${goalsAdded} goals), total ${partial.totalShots}`);
+  await storeXgPartial(env, partial, season);
+  console.log(`xG chunk ${team} (${season}): +${shotsAdded} shots (+${goalsAdded} goals), total ${partial.totalShots}`);
 }
 
 // Finalize: convert partial counts to rates and write the lookup.
-async function finalizeXgLookup(env: Env): Promise<void> {
-  const partial = await loadXgPartial(env);
+async function finalizeXgLookup(env: Env, season: string = CURRENT_SEASON): Promise<void> {
+  const partial = await loadXgPartial(env, season);
   const out: Record<string, { shots: number; goals: number; rate: number }> = {};
   for (const [k, v] of Object.entries(partial.buckets)) {
     out[k] = { shots: v.shots, goals: v.goals, rate: v.shots > 0 ? v.goals / v.shots : 0 };
@@ -2479,7 +2602,7 @@ async function finalizeXgLookup(env: Env): Promise<void> {
   const baselineRate = partial.totalShots > 0 ? partial.totalGoals / partial.totalShots : 0;
   const lookup = {
     schemaVersion: 2,
-    season: CURRENT_SEASON,
+    season,
     computedAt: new Date().toISOString(),
     gamesAnalyzed: partial.seenGameIds.length,
     totalShots: partial.totalShots,
@@ -2488,23 +2611,23 @@ async function finalizeXgLookup(env: Env): Promise<void> {
     minShotsPerBucket: XG_MIN_SHOTS_PER_BUCKET,
     buckets: out,
   };
-  await env.NHL_CACHE.put(`xg_lookup_${CURRENT_SEASON}`, JSON.stringify(lookup), {
+  await env.NHL_CACHE.put(`xg_lookup_${season}`, JSON.stringify(lookup), {
     expirationTtl: 7 * 24 * 60 * 60,
   });
-  console.log(`xG lookup finalized: ${Object.keys(out).length} buckets, ${partial.seenGameIds.length} games, baseline ${(baselineRate * 100).toFixed(2)}%`);
+  console.log(`xG lookup finalized for ${season}: ${Object.keys(out).length} buckets, ${partial.seenGameIds.length} games, baseline ${(baselineRate * 100).toFixed(2)}%`);
 }
 
 // Reset partial state before starting a new build.
-async function resetXgPartial(env: Env): Promise<void> {
-  await env.NHL_CACHE.delete(XG_PARTIAL_KEY());
+async function resetXgPartial(env: Env, season: string = CURRENT_SEASON): Promise<void> {
+  await env.NHL_CACHE.delete(XG_PARTIAL_KEY(season));
 }
 
 // Old one-shot wrapper — retained so the cron still works without
 // external orchestration (cron-scheduled workers have a much larger
 // CPU budget than HTTP requests, so the full one-shot build is fine
 // from that path).
-async function buildXgLookup(env: Env): Promise<void> {
-  console.log('Building empirical xG lookup (one-shot for cron)...');
+async function buildXgLookup(env: Env, season: string = CURRENT_SEASON): Promise<void> {
+  console.log(`Building empirical xG lookup for ${season} (one-shot for cron)...`);
   const startTime = Date.now();
 
   type Bucket = { shots: number; goals: number };
@@ -2522,7 +2645,7 @@ async function buildXgLookup(env: Env): Promise<void> {
   for (let i = 0; i < NHL_TEAMS.length; i += BATCH) {
     const batch = NHL_TEAMS.slice(i, i + BATCH);
     const pbps = await Promise.all(
-      batch.map(t => env.NHL_CACHE.get(`team_pbp_${t}_${CURRENT_SEASON}`, 'json') as Promise<any[] | null>)
+      batch.map(t => env.NHL_CACHE.get(`team_pbp_${t}_${season}`, 'json') as Promise<any[] | null>)
     );
     for (const games of pbps) {
       if (!Array.isArray(games)) continue;
@@ -2558,7 +2681,7 @@ async function buildXgLookup(env: Env): Promise<void> {
 
   const lookup = {
     schemaVersion: 2, // bumped when key layout changes — client invalidates cache
-    season: CURRENT_SEASON,
+    season,
     computedAt: new Date().toISOString(),
     gamesAnalyzed: seenGameIds.size,
     totalShots,
@@ -2568,12 +2691,12 @@ async function buildXgLookup(env: Env): Promise<void> {
     buckets: out,
   };
 
-  await env.NHL_CACHE.put(`xg_lookup_${CURRENT_SEASON}`, JSON.stringify(lookup), {
+  await env.NHL_CACHE.put(`xg_lookup_${season}`, JSON.stringify(lookup), {
     expirationTtl: 7 * 24 * 60 * 60, // 7 days (refreshed daily by cron)
   });
 
   const duration = Math.round((Date.now() - startTime) / 1000);
-  console.log(`xG lookup built: ${Object.keys(out).length} buckets, baseline ${(baselineRate * 100).toFixed(2)}%, in ${duration}s`);
+  console.log(`xG lookup built for ${season}: ${Object.keys(out).length} buckets, baseline ${(baselineRate * 100).toFixed(2)}%, in ${duration}s`);
 }
 
 // ============================================================================
@@ -3005,16 +3128,16 @@ interface LeagueGoalieStats {
 // PBP. Separating them doubles the I/O and CPU cost; we got close to
 // the worker budget ceiling in v1. The single-pass version indexes both
 // shooter and goalie from each shot event.
-async function buildWARTables(env: Env): Promise<{
+async function buildWARTables(env: Env, season: string = CURRENT_SEASON): Promise<{
   skaters: Record<number, WARSkaterRow>;
   goalies: Record<number, WARGoalieRow>;
 }> {
-  console.log('WAR: aggregating per-skater + per-goalie stats from cached PBP (single pass)...');
+  console.log(`WAR: aggregating per-skater + per-goalie stats from cached PBP for ${season} (single pass)...`);
 
   // Load the xG lookup so we can compute ixG per shot.
-  const xgLookupRaw = await env.NHL_CACHE.get(`xg_lookup_${CURRENT_SEASON}`, 'json') as any;
+  const xgLookupRaw = await env.NHL_CACHE.get(`xg_lookup_${season}`, 'json') as any;
   if (!xgLookupRaw?.buckets) {
-    throw new Error('xG lookup not built — run Phase 3 first.');
+    throw new Error(`xG lookup not built for ${season} — run Phase 3 first.`);
   }
   const xgBuckets: Record<string, { rate: number; shots: number }> = xgLookupRaw.buckets;
   const baselineRate: number = xgLookupRaw.baselineRate || 0.073;
@@ -3054,7 +3177,7 @@ async function buildWARTables(env: Env): Promise<{
   }>>();
 
   for (const team of NHL_TEAMS) {
-    const key = `team_pbp_${team}_${CURRENT_SEASON}`;
+    const key = `team_pbp_${team}_${season}`;
     const games = await env.NHL_CACHE.get(key, 'json') as any[] | null;
     if (!Array.isArray(games)) continue;
 
@@ -3305,7 +3428,7 @@ async function buildWARTables(env: Env): Promise<{
 
   // Fetch TOI splits from NHL Stats API — one call apiece for skaters
   // and goalies. Much cheaper than walking shift data per game.
-  const [toi, goalieToi] = await Promise.all([fetchSkaterTOI(), fetchGoalieTOI()]);
+  const [toi, goalieToi] = await Promise.all([fetchSkaterTOI(season), fetchGoalieTOI(season)]);
   for (const t of toi) {
     const row = skaters.get(t.playerId);
     if (row) {
@@ -3330,7 +3453,7 @@ async function buildWARTables(env: Env): Promise<{
   // their game-shot tallies by date and split by even/odd index.
   applySplitHalfFromPerGame(skaters, perPlayerGameShots);
 
-  console.log(`WAR aggregation: ${skaters.size} skaters, ${goalies.size} goalies, ${seenGameIds.size} games`);
+  console.log(`WAR aggregation for ${season}: ${skaters.size} skaters, ${goalies.size} goalies, ${seenGameIds.size} games`);
   const skOut: Record<number, WARSkaterRow> = {};
   const goOut: Record<number, WARGoalieRow> = {};
   for (const [pid, row] of skaters) skOut[pid] = row;
@@ -3438,21 +3561,21 @@ interface WARPartial {
   };
 }
 
-const WAR_PARTIAL_KEY = () => `war_partial_${CURRENT_SEASON}`;
+const WAR_PARTIAL_KEY = (season: string = CURRENT_SEASON) => `war_partial_${season}`;
 
-async function loadWARPartial(env: Env): Promise<WARPartial> {
-  const cached = await env.NHL_CACHE.get(WAR_PARTIAL_KEY(), 'json') as WARPartial | null;
+async function loadWARPartial(env: Env, season: string = CURRENT_SEASON): Promise<WARPartial> {
+  const cached = await env.NHL_CACHE.get(WAR_PARTIAL_KEY(season), 'json') as WARPartial | null;
   return cached || { skaters: {}, goalies: {}, gamesSeenPerPlayer: {}, seenGameIds: [], teamsProcessed: [] };
 }
 
-async function storeWARPartial(env: Env, partial: WARPartial): Promise<void> {
-  await env.NHL_CACHE.put(WAR_PARTIAL_KEY(), JSON.stringify(partial), {
+async function storeWARPartial(env: Env, partial: WARPartial, season: string = CURRENT_SEASON): Promise<void> {
+  await env.NHL_CACHE.put(WAR_PARTIAL_KEY(season), JSON.stringify(partial), {
     expirationTtl: 24 * 60 * 60,
   });
 }
 
-async function resetWARPartial(env: Env): Promise<void> {
-  await env.NHL_CACHE.delete(WAR_PARTIAL_KEY());
+async function resetWARPartial(env: Env, season: string = CURRENT_SEASON): Promise<void> {
+  await env.NHL_CACHE.delete(WAR_PARTIAL_KEY(season));
 }
 
 // Process one team's cached PBP into the partial WAR state — v3.
@@ -3466,10 +3589,10 @@ async function resetWARPartial(env: Env): Promise<void> {
 //     xGA, goals-for, goals-against, and shots-for/against. Skipped
 //     silently (on-ice fields stay undefined) if shift data isn't cached
 //     for the game.
-async function buildWARChunkTeam(env: Env, team: string): Promise<void> {
-  const partial = await loadWARPartial(env);
+async function buildWARChunkTeam(env: Env, team: string, season: string = CURRENT_SEASON): Promise<void> {
+  const partial = await loadWARPartial(env, season);
   if (partial.teamsProcessed.includes(team)) {
-    console.log(`WAR chunk ${team}: already processed`);
+    console.log(`WAR chunk ${team} (${season}): already processed`);
     return;
   }
 
@@ -3508,8 +3631,8 @@ async function buildWARChunkTeam(env: Env, team: string): Promise<void> {
     }
   };
 
-  const xgLookupRaw = await env.NHL_CACHE.get(`xg_lookup_${CURRENT_SEASON}`, 'json') as any;
-  if (!xgLookupRaw?.buckets) throw new Error('xG lookup not built');
+  const xgLookupRaw = await env.NHL_CACHE.get(`xg_lookup_${season}`, 'json') as any;
+  if (!xgLookupRaw?.buckets) throw new Error(`xG lookup not built for ${season}`);
   const xgBuckets: Record<string, { rate: number; shots: number }> = xgLookupRaw.buckets;
   const baselineRate: number = xgLookupRaw.baselineRate || 0.073;
   const minShotsForBucket: number = xgLookupRaw.minShotsPerBucket || WAR_MIN_SHOTS_PER_BUCKET;
@@ -3530,8 +3653,8 @@ async function buildWARChunkTeam(env: Env, team: string): Promise<void> {
     return baselineRate;
   };
 
-  const games = await env.NHL_CACHE.get(`team_pbp_${team}_${CURRENT_SEASON}`, 'json') as any[] | null;
-  if (!Array.isArray(games)) { console.log(`WAR chunk ${team}: no PBP`); return; }
+  const games = await env.NHL_CACHE.get(`team_pbp_${team}_${season}`, 'json') as any[] | null;
+  if (!Array.isArray(games)) { console.log(`WAR chunk ${team} (${season}): no PBP`); return; }
 
   const seen = new Set(partial.seenGameIds);
 
@@ -3928,14 +4051,14 @@ async function buildWARChunkTeam(env: Env, team: string): Promise<void> {
   }
 
   partial.teamsProcessed.push(team);
-  await storeWARPartial(env, partial);
-  console.log(`WAR chunk ${team}: processed. teams=${partial.teamsProcessed.length} games=${partial.seenGameIds.length} skaters=${Object.keys(partial.skaters).length}`);
+  await storeWARPartial(env, partial, season);
+  console.log(`WAR chunk ${team} (${season}): processed. teams=${partial.teamsProcessed.length} games=${partial.seenGameIds.length} skaters=${Object.keys(partial.skaters).length}`);
 }
 
 // Finalize: attach TOI splits from NHL Stats, compute league context,
 // write the three artifacts.
-async function finalizeWARTables(env: Env): Promise<void> {
-  const partial = await loadWARPartial(env);
+async function finalizeWARTables(env: Env, season: string = CURRENT_SEASON): Promise<void> {
+  const partial = await loadWARPartial(env, season);
 
   for (const [pidStr, gameIds] of Object.entries(partial.gamesSeenPerPlayer)) {
     const pid = parseInt(pidStr, 10);
@@ -3951,7 +4074,7 @@ async function finalizeWARTables(env: Env): Promise<void> {
     applySplitHalfFromPerGame(partial.skaters, partial.perPlayerGameShots);
   }
 
-  const [toi, goalieToi] = await Promise.all([fetchSkaterTOI(), fetchGoalieTOI()]);
+  const [toi, goalieToi] = await Promise.all([fetchSkaterTOI(season), fetchGoalieTOI(season)]);
   for (const t of toi) {
     const row = partial.skaters[t.playerId];
     if (row) {
@@ -3973,16 +4096,16 @@ async function finalizeWARTables(env: Env): Promise<void> {
   }
 
   // Write per-player tables
-  await env.NHL_CACHE.put(`war_skaters_${CURRENT_SEASON}`, JSON.stringify({
+  await env.NHL_CACHE.put(`war_skaters_${season}`, JSON.stringify({
     schemaVersion: 2,
-    season: CURRENT_SEASON,
+    season,
     computedAt: new Date().toISOString(),
     players: partial.skaters,
   }), { expirationTtl: 7 * 24 * 60 * 60 });
 
-  await env.NHL_CACHE.put(`war_goalies_${CURRENT_SEASON}`, JSON.stringify({
+  await env.NHL_CACHE.put(`war_goalies_${season}`, JSON.stringify({
     schemaVersion: 2,
-    season: CURRENT_SEASON,
+    season,
     computedAt: new Date().toISOString(),
     players: partial.goalies,
   }), { expirationTtl: 7 * 24 * 60 * 60 });
@@ -3992,12 +4115,13 @@ async function finalizeWARTables(env: Env): Promise<void> {
   const context = await buildLeagueContext(
     env, partial.skaters, partial.goalies,
     partial.leagueCounters, partial.teamTotals,
+    season,
   );
-  await env.NHL_CACHE.put(`league_context_${CURRENT_SEASON}`, JSON.stringify(context), {
+  await env.NHL_CACHE.put(`league_context_${season}`, JSON.stringify(context), {
     expirationTtl: 7 * 24 * 60 * 60,
   });
 
-  console.log(`WAR finalized: ${Object.keys(partial.skaters).length} skaters, ${Object.keys(partial.goalies).length} goalies, marginalGoalsPerWin=${context.marginalGoalsPerWin.toFixed(3)}`);
+  console.log(`WAR finalized for ${season}: ${Object.keys(partial.skaters).length} skaters, ${Object.keys(partial.goalies).length} goalies, marginalGoalsPerWin=${context.marginalGoalsPerWin.toFixed(3)}`);
 }
 
 function blankSkaterRow(playerId: number): WARSkaterRow {
@@ -4020,15 +4144,15 @@ function blankSkaterRow(playerId: number): WARSkaterRow {
   };
 }
 
-async function fetchSkaterTOI(): Promise<Array<{
+async function fetchSkaterTOI(season: string = CURRENT_SEASON): Promise<Array<{
   playerId: number; positionCode: string; teamAbbrevs: string;
   total: number; ev: number; pp: number; sh: number;
 }>> {
-  const url = `https://api.nhle.com/stats/rest/en/skater/timeonice?limit=-1&cayenneExp=seasonId=${CURRENT_SEASON}%20and%20gameTypeId=2`;
+  const url = `https://api.nhle.com/stats/rest/en/skater/timeonice?limit=-1&cayenneExp=seasonId=${season}%20and%20gameTypeId=2`;
   const res = await fetch(url, {
     headers: { 'User-Agent': 'NHL-Analytics-CacheWarmer/1.0', 'Accept': 'application/json' },
   });
-  if (!res.ok) throw new Error(`Skater TOI fetch failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Skater TOI fetch failed for ${season}: ${res.status}`);
   const json: any = await res.json();
   return (json.data || []).map((p: any) => ({
     playerId: p.playerId,
@@ -4042,14 +4166,14 @@ async function fetchSkaterTOI(): Promise<Array<{
 }
 
 
-async function fetchGoalieTOI(): Promise<Array<{
+async function fetchGoalieTOI(season: string = CURRENT_SEASON): Promise<Array<{
   playerId: number; teamAbbrevs: string; gamesPlayed: number; total: number;
 }>> {
-  const url = `https://api.nhle.com/stats/rest/en/goalie/summary?limit=-1&cayenneExp=seasonId=${CURRENT_SEASON}%20and%20gameTypeId=2`;
+  const url = `https://api.nhle.com/stats/rest/en/goalie/summary?limit=-1&cayenneExp=seasonId=${season}%20and%20gameTypeId=2`;
   const res = await fetch(url, {
     headers: { 'User-Agent': 'NHL-Analytics-CacheWarmer/1.0', 'Accept': 'application/json' },
   });
-  if (!res.ok) throw new Error(`Goalie summary fetch failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Goalie summary fetch failed for ${season}: ${res.status}`);
   const json: any = await res.json();
   return (json.data || []).map((p: any) => ({
     playerId: p.playerId,
@@ -4068,9 +4192,19 @@ async function buildLeagueContext(
   goalies: Record<number, WARGoalieRow>,
   counters?: WARPartial['leagueCounters'],
   teamTotals?: WARPartial['teamTotals'],
+  season: string = CURRENT_SEASON,
 ): Promise<LeagueContext> {
-  // Pull league-wide standings totals for this season.
-  const standingsRes = await fetch(`https://api-web.nhle.com/v1/standings/now`, {
+  // Pull league-wide standings totals for this season. For the current
+  // season use /standings/now (live data). For historical seasons use
+  // /standings/{YYYY-MM-DD} pointed at end-of-regular-season — usually
+  // mid-April of the season's end year. April 15 is a safe pick: every
+  // post-2005 NHL regular season has ended on or after April 13.
+  const isCurrent = season === CURRENT_SEASON;
+  const endYear = season.slice(4); // e.g. "2025" for "20242025"
+  const standingsUrl = isCurrent
+    ? `https://api-web.nhle.com/v1/standings/now`
+    : `https://api-web.nhle.com/v1/standings/${endYear}-04-15`;
+  const standingsRes = await fetch(standingsUrl, {
     headers: { 'User-Agent': 'NHL-Analytics-CacheWarmer/1.0', 'Accept': 'application/json' },
   });
   const standings: any = standingsRes.ok ? await standingsRes.json() : { standings: [] };
@@ -4107,7 +4241,7 @@ async function buildLeagueContext(
   // A rough PP multiplier: on PP, individual ixG per player per 60 is roughly
   // ~1.8-2x the EV rate. We need an empirical number — derive from the xG
   // lookup's strength buckets:
-  const xgLookupRaw = await env.NHL_CACHE.get(`xg_lookup_${CURRENT_SEASON}`, 'json') as any;
+  const xgLookupRaw = await env.NHL_CACHE.get(`xg_lookup_${season}`, 'json') as any;
   const ppBucket = xgLookupRaw?.buckets?.['en0|d05_10|a00_10|wrist|pp'];
   const evBucket = xgLookupRaw?.buckets?.['en0|d05_10|a00_10|wrist|5v5'];
   const strengthMultiplier = (ppBucket?.rate && evBucket?.rate)
@@ -4186,7 +4320,7 @@ async function buildLeagueContext(
   // signal; counts stay on the row for display only.
 
   return {
-    season: CURRENT_SEASON,
+    season,
     computedAt: new Date().toISOString(),
     marginalGoalsPerWin,
     leagueTotals: {
@@ -4343,33 +4477,33 @@ function computeGoalieStats(gsaxPerGame: number[], marginalGoalsPerWin: number):
 // Build the entire WAR pipeline and store all three artifacts. One
 // single-pass aggregation produces both skater + goalie tables; league
 // context is then computed from those plus standings.
-async function buildWAR(env: Env): Promise<void> {
+async function buildWAR(env: Env, season: string = CURRENT_SEASON): Promise<void> {
   const t0 = Date.now();
-  console.log('WAR: starting full pipeline...');
+  console.log(`WAR: starting full pipeline for ${season}...`);
 
-  const { skaters, goalies } = await buildWARTables(env);
+  const { skaters, goalies } = await buildWARTables(env, season);
 
-  await env.NHL_CACHE.put(`war_skaters_${CURRENT_SEASON}`, JSON.stringify({
+  await env.NHL_CACHE.put(`war_skaters_${season}`, JSON.stringify({
     schemaVersion: 1,
-    season: CURRENT_SEASON,
+    season,
     computedAt: new Date().toISOString(),
     players: skaters,
   }), { expirationTtl: 7 * 24 * 60 * 60 });
 
-  await env.NHL_CACHE.put(`war_goalies_${CURRENT_SEASON}`, JSON.stringify({
+  await env.NHL_CACHE.put(`war_goalies_${season}`, JSON.stringify({
     schemaVersion: 1,
-    season: CURRENT_SEASON,
+    season,
     computedAt: new Date().toISOString(),
     players: goalies,
   }), { expirationTtl: 7 * 24 * 60 * 60 });
 
-  const context = await buildLeagueContext(env, skaters, goalies);
-  await env.NHL_CACHE.put(`league_context_${CURRENT_SEASON}`, JSON.stringify(context), {
+  const context = await buildLeagueContext(env, skaters, goalies, undefined, undefined, season);
+  await env.NHL_CACHE.put(`league_context_${season}`, JSON.stringify(context), {
     expirationTtl: 7 * 24 * 60 * 60,
   });
 
   const dur = Math.round((Date.now() - t0) / 1000);
-  console.log(`WAR pipeline complete in ${dur}s — ${Object.keys(skaters).length} skaters, ${Object.keys(goalies).length} goalies, marginalGoalsPerWin=${context.marginalGoalsPerWin.toFixed(3)}`);
+  console.log(`WAR pipeline complete for ${season} in ${dur}s — ${Object.keys(skaters).length} skaters, ${Object.keys(goalies).length} goalies, marginalGoalsPerWin=${context.marginalGoalsPerWin.toFixed(3)}`);
 }
 
 /**

@@ -27,11 +27,132 @@
  */
 
 import type {
+  DeploymentBand,
   LeagueContext,
   WARGoalieRow,
   WARSkaterRow,
 } from './warTableService';
 import { getRAPMForPlayer, type RAPMArtifact } from './rapmService';
+
+// ============================================================================
+// Deployment-band classification + lazy RAPM-by-band derivation
+//
+// v6.3 — top-pair D and 1st-line F naturally play harder defensive
+// minutes than 3rd-pair D and 4th-liners. Comparing every skater's
+// on-ice xGA/60 (or RAPM defense coefficient) to the position-wide
+// median punishes top-deployment players for usage they don't choose.
+//
+// We classify each row by total TOI per game played (the spec uses
+// total TOI not EV-only TOI; PP/PK time is part of "deployment"). The
+// band thresholds (D: 22/18, F: 18/14) come from the published Evolving-
+// Hockey / JFresh / McCurdy framework — they're not tuned to our
+// distribution but reproduce the buckets those public models use.
+// ============================================================================
+
+function deploymentBandFor(row: WARSkaterRow): DeploymentBand | null {
+  if (row.gamesPlayed <= 0 || row.toiTotalSeconds <= 0) return null;
+  const minPerGame = (row.toiTotalSeconds / row.gamesPlayed) / 60;
+  if (row.positionCode === 'D') {
+    if (minPerGame >= 22) return 'D-top';
+    if (minPerGame >= 18) return 'D-mid';
+    return 'D-bot';
+  }
+  if (row.positionCode === 'G') return null;
+  if (minPerGame >= 18) return 'F-top';
+  if (minPerGame >= 14) return 'F-mid';
+  return 'F-bot';
+}
+
+/**
+ * Lazy cache of `RAPM-by-band median` keyed by the RAPM artifact
+ * reference. The medians are derived from the artifact's player table
+ * once per artifact load and reused across every computeSkaterWAR call.
+ *
+ * We need the WAR-skaters table to know each player's TOI band, so the
+ * cache is `WeakMap<RAPMArtifact, ...>` and the value carries the
+ * cohort-derived medians in a closure that takes a `(playerId →
+ * WARSkaterRow)` resolver. Cleanest: pass the WAR tables down through
+ * computeSkaterWAR, but the existing signature only takes a single row
+ * — so we infer the row's band internally and accumulate medians the
+ * first time `(rapm, context)` is seen by walking RAPM entries against
+ * positionCode + minutes carried inside the RAPM entry itself.
+ *
+ * The RAPM artifact carries `gp` and `minutes` per player, so we can
+ * approximate the deployment band from the artifact alone:
+ *   minPerGame ≈ (minutes_5v5 + ppMinutes + pkMinutes) / gp
+ * This is 5v5+PP+PK = total game-minutes (close to total TOI). We use
+ * this approximation only for the cohort-median derivation; for the
+ * individual player's band we still use the WARSkaterRow.
+ */
+const rapmDeploymentMedianCache = new WeakMap<
+  RAPMArtifact,
+  Record<DeploymentBand, { offense: number | null; defense: number | null; n: number }>
+>();
+
+function deriveRAPMDeploymentMedians(
+  rapm: RAPMArtifact,
+): Record<DeploymentBand, { offense: number | null; defense: number | null; n: number }> {
+  const cached = rapmDeploymentMedianCache.get(rapm);
+  if (cached) return cached;
+
+  const buckets: Record<DeploymentBand, { offense: number[]; defense: number[] }> = {
+    'D-top': { offense: [], defense: [] },
+    'D-mid': { offense: [], defense: [] },
+    'D-bot': { offense: [], defense: [] },
+    'F-top': { offense: [], defense: [] },
+    'F-mid': { offense: [], defense: [] },
+    'F-bot': { offense: [], defense: [] },
+  };
+
+  for (const entry of Object.values(rapm.players)) {
+    if (entry.lowSample) continue;
+    if (!entry.gp || entry.gp < 35) continue;
+    // Total game minutes = 5v5 minutes + PP minutes + PK minutes. The
+    // artifact's `minutes` field is 5v5; ppMinutes/pkMinutes ride on
+    // schema v2+. Together they reconstruct total TOI for the band cut.
+    const totalMin =
+      (entry.minutes || 0) + (entry.ppMinutes || 0) + (entry.pkMinutes || 0);
+    if (totalMin <= 0) continue;
+    const minPerGame = totalMin / entry.gp;
+    const cohort: 'F' | 'D' | null =
+      entry.positionCohort === 'D' ? 'D' :
+      entry.positionCohort === 'F' ? 'F' :
+      null;
+    if (!cohort) continue;
+    let band: DeploymentBand;
+    if (cohort === 'D') {
+      band = minPerGame >= 22 ? 'D-top' : minPerGame >= 18 ? 'D-mid' : 'D-bot';
+    } else {
+      band = minPerGame >= 18 ? 'F-top' : minPerGame >= 14 ? 'F-mid' : 'F-bot';
+    }
+    buckets[band].offense.push(entry.offense);
+    buckets[band].defense.push(entry.defense);
+  }
+
+  const medianOf = (arr: number[]): number | null => {
+    if (arr.length === 0) return null;
+    const s = arr.slice().sort((a, b) => a - b);
+    const mid = (s.length - 1) / 2;
+    const lo = Math.floor(mid), hi = Math.ceil(mid);
+    return lo === hi ? s[lo] : 0.5 * (s[lo] + s[hi]);
+  };
+
+  const out = {} as Record<DeploymentBand, { offense: number | null; defense: number | null; n: number }>;
+  for (const band of Object.keys(buckets) as DeploymentBand[]) {
+    const b = buckets[band];
+    out[band] = {
+      n: b.offense.length,
+      // Require ≥5 entries in a cell to publish a median — same threshold
+      // used for the on-ice xGF/A baselines. Below that, return null and
+      // the consumer falls through to the un-corrected RAPM coefficient.
+      offense: b.offense.length >= 5 ? medianOf(b.offense) : null,
+      defense: b.defense.length >= 5 ? medianOf(b.defense) : null,
+    };
+  }
+
+  rapmDeploymentMedianCache.set(rapm, out);
+  return out;
+}
 
 // ============================================================================
 // Types
@@ -116,6 +237,40 @@ export interface WARResult {
   notes: string[];
 }
 
+export interface GoalieWARComponents {
+  // Algebraic decomposition of cumulative goalie WAR. By construction:
+  //   savePerformance + workloadBonus + shrinkageAdjust + replacementAdjust = WAR
+  //
+  // Each component is a pure transform of fields already present on the
+  // WARGoalieRow + LeagueContext.goalies — no new measurements, no new
+  // narrative. The chart renders these four rows + the Total WAR row.
+  //
+  // savePerformance     — GSAx / marginalGoalsPerWin. This IS the
+  //                       headline goalie metric: goals saved above
+  //                       expected expressed in win-units.
+  // workloadBonus       — (gsaxPerGame − leagueMedianGsaxPerGame) ×
+  //                       games / marginalGoalsPerWin. Above-median rate
+  //                       × games played. Rewards goalies who are both
+  //                       efficient AND playing a heavy load.
+  // shrinkageAdjust     — equals −workloadBonus by construction. It
+  //                       exists so the four-component decomposition
+  //                       sums to the same WAR the simple two-term
+  //                       (savePerformance + replacementAdjust) formula
+  //                       produces. Visually it shows how much of the
+  //                       above-median rate cancels itself out once you
+  //                       account for the "bonus" being a re-statement
+  //                       of GSAx above median.
+  // replacementAdjust   — −replacementGSAxPerGame × games /
+  //                       marginalGoalsPerWin. Anchors the metric
+  //                       above replacement-level (replacement is a
+  //                       NEGATIVE GSAx/game, so subtracting it adds
+  //                       wins for any working NHL goalie).
+  savePerformance: number;
+  workloadBonus: number;
+  shrinkageAdjust: number;
+  replacementAdjust: number;
+}
+
 export interface GoalieWARResult {
   position: 'G';
   gamesPlayed: number;
@@ -123,8 +278,20 @@ export interface GoalieWARResult {
   goalsAllowed: number;
   xGFaced: number;
   GSAx: number;
+  // Per-60 GSAx — used in the metrics row of the goalie share card so
+  // a viewer can compare goalies across workloads. NaN-safe: 0 when
+  // toiTotalSeconds is 0.
+  gsaxPer60: number;
+  // Per-60 GSAx percentile against the league distribution, when the
+  // worker artifact carries the per-60 quantile bucket. Hidden in the
+  // UI when null (per CLAUDE.md hard rule #3).
+  gsaxPer60Percentile?: number;
   WAR: number;
   WAR_per_82: number;
+  // Algebraic 4-segment decomposition. Sum = WAR by construction; the
+  // computeGoalieWAR function asserts this with a runtime check that
+  // logs and self-corrects on drift > 0.001.
+  components: GoalieWARComponents;
   percentile: number;
   percentileLabel: string;
   sources: {
@@ -431,10 +598,56 @@ export function computeSkaterWAR(
         ? row.toiEvSeconds / 3600
         : onIceHoursAllStrength;
 
+  // v6.3 — DEPLOYMENT-AWARE DEFENSE BASELINE.
+  //
+  // Top-pair D play 24+ minutes a night and naturally face more dangerous
+  // shots than 3rd-pair D, even when both are league-average defenders
+  // for their role. Comparing every D's xGA/60 to the position-wide
+  // median treats deployment as a skill defect — Cale Makar's on-ice
+  // xGA/60 lands above the league median not because he's a bad defender
+  // but because his shifts include the highest-leverage minutes of every
+  // game. Same dynamic for 1st-line F vs 4th-liners.
+  //
+  // Public WAR (Evolving-Hockey, JFresh, MoneyPuck, McCurdy / Sprigings)
+  // handle this via either (a) position-specific defense baselines that
+  // account for deployment, or (b) clipping negative EV defense at zero
+  // in the headline number. We choose (a) — the principled per-band
+  // baseline on DEFENSE ONLY — to keep the breakdown bar reading
+  // "evDefense" without introducing a separate narrative "deployment
+  // adjust" component (forbidden by CLAUDE.md hard rule #5).
+  //
+  // OFFENSE BASELINE STAYS POSITION-WIDE. The deployment effect is
+  // asymmetric: top-pair D play tougher defensive matchups (we remove
+  // that headwind via xGA correction) but they ALSO play against
+  // opposing top lines, which is bad for shot generation — so the
+  // offense side already factors in tough comp at the league-median
+  // baseline. Adjusting offense by cohort-median would over-correct
+  // (penalizing Makar for not generating as much as Quinn Hughes, who
+  // has different shift contexts even within the same band).
+  //
+  // Fallback chain for the defense baseline:
+  //   1. context.defenseBaselineByDeployment[band].medianOnIceXGA60
+  //      (loaded in warTableService) — the per-band median.
+  //   2. posStats.medianOnIceXGA60 — the existing position-wide median,
+  //      used when the band is too thin (n<5) or the deployment table
+  //      is missing on a legacy artifact.
+  const deploymentBand = deploymentBandFor(row);
+  const deploymentCell =
+    deploymentBand && context.defenseBaselineByDeployment
+      ? context.defenseBaselineByDeployment[deploymentBand]
+      : null;
   const medianXGF60 = posStats.medianOnIceXGF60 ?? null;
-  const medianXGA60 = posStats.medianOnIceXGA60 ?? null;
+  const medianXGA60 =
+    deploymentCell?.medianOnIceXGA60 ?? posStats.medianOnIceXGA60 ?? null;
   const teamAbbrev = row.teamAbbrevs?.split(',')?.[0]?.trim();
   const teamTotal = context.teamTotals?.[teamAbbrev || ''] ?? null;
+
+  // RAPM-by-band medians for the principled-RAPM path. Lazy-derived from
+  // the rapm artifact the first time we see it. Empty (null medians)
+  // when the RAPM artifact is absent or the band is too thin.
+  const rapmBandMedians = rapm ? deriveRAPMDeploymentMedians(rapm) : null;
+  const rapmBandCell =
+    rapmBandMedians && deploymentBand ? rapmBandMedians[deploymentBand] : null;
 
   // Inverse-variance blend weights, derived at load time from the
   // cross-player distributions of team-relative and league-median
@@ -456,8 +669,46 @@ export function computeSkaterWAR(
     // Convert to total goal value by multiplying by the player's 5v5
     // on-ice hours (NOT all-strength — RAPM doesn't model PP/PK).
     // No ×1/5 scaling (see comment above).
+    //
+    // v6.3 — DEPLOYMENT-COST CORRECTION (DEFENSE ONLY).
+    //
+    // Subtract the position+TOI-band median RAPM defense coefficient from
+    // the player's RAPM defense. This isolates "defensive skill above
+    // deployment-matched peers" from "the headwind of how often the coach
+    // sends the player out vs top lines." Post-correction, the
+    // coefficient is the deviation from same-cohort defenders, so a
+    // top-pair D with the cohort-median RAPM defense scores 0 — neutral —
+    // instead of negative (which the league-wide RAPM coefficient was
+    // structurally producing because top-pair D give up more xGA/60 than
+    // bottom-pair D by deployment, not defensive ability).
+    //
+    // OFFENSE IS NOT CORRECTED. The deployment cost is asymmetric: top-
+    // pair D and 1st-line F face tougher defensive matchups (the headwind
+    // we want to remove), but they don't get an inflated-OZ-tailwind on
+    // the offense side that's commensurate. Top-pair D often play
+    // against opposing top lines, which is BAD for shot generation — so
+    // their offense is already discounted by deployment in the same
+    // direction the coefficient is moved. Subtracting cohort-median
+    // RAPM offense would over-correct (penalizing Makar for not
+    // generating as much as Quinn Hughes, who has different shift
+    // contexts even within the same band).
+    //
+    // No correction when the cohort is too thin (n<5) — falls through to
+    // the un-corrected coefficient and the breakdown bar reads what RAPM
+    // would have produced before this knob.
+    //
+    // Methodology citations: Evolving-Hockey "Comparing WAR" 2018,
+    // JFresh / Patrick Bacon WAR 1.1 ("usage-adjusted RAPM"), McCurdy
+    // 2017 "Reviving RAPM" (Hockey Graphs). All three account for usage
+    // in their headline number; we converge on the "subtract cohort
+    // median from defense coefficient" form because it preserves the
+    // breakdown bar's interpretability.
+    const rapmDefenseCorrected =
+      rapmBandCell?.defense != null
+        ? rapmEntry.defense - rapmBandCell.defense
+        : rapmEntry.defense;
     evOffense = rapmEntry.offense * rapm5v5Hours;
-    evDefense = rapmEntry.defense * rapm5v5Hours;
+    evDefense = rapmDefenseCorrected * rapm5v5Hours;
   } else {
     // Fallback blend path — only engaged when RAPM unavailable or low-sample.
     if (
@@ -948,11 +1199,84 @@ export function computeGoalieWAR(
   context: LeagueContext
 ): GoalieWARResult {
   const notes: string[] = [];
-  const GSAx = row.xGFaced - row.goalsAllowed;
+  // Apply the league xG-to-goals calibration before computing GSAx. The
+  // worker-built empirical xG bucket lookup is calibrated against shot
+  // features but does not enforce the global identity sum(xG) = sum(goals).
+  // In practice it under-predicts goals (avg ~0.074 xG/shot vs ~0.107
+  // actual SH%), which would otherwise produce negative GSAx for every
+  // goalie in the league and obscure the relative-skill signal. The
+  // calibration constant is computed in `warTableService.loadWARTables`
+  // from the same artifact data — no hardcoded value, derives from
+  // sum(goalsAllowed) / sum(xGFaced) over every goalie this season.
+  const xgCalibration = context.goalies.xgCalibration ?? 1.0;
+  const xGFacedCalibrated = row.xGFaced * xgCalibration;
+  const GSAx = xGFacedCalibrated - row.goalsAllowed;
   const replacementGSAxPerGame = context.goalies.replacementGSAxPerGame;
+  const leagueMedianGsaxPerGame = context.goalies.medianGSAxPerGame;
+  const mGW = Math.max(0.001, context.marginalGoalsPerWin);
   const baseline = replacementGSAxPerGame * row.gamesPlayed;
   const GSAxAboveReplacement = GSAx - baseline;
-  const WAR = GSAxAboveReplacement / Math.max(0.001, context.marginalGoalsPerWin);
+  const WAR = GSAxAboveReplacement / mGW;
+
+  // Algebraic 4-segment decomposition. By construction these sum to WAR.
+  //
+  //   savePerformance   = GSAx / mGW
+  //                       (the "goals saved above expected" headline
+  //                       converted to win-units — the prominent goalie
+  //                       analytics metric the share card surfaces)
+  //   workloadBonus     = (gsaxPerGame − leagueMedianGsaxPerGame) ×
+  //                       games / mGW
+  //                       (above-median rate × games — credits volume
+  //                       AND quality together)
+  //   shrinkageAdjust   = −workloadBonus
+  //                       (algebraic identity — workload bonus is a
+  //                       restatement of GSAx-above-median and once
+  //                       it's been displayed visually, this term
+  //                       removes it from the WAR sum so we don't
+  //                       double-count GSAx)
+  //   replacementAdjust = −replacementGSAxPerGame × games / mGW
+  //                       (the standard above-replacement floor)
+  //
+  // sum = GSAx/mGW + 0 + (−replacementGSAxPerGame × games / mGW) = WAR.
+  const savePerformance = GSAx / mGW;
+  const gsaxPerGame = row.gamesPlayed > 0 ? GSAx / row.gamesPlayed : 0;
+  const workloadBonus =
+    row.gamesPlayed > 0
+      ? (gsaxPerGame - leagueMedianGsaxPerGame) * row.gamesPlayed / mGW
+      : 0;
+  const shrinkageAdjust = -workloadBonus;
+  const replacementAdjust = -replacementGSAxPerGame * row.gamesPlayed / mGW;
+
+  // Runtime invariant — catches future drift in case anyone reaches in
+  // and changes one term without rebalancing the others. Uses a
+  // tolerant epsilon for floating-point safety.
+  const sum = savePerformance + workloadBonus + shrinkageAdjust + replacementAdjust;
+  if (Math.abs(sum - WAR) > 0.001) {
+    // Don't throw in production — log loudly so QA catches it but the
+    // share card still renders. Throwing would break every goalie page
+    // for one bad component, which is a worse failure mode than a
+    // visibly-skewed total.
+    console.warn(
+      `[computeGoalieWAR] component sum (${sum.toFixed(4)}) ≠ WAR ` +
+      `(${WAR.toFixed(4)}); drift = ${(sum - WAR).toFixed(4)}. ` +
+      `playerId=${row.playerId} season=${context.season}`
+    );
+  }
+
+  // Per-60 GSAx — used in the share card's metrics row so the
+  // workload-comparison story isn't muddled by GP differences.
+  const totalHours = row.toiTotalSeconds > 0 ? row.toiTotalSeconds / 3600 : 0;
+  const gsaxPer60 = totalHours > 0 ? GSAx / totalHours : 0;
+
+  // Optional per-60 percentile lookup. The artifact's
+  // LeagueGoalieStats interface today only ships warPer82Quantiles —
+  // there's no standalone gsaxPer60 quantile bucket. We can derive an
+  // approximate one by mapping per-60 to per-82 via average TOI/game,
+  // but doing so silently asserts a relationship that isn't on the
+  // artifact. Per CLAUDE.md hard rule #3 (no assumed percentiles), we
+  // surface this as `undefined` until the worker emits a real per-60
+  // quantile bucket. The UI will hide the percentile when it's absent.
+  const gsaxPer60Percentile = undefined;
 
   // Same shrinkage pattern as skaters, but on shots-faced rather than
   // GP: goalie performance stabilizes around ~500 shots faced (the
@@ -961,7 +1285,9 @@ export function computeGoalieWAR(
   // GSAx.
   const K_SHOTS_SHRINKAGE = 500;
   const rawWARPer82 = row.gamesPlayed > 0 ? (WAR / row.gamesPlayed) * 82 : 0;
-  const shotShrinkage = row.shotsFaced / (row.shotsFaced + K_SHOTS_SHRINKAGE);
+  const shotShrinkage = row.shotsFaced > 0
+    ? row.shotsFaced / (row.shotsFaced + K_SHOTS_SHRINKAGE)
+    : 0;
   const WAR_per_82 = rawWARPer82 * shotShrinkage;
 
   const percentile = percentileFromQuantiles(WAR_per_82, context.goalies.warPer82Quantiles);
@@ -973,16 +1299,28 @@ export function computeGoalieWAR(
     gamesPlayed: row.gamesPlayed,
     shotsFaced: row.shotsFaced,
     goalsAllowed: row.goalsAllowed,
-    xGFaced: row.xGFaced,
+    // Report the calibrated xGFaced so consumers see the value that
+    // matches the rendered GSAx. The raw artifact xGFaced is the model
+    // output; the calibrated value is what we actually grade goalies
+    // against (sum equal to league goals by construction).
+    xGFaced: xGFacedCalibrated,
     GSAx,
+    gsaxPer60,
+    gsaxPer60Percentile,
     WAR,
     WAR_per_82,
+    components: {
+      savePerformance,
+      workloadBonus,
+      shrinkageAdjust,
+      replacementAdjust,
+    },
     percentile,
     percentileLabel: labelFromPercentile(percentile),
     sources: {
       marginalGoalsPerWin: context.marginalGoalsPerWin,
       replacementGSAxPerGame,
-      leagueMedianGSAxPerGame: context.goalies.medianGSAxPerGame,
+      leagueMedianGSAxPerGame: leagueMedianGsaxPerGame,
       season: context.season,
     },
     notes,

@@ -14,17 +14,15 @@
      cards override via inline style. */
   --team-accent: var(--primary-blue);
 
-  /* 1200×675 = Twitter 16:9 share target. Fluid width so the card
-     renders responsively on the profile page, locked aspect-ratio so
-     every screenshot exports at the same platform-friendly shape.
-     (Container-type for the @container queries below is on the parent
-     `.card-preview` wrapper, NOT on the card itself — putting it on
-     the card collapses its width because `inline-size` containment
-     prevents the `width:100%` declaration from resolving against the
-     parent's available space.) */
+  /* 1080×1080 square share target — fits chat/social previews
+     natively (iMessage, WhatsApp, Twitter/X, Discord, Instagram). The
+     card always renders at this 1:1 layout; on narrow viewports the
+     parent `.card-preview` slot scales it down via CSS transform so
+     the on-page preview is a faithful smaller version of the
+     downloaded image (no responsive restructuring). */
   width: 100%;
-  max-width: 1200px;
-  aspect-ratio: 16 / 9;
+  max-width: 1080px;
+  aspect-ratio: 1 / 1;
   margin: 0 auto;
   background: linear-gradient(
     145deg,
@@ -33,7 +31,7 @@
     var(--panel-bg-elev) 100%
   );
   border-radius: var(--radius-xl);
-  padding: var(--space-xl) var(--space-2xl);
+  padding: 2.75rem;
   color: #fff;
   font-family: inherit;
   /* Team-color boundary drawn INSIDE the box-size (inset) so the ring
@@ -77,11 +75,22 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: 0;
   position: relative;
   z-index: 1;
   gap: 1.5rem;
 }
+
+/* Even-flex distribution — direct children share the 1080px vertical
+   budget so the card fills its 1:1 aspect cleanly without dead space.
+   Header + metrics + footer keep their natural height; the bottom
+   block (war-full or 2-column fallback) absorbs the remainder. */
+.player-analytics-card > .card-header-row { flex: 0 0 auto; }
+.player-analytics-card > .metrics-row { flex: 0 0 auto; }
+.player-analytics-card > .bottom-columns,
+.player-analytics-card > .bottom-war-full { flex: 1 1 auto; min-height: 0; }
+.player-analytics-card > .share-war-history { flex: 0 0 auto; }
+.player-analytics-card > .card-footer { flex: 0 0 auto; margin-top: auto; padding-top: 1rem; }
 
 .header-left {
   display: flex;
@@ -102,8 +111,8 @@
 }
 
 .player-headshot {
-  width: 72px;
-  height: 72px;
+  width: 112px;
+  height: 112px;
   border-radius: 50%;
   border: 3px solid rgba(59, 130, 246, 0.4);
   object-fit: cover;
@@ -113,8 +122,8 @@
 }
 
 .player-headshot-placeholder {
-  width: 72px;
-  height: 72px;
+  width: 112px;
+  height: 112px;
   border-radius: 50%;
   border: 3px solid rgba(59, 130, 246, 0.4);
   background: rgba(59, 130, 246, 0.1);
@@ -133,7 +142,7 @@
 }
 
 .player-name {
-  font-size: 1.4rem;
+  font-size: 2.25rem;
   font-weight: 800;
   margin: 0;
   line-height: 1.15;
@@ -279,9 +288,9 @@
 
 .hero-stat-value {
   display: block;
-  /* Big enough to survive Twitter's downscale to 506×264. 2.4rem at
-     1200px-wide → ~1.0rem at preview scale, still bold enough. */
-  font-size: 2.4rem;
+  /* Tuned for the 1080×1080 share image — big enough to read on a
+     phone-sized chat preview after downscale. */
+  font-size: 3.25rem;
   font-weight: 800;
   color: white;
   line-height: 1;
@@ -290,7 +299,7 @@
 
 .hero-stat-label {
   display: block;
-  font-size: 0.8rem;    /* ≥12px at 1200px base */
+  font-size: 0.9rem;
   text-transform: uppercase;
   letter-spacing: 1px;
   color: rgba(255, 255, 255, 0.6);
@@ -335,7 +344,7 @@
 }
 
 .edge-badge-value {
-  font-size: 1.2rem;
+  font-size: 1.9rem;
   font-weight: 800;
   color: #7dd3fc;
   line-height: 1;
@@ -352,7 +361,7 @@
 }
 
 .edge-badge-label {
-  font-size: 0.65rem;
+  font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.55);
   text-transform: uppercase;
   letter-spacing: 0.8px;
@@ -439,7 +448,7 @@
 
 .rate-value {
   display: block;
-  font-size: 1.25rem;
+  font-size: 1.9rem;
   font-weight: 800;
   color: #c4b5fd;
   letter-spacing: -0.01em;
@@ -447,7 +456,7 @@
 
 .rate-label {
   display: block;
-  font-size: 0.65rem;
+  font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: rgba(255, 255, 255, 0.5);
@@ -514,10 +523,10 @@
   align-items: stretch;
   width: 100%;
   padding: 0 0.5rem;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  max-height: 380px;
-  overflow: hidden;
+  height: 100%;
+  overflow: visible;
 }
 .bottom-war-full .share-war-breakdown {
   flex: 3 1 360px;
@@ -526,6 +535,15 @@
   gap: 4px;
   min-height: 0;
   min-width: 0;
+  /* Bound the inner SVG's natural height so it can't exceed the
+     bottom-war-full row. Without this, the WARBreakdown SVG (rendered
+     with `height="auto"`) resolves to its content-natural pixel height
+     and visually overflows below the row — colliding with the WAR
+     history strip. `max-height: 100%` references the flex-allocated
+     row height; `overflow: hidden` clips any residual content within
+     the bounded box. */
+  max-height: 100%;
+  overflow: hidden;
 }
 .bottom-war-full .share-war-breakdown .war-break {
   flex: 1;
@@ -557,12 +575,36 @@
 .share-war-breakdown .war-explainer { display: none; }
 .share-war-breakdown .war-sources { display: none; }
 .share-war-breakdown .war-headline { display: none; }
+.share-war-breakdown .war-notes { display: none; }
+.share-war-breakdown .war-footer { display: none; }
 .share-war-breakdown .war-empty { padding: 12px; }
 .share-war-breakdown svg {
   max-width: 100%;
   width: 100%;
-  height: auto;
-  max-height: 240px;
+  height: 100%;
+  max-height: none;
+}
+
+/* ============================================================
+   WAR history strip (3-year sparkline grid).
+   Rendered as a direct sibling of bottom-war-full inside the card's
+   flex column. bottom-war-full claims `flex: 1` (fills); the strip
+   takes its own content height (`flex: 0 0 auto`) so the WAR
+   breakdown SVG can't overflow into the strip's space.
+   ============================================================ */
+.share-war-history {
+  background: rgba(15, 23, 42, 0.32);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  margin: 0 0.5rem;
+  overflow: visible;
+}
+
+@media (max-width: 600px) {
+  .share-war-history {
+    padding: 0.4rem 0.5rem;
+  }
 }
 
 /* Rolling Section */
@@ -893,9 +935,9 @@
 
 .card-methodology {
   color: rgba(255, 255, 255, 0.55);
-  font-size: 0.72rem;
+  font-size: 0.85rem;
   font-style: italic;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 /* ============================================================
@@ -904,68 +946,16 @@
    ============================================================ */
 
 /* ============================================================
-   MOBILE PREVIEW (narrow CARD widths via container query)
+   No mobile-specific @container queries.
 
-   Layout responds to the CARD'S own width, not the viewport. The
-   export clone (1080px) always gets the desktop layout; the
-   on-page preview at S23 (~393px card width) gets the stacked
-   mobile layout. Pre-existing card pages on tablets get the right
-   layout based on actual card-preview container width.
+   The card always renders at 1080×1080 desktop layout. On narrow
+   viewports the parent `.card-preview` slot scales it down via CSS
+   transform (see PlayerProfile.css). This keeps the on-page preview
+   a faithful smaller version of the downloaded share image —
+   previously the card restructured (stacked WAR + heat, hid header
+   columns) on mobile, which made preview and export look totally
+   different.
    ============================================================ */
-@container card (max-width: 720px) {
-  .player-analytics-card {
-    aspect-ratio: auto;
-    height: auto;
-    padding: 1rem 1rem;
-  }
-  .card-header-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
-  }
-  .header-right {
-    width: 100%;
-  }
-  .bottom-war-full {
-    flex-direction: column;
-    max-height: none;
-    overflow: visible;
-  }
-  .bottom-war-full .share-war-breakdown {
-    flex: 0 0 auto;
-    width: 100%;
-  }
-  .bottom-war-full .share-spatial-panel {
-    flex: 0 0 auto;
-    width: 100%;
-    padding-right: 0;
-  }
-  /* Cap spatial-panel height on narrow cards so it doesn't dominate
-     the stacked layout. SVG scales width-first via viewBox. */
-  .bottom-war-full .share-spatial-panel svg {
-    max-height: 280px;
-  }
-  /* WAR breakdown fits SVG to viewBox at any width; remove the
-     desktop max-height cap so all bars render. */
-  .share-war-breakdown svg {
-    max-height: none;
-  }
-}
-
-/* Tighter font scaling for very narrow cards (Galaxy S phones in
-   portrait typically report ~360–400px viewport, card preview a
-   touch narrower after parent padding). */
-@container card (max-width: 420px) {
-  .player-analytics-card {
-    padding: 0.75rem 0.75rem;
-  }
-  .player-name {
-    font-size: 1.4rem;
-  }
-  .hero-stat-value {
-    font-size: 1.6rem;
-  }
-}
 
 /* ============================================================
    PRINT / EXPORT

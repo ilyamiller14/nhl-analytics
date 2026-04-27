@@ -16,6 +16,7 @@ import { computePercentile } from '../services/leagueAveragesService';
 import XGTimeSeriesChart from './charts/XGTimeSeriesChart';
 import SpatialSignaturePanel from './charts/SpatialSignaturePanel';
 import WARBreakdown from './charts/WARBreakdown';
+import WARHistoryStrip from './charts/WARHistoryStrip';
 import type { WARResult } from '../services/warService';
 import { getTeamPrimaryColor } from '../constants/teams';
 import './PlayerAnalyticsCard.css';
@@ -707,37 +708,59 @@ export default function PlayerAnalyticsCard({
           cutting into the vertical budget for WAR.
           ============================================================ */}
       {warResult ? (
-        // Two-column "value + signature" layout. CSS in
+        // Two-column "value + signature" layout, then a 3rd compact row
+        // showing 1-3 seasons of WAR history side-by-side. CSS in
         // PlayerAnalyticsCard.css owns the flex behavior so it can
         // respond to viewport width (stack on mobile, side-by-side
         // on desktop and during the 1080×1080 export capture).
         (() => {
           const shotsToShow = shotEvents || analytics?.playerShots;
           const hasShots = !!(shotsToShow && shotsToShow.length > 0);
+          const historyPosition: 'F' | 'D' | 'G' = warResult.position;
           return (
-            <div className={`bottom-war-full${hasShots ? '' : ' bottom-war-full-solo'}`}>
-              <div className="share-war-breakdown">
-                {/* WARBreakdown sizes its SVG via viewBox; we pass a
-                    nominal width that the CSS overrides via the flex
-                    column + viewBox-driven SVG scale. */}
-                <WARBreakdown
-                  result={warResult}
-                  title="Wins Above Replacement"
-                  width={640}
-                  compact
-                />
+            <>
+              <div className={`bottom-war-full${hasShots ? '' : ' bottom-war-full-solo'}`}>
+                <div className="share-war-breakdown">
+                  {/* WARBreakdown sizes its SVG via viewBox; we pass a
+                      nominal width that the CSS overrides via the flex
+                      column + viewBox-driven SVG scale. */}
+                  <WARBreakdown
+                    result={warResult}
+                    title="Wins Above Replacement"
+                    width={760}
+                    compact
+                  />
+                </div>
+                {hasShots && (
+                  <div className="share-spatial-panel">
+                    <SpatialSignaturePanel
+                      shots={shotsToShow!}
+                      width={400}
+                      height={340}
+                      smoothSigma={1.4}
+                    />
+                  </div>
+                )}
               </div>
-              {hasShots && (
-                <div className="share-spatial-panel">
-                  <SpatialSignaturePanel
-                    shots={shotsToShow!}
-                    width={400}
-                    height={340}
-                    smoothSigma={1.4}
+              {/* 3-year WAR history strip — flat sibling of
+                  bottom-war-full so each gets its own flex allocation
+                  in the card's column layout. (Wrapping them in a
+                  bottom-war-block caused the WAR breakdown SVG to
+                  overflow vertically into the strip's space because
+                  the SVG's natural content height defeats nested
+                  flex stretch.) Only renders when we have a playerId. */}
+              {_playerId != null && (
+                <div className="share-war-history">
+                  <WARHistoryStrip
+                    playerId={_playerId}
+                    position={historyPosition}
+                    currentSeasonResult={warResult}
+                    compact
+                    title="3-Year WAR/82"
                   />
                 </div>
               )}
-            </div>
+            </>
           );
         })()
       ) : (

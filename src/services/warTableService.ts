@@ -149,6 +149,19 @@ export interface LeagueGoalieStats {
   q90GSAxPerGame: number;
   q99GSAxPerGame: number;
   warPer82Quantiles: Array<{ p: number; value: number }>;
+  // xG → goals calibration constant, derived client-side at load time
+  // from the war_goalies artifact: sum(goalsAllowed) / sum(xGFaced).
+  // The empirical xG bucket lookup is calibrated against shot features
+  // alone — it does NOT enforce the constraint that league total xG =
+  // league total goals. In practice it under-predicts goals by ~30%
+  // (avg 0.074 xG/shot vs 0.107 actual SH%), so raw GSAx reads negative
+  // for every goalie. Multiplying xGFaced by this constant rescales the
+  // model so league sum(GSAx) ≈ 0, recovering the standard "above /
+  // below average goalie" interpretation. Constant updates daily as
+  // the worker rebuilds the artifact.
+  // Optional so direct test fixtures don't need to set it; runtime
+  // path always populates it via loadWARTables enrichment.
+  xgCalibration?: number;
 }
 
 export interface LeagueContext {
@@ -256,6 +269,52 @@ export interface LeagueContext {
    *  HockeyGraphs model per-60 takeaway value at ~0.01 goals with RAPM
    *  overlap). Addresses the audit's structural redundancy flag. */
   turnoverShrinkage?: number;
+  /** v6.3: position × TOI-band deployment baselines for the EV
+   *  offense/defense components. Top-pair D and 1st-line F naturally
+   *  face higher xGA/60 (their shifts are weighted to high-leverage
+   *  states) and generate higher xGF/60 (more time vs offensive
+   *  zonestarts and weaker comp on-ice averaged). Comparing every
+   *  skater against the position-wide median punishes top-pair players
+   *  for deployment they don't choose.
+   *
+   *  Bands (total TOI per game played):
+   *    D: top-pair (≥22), middle-pair (18–22), bottom-pair (<18)
+   *    F: top-line (≥18), middle-line (14–18), bottom-line (<14)
+   *
+   *  Each cell carries:
+   *    - n             count of qualified players (≥35 GP) in the cell
+   *    - medianOnIceXGF60 / medianOnIceXGA60 (used by fallback blend)
+   *    - medianRAPMOffense / medianRAPMDefense (used by RAPM path) —
+   *      only the non-lowSample subset of the cell; null when n<5.
+   *
+   *  Methodology: Evolving-Hockey, JFresh, McCurdy, and Sprigings all
+   *  account for usage either via position-specific defense baselines
+   *  or by clipping negative EV defense at 0 in the headline number.
+   *  We choose the principled per-band baseline path so the WAR breakdown
+   *  bar still reads "evDefense" — a single, more honest delta — without
+   *  introducing a separate "deployment adjust" component (forbidden by
+   *  CLAUDE.md hard rule #5: no narrative WAR components). */
+  defenseBaselineByDeployment?: Record<DeploymentBand, DeploymentBaselineCell>;
+}
+
+/** Deployment band keys. The first character is the position group,
+ *  the suffix is the TOI band. Stable string keys so the WAR service can
+ *  look them up by `${pos}-${band}`. */
+export type DeploymentBand =
+  | 'D-top'
+  | 'D-mid'
+  | 'D-bot'
+  | 'F-top'
+  | 'F-mid'
+  | 'F-bot';
+
+export interface DeploymentBaselineCell {
+  n: number;
+  medianOnIceXGF60: number | null;
+  medianOnIceXGA60: number | null;
+  medianRAPMOffense: number | null;
+  medianRAPMDefense: number | null;
+  rapmN: number;
 }
 
 export interface WARTables {
@@ -271,7 +330,7 @@ const BASE = (() => {
   return base;
 })();
 
-const CACHE_KEY = 'war_tables_v6_1';
+const CACHE_KEY = 'war_tables_v6_3';
 
 let loaded: WARTables | null = null;
 let loadPromise: Promise<WARTables | null> | null = null;
@@ -583,11 +642,146 @@ export async function loadWARTables(): Promise<WARTables | null> {
       }
     }
 
+    // v6.3: position × TOI-band deployment baselines for on-ice xGF/A.
+    //
+    // Top-pair D and 1st-line F naturally face higher xGA/60 (they're on
+    // the ice for more high-leverage states) AND generate higher xGF/60
+    // (more OZ starts and weaker comp average). The position-wide median
+    // (the existing baseline) treats deployment-driven exposure as if it
+    // were a skill defect — Cale Makar's RAPM defense lands at the bottom
+    // of the league not because he's a bad defender but because he plays
+    // 24+ min/night vs every team's top line.
+    //
+    // The fix: classify each skater into a TOI band and compute the
+    // band's own median xGF/60 and xGA/60 (35+ GP qualifier — same
+    // stabilization threshold v5 uses for WAR/82). The fallback EV
+    // blend in warService consumes these as the baseline instead of
+    // posStats.medianOnIceXGF60 / medianOnIceXGA60.
+    //
+    // Method: Evolving-Hockey, JFresh, McCurdy, and Sprigings all
+    // either (a) compute position-specific defense baselines that
+    // account for deployment, or (b) clip negative EV defense at zero.
+    // We choose (a) — the principled per-band baseline — to keep the
+    // breakdown bar reading "evDefense" without introducing a separate
+    // narrative "deployment adjust" component.
+    //
+    // The RAPM-by-band median is derived in warService at first-call
+    // (it needs the rapm artifact, which loadWARTables doesn't have in
+    // scope).
+    const STABILIZATION_GP = 35;
+    const bandFor = (s: WARSkaterRow): DeploymentBand | null => {
+      if (s.gamesPlayed < STABILIZATION_GP) return null;
+      if (s.toiTotalSeconds <= 0) return null;
+      const minPerGame = (s.toiTotalSeconds / s.gamesPlayed) / 60;
+      if (s.positionCode === 'D') {
+        if (minPerGame >= 22) return 'D-top';
+        if (minPerGame >= 18) return 'D-mid';
+        return 'D-bot';
+      }
+      if (s.positionCode === 'G') return null;
+      if (minPerGame >= 18) return 'F-top';
+      if (minPerGame >= 14) return 'F-mid';
+      return 'F-bot';
+    };
+    const cellAccum: Record<DeploymentBand, { xgf: number[]; xga: number[] }> = {
+      'D-top': { xgf: [], xga: [] },
+      'D-mid': { xgf: [], xga: [] },
+      'D-bot': { xgf: [], xga: [] },
+      'F-top': { xgf: [], xga: [] },
+      'F-mid': { xgf: [], xga: [] },
+      'F-bot': { xgf: [], xga: [] },
+    };
+    for (const s of Object.values(skPayload.players)) {
+      const band = bandFor(s);
+      if (!band) continue;
+      if (!s.onIceTOIAllSec || s.onIceTOIAllSec <= 0) continue;
+      const onIceHours = s.onIceTOIAllSec / 3600;
+      if (s.onIceXGF != null) cellAccum[band].xgf.push(s.onIceXGF / onIceHours);
+      if (s.onIceXGA != null) cellAccum[band].xga.push(s.onIceXGA / onIceHours);
+    }
+    const median = (arr: number[]): number | null => {
+      if (arr.length === 0) return null;
+      const s = arr.slice().sort((a, b) => a - b);
+      const mid = (s.length - 1) / 2;
+      const lo = Math.floor(mid), hi = Math.ceil(mid);
+      return lo === hi ? s[lo] : 0.5 * (s[lo] + s[hi]);
+    };
+    const defenseBaselineByDeployment: Record<DeploymentBand, DeploymentBaselineCell> = {
+      'D-top': { n: 0, medianOnIceXGF60: null, medianOnIceXGA60: null, medianRAPMOffense: null, medianRAPMDefense: null, rapmN: 0 },
+      'D-mid': { n: 0, medianOnIceXGF60: null, medianOnIceXGA60: null, medianRAPMOffense: null, medianRAPMDefense: null, rapmN: 0 },
+      'D-bot': { n: 0, medianOnIceXGF60: null, medianOnIceXGA60: null, medianRAPMOffense: null, medianRAPMDefense: null, rapmN: 0 },
+      'F-top': { n: 0, medianOnIceXGF60: null, medianOnIceXGA60: null, medianRAPMOffense: null, medianRAPMDefense: null, rapmN: 0 },
+      'F-mid': { n: 0, medianOnIceXGF60: null, medianOnIceXGA60: null, medianRAPMOffense: null, medianRAPMDefense: null, rapmN: 0 },
+      'F-bot': { n: 0, medianOnIceXGF60: null, medianOnIceXGA60: null, medianRAPMOffense: null, medianRAPMDefense: null, rapmN: 0 },
+    };
+    for (const band of Object.keys(cellAccum) as DeploymentBand[]) {
+      const cell = cellAccum[band];
+      // Require at least 5 skaters in the cell before we publish a
+      // baseline — otherwise the median is too noisy and the consumer
+      // should fall back to the position-wide median.
+      const n = Math.max(cell.xgf.length, cell.xga.length);
+      defenseBaselineByDeployment[band].n = n;
+      if (n >= 5) {
+        defenseBaselineByDeployment[band].medianOnIceXGF60 = median(cell.xgf);
+        defenseBaselineByDeployment[band].medianOnIceXGA60 = median(cell.xga);
+      }
+    }
+
+    // Compute the goalie xG calibration constant from the actual
+    // war-goalies artifact: c = sum(goalsAllowed) / sum(xGFaced).
+    // The empirical xG model under-predicts goals by ~30% league-wide
+    // (avg 0.074 xG/shot vs ~0.107 actual SH%), which would otherwise
+    // produce negative GSAx for every goalie. Scaling xGFaced by `c`
+    // rescales the model so league sum(GSAx) ≈ 0 by construction —
+    // recovering the standard "above / below league-average goalie"
+    // interpretation without changing relative rankings (the bucket
+    // model has the right SHAPE; only the absolute level is off).
+    let sumGoalsAllowed = 0;
+    let sumXGFaced = 0;
+    for (const g of Object.values(goPayload.players)) {
+      sumGoalsAllowed += g.goalsAllowed;
+      sumXGFaced += g.xGFaced;
+    }
+    const xgCalibration = sumXGFaced > 0 ? sumGoalsAllowed / sumXGFaced : 1.0;
+
+    // Re-derive median + replacement GSAx-per-game under the calibrated
+    // scale. Pre-calibration these come from the worker, but they were
+    // computed against raw (uncalibrated) xGFaced — using them with
+    // calibrated GSAx would mean the workload bonus + replacement
+    // adjust both shift by the calibration constant, breaking the
+    // algebraic decomposition. Recomputing client-side keeps
+    // computeGoalieWAR's invariants (sum=WAR) intact.
+    const calibratedGsaxPerGame: number[] = [];
+    for (const g of Object.values(goPayload.players)) {
+      if (g.gamesPlayed >= 5) {
+        const calibratedGSAx = g.xGFaced * xgCalibration - g.goalsAllowed;
+        calibratedGsaxPerGame.push(calibratedGSAx / g.gamesPlayed);
+      }
+    }
+    calibratedGsaxPerGame.sort((a, b) => a - b);
+    const calibratedMedianGSAxPerGame =
+      calibratedGsaxPerGame.length > 0
+        ? calibratedGsaxPerGame[Math.floor(calibratedGsaxPerGame.length / 2)]
+        : 0;
+    // Replacement = 10th percentile of qualified goalies under the
+    // calibrated metric. This is the same definition as the worker's
+    // pre-calibration replacement (just on a different scale).
+    const calibratedReplacementGSAxPerGame =
+      calibratedGsaxPerGame.length > 0
+        ? calibratedGsaxPerGame[Math.floor(calibratedGsaxPerGame.length * 0.1)]
+        : 0;
+
     const tables: WARTables = {
       skaters: skPayload.players,
       goalies: goPayload.players,
       context: {
         ...ctx,
+        goalies: {
+          ...ctx.goalies,
+          xgCalibration,
+          medianGSAxPerGame: calibratedMedianGSAxPerGame,
+          replacementGSAxPerGame: calibratedReplacementGSAxPerGame,
+        },
         leagueIxGPerShot,
         baselineBlendTeamWeight,
         finishingShrinkage,
@@ -595,6 +789,7 @@ export async function loadWARTables(): Promise<WARTables | null> {
         secondaryPlaymakingAttribution,
         faceoffPossessionDiscount,
         turnoverShrinkage,
+        defenseBaselineByDeployment,
       },
       loadedAt: Date.now(),
     };

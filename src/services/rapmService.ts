@@ -110,9 +110,23 @@ export interface RAPMCovariates {
   venue: number;
 }
 
+// v5 partner-pair shrinkage metadata. After the prior-informed ridge
+// solve, structural top-pair partners (>800 5v5 min shared, >40% of each
+// player's individual TOI) have their offense/defense coefficients
+// blended toward the TOI-weighted joint mean to fix the well-known
+// RAPM partner-redistribution failure mode (e.g. Makar / Toews split,
+// Heiskanen / Lindell, McAvoy / Carlo).
+export interface RAPMPartnerShrinkMetadata {
+  minPairTOIMin: number;
+  tauMin: number;
+  blendStrength: number;
+  overlapThreshold: number;
+  triggeredPairCount: number;
+}
+
 export interface RAPMArtifact {
   season: string;              // "20252026"
-  schemaVersion: 1 | 2 | 3 | 4;    // v2: PP/PK; v3: Bacon ridge prior; v4: T2b covariates
+  schemaVersion: 1 | 2 | 3 | 4 | 5;    // v2: PP/PK; v3: Bacon ridge prior; v4: T2b covariates; v5: partner-pair shrinkage
   computedAt: string;
   gamesAnalyzed: number;
   shiftsAnalyzed: number;
@@ -122,6 +136,7 @@ export interface RAPMArtifact {
   lambdaSelection: 'empirical-bayes' | '5fold-cv';
   prior?: RAPMPriorMetadata | null;  // schema v3
   covariates?: RAPMCovariates;       // schema v4
+  partnerShrink?: RAPMPartnerShrinkMetadata; // schema v5
   leagueBaselineXGF60: number;
   leagueBaselineXGA60: number;
   leaguePpXgfPerMin?: number;  // schema v2: league PP xG / team-minute of PP
@@ -176,7 +191,7 @@ function isValidArtifact(obj: unknown): obj is RAPMArtifact {
   const a = obj as Partial<RAPMArtifact>;
   return (
     typeof a.season === 'string' &&
-    (a.schemaVersion === 1 || a.schemaVersion === 2 || a.schemaVersion === 3 || a.schemaVersion === 4) &&
+    (a.schemaVersion === 1 || a.schemaVersion === 2 || a.schemaVersion === 3 || a.schemaVersion === 4 || a.schemaVersion === 5) &&
     typeof a.players === 'object' &&
     a.players !== null
   );
