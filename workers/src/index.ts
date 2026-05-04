@@ -755,12 +755,25 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    // Optional sub-team chunking — process [gameOffset, gameOffset+gameLimit)
+    // games of the team's season. Lets very-large-PBP teams (Cup runs,
+    // playoff appearances) avoid Cloudflare error 1102 ("worker resource
+    // limit exceeded") by splitting one team's full 82 games across
+    // multiple HTTP calls. Backwards compatible: omit both params to
+    // process the full season in one call (legacy behavior).
+    const gameOffset = parseInt(url.searchParams.get('gameOffset') || '0', 10) || 0;
+    const gameLimitRaw = url.searchParams.get('gameLimit');
+    const gameLimit = gameLimitRaw ? Math.max(1, parseInt(gameLimitRaw, 10)) : Infinity;
     try {
-      await buildWARChunkTeam(env, team.toUpperCase(), season);
+      const result = await buildWARChunkTeam(env, team.toUpperCase(), season, gameOffset, gameLimit);
       const partial = await loadWARPartial(env, season);
       return new Response(JSON.stringify({
         team: team.toUpperCase(),
         season,
+        gameOffset,
+        gameLimit: gameLimitRaw ? gameLimit : null,
+        gamesProcessedInThisCall: result.gamesProcessedInThisCall,
+        teamComplete: result.teamComplete,
         teamsProcessed: partial.teamsProcessed.length,
         gamesSeen: partial.seenGameIds.length,
         skaters: Object.keys(partial.skaters).length,
@@ -837,6 +850,59 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     })());
     return new Response(JSON.stringify({
       message: `WAR finalize started for ${season}. Runs in background; poll /cached/league-context?season=${season} in ~30s to confirm.`,
+      season,
+    }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+
+  // Two-stage finalize: when the one-shot war-finalize blows past the
+  // worker's CPU/memory budget on a brand-new historical season (lots
+  // of games + skaters all in one waitUntil), the caller can split the
+  // work across two HTTP requests instead. Each stage fits comfortably
+  // in a single request budget.
+  //
+  // Stage A: gamesPlayed + split-half + TOI fetch/merge + write
+  //          war_skaters + war_goalies. Skips league_context.
+  // Stage B: build league_context from the already-written tables and
+  //          write league_context_${season}.
+  if (url.pathname === '/cached/war-finalize-tables') {
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    ctx.waitUntil((async () => {
+      try {
+        await finalizeWARTablesOnly(env, season);
+        console.log(`war-finalize-tables ${season}: done`);
+      } catch (err) {
+        console.error(`war-finalize-tables ${season} failed:`, err);
+      }
+    })());
+    return new Response(JSON.stringify({
+      message: `WAR tables finalize started for ${season}. Poll /cached/war-skaters?season=${season} in ~30s, then call /cached/war-finalize-context?season=${season}.`,
+      season,
+    }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+  if (url.pathname === '/cached/war-finalize-context') {
+    let season: string;
+    try { season = parseSeasonParam(url); }
+    catch (err: any) {
+      return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    ctx.waitUntil((async () => {
+      try {
+        await finalizeLeagueContextOnly(env, season);
+        console.log(`war-finalize-context ${season}: done`);
+      } catch (err) {
+        console.error(`war-finalize-context ${season} failed:`, err);
+      }
+    })());
+    return new Response(JSON.stringify({
+      message: `League context finalize started for ${season}. Poll /cached/league-context?season=${season} in ~30s.`,
       season,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
@@ -3589,11 +3655,17 @@ async function resetWARPartial(env: Env, season: string = CURRENT_SEASON): Promi
 //     xGA, goals-for, goals-against, and shots-for/against. Skipped
 //     silently (on-ice fields stay undefined) if shift data isn't cached
 //     for the game.
-async function buildWARChunkTeam(env: Env, team: string, season: string = CURRENT_SEASON): Promise<void> {
+async function buildWARChunkTeam(
+  env: Env,
+  team: string,
+  season: string = CURRENT_SEASON,
+  gameOffset: number = 0,
+  gameLimit: number = Infinity,
+): Promise<{ gamesProcessedInThisCall: number; teamComplete: boolean }> {
   const partial = await loadWARPartial(env, season);
   if (partial.teamsProcessed.includes(team)) {
     console.log(`WAR chunk ${team} (${season}): already processed`);
-    return;
+    return { gamesProcessedInThisCall: 0, teamComplete: true };
   }
 
   // Initialize league counters lazily.
@@ -3653,10 +3725,15 @@ async function buildWARChunkTeam(env: Env, team: string, season: string = CURREN
     return baselineRate;
   };
 
-  const games = await env.NHL_CACHE.get(`team_pbp_${team}_${season}`, 'json') as any[] | null;
-  if (!Array.isArray(games)) { console.log(`WAR chunk ${team} (${season}): no PBP`); return; }
+  const allGames = await env.NHL_CACHE.get(`team_pbp_${team}_${season}`, 'json') as any[] | null;
+  if (!Array.isArray(allGames)) { console.log(`WAR chunk ${team} (${season}): no PBP`); return { gamesProcessedInThisCall: 0, teamComplete: false }; }
+  const totalGames = allGames.length;
+  const sliceEnd = Math.min(totalGames, gameOffset + gameLimit);
+  const games = allGames.slice(gameOffset, sliceEnd);
+  const teamComplete = sliceEnd >= totalGames;
 
   const seen = new Set(partial.seenGameIds);
+  let gamesProcessedInThisCall = 0;
 
   const getOrCreateSkater = (pid: number): WARSkaterRow => {
     let r = partial.skaters[pid];
@@ -3678,6 +3755,7 @@ async function buildWARChunkTeam(env: Env, team: string, season: string = CURREN
     if (!g?.gameId || seen.has(g.gameId)) continue;
     seen.add(g.gameId);
     partial.seenGameIds.push(g.gameId);
+    gamesProcessedInThisCall++;
 
     const plays = g.plays || [];
     const homeTeamId = g.homeTeamId;
@@ -4050,9 +4128,10 @@ async function buildWARChunkTeam(env: Env, team: string, season: string = CURREN
     }
   }
 
-  partial.teamsProcessed.push(team);
+  if (teamComplete) partial.teamsProcessed.push(team);
   await storeWARPartial(env, partial, season);
-  console.log(`WAR chunk ${team} (${season}): processed. teams=${partial.teamsProcessed.length} games=${partial.seenGameIds.length} skaters=${Object.keys(partial.skaters).length}`);
+  console.log(`WAR chunk ${team} (${season}): slice [${gameOffset}, ${sliceEnd}) of ${totalGames}, processed=${gamesProcessedInThisCall}, teamComplete=${teamComplete}, teamsDone=${partial.teamsProcessed.length}`);
+  return { gamesProcessedInThisCall, teamComplete };
 }
 
 // Finalize: attach TOI splits from NHL Stats, compute league context,
@@ -4122,6 +4201,80 @@ async function finalizeWARTables(env: Env, season: string = CURRENT_SEASON): Pro
   });
 
   console.log(`WAR finalized for ${season}: ${Object.keys(partial.skaters).length} skaters, ${Object.keys(partial.goalies).length} goalies, marginalGoalsPerWin=${context.marginalGoalsPerWin.toFixed(3)}`);
+}
+
+// Two-stage finalize variants — used when the one-shot finalizeWARTables
+// blows past the worker's CPU/memory budget on a brand-new historical
+// season build. Stage A produces the per-player tables; stage B produces
+// the league-wide context.
+async function finalizeWARTablesOnly(env: Env, season: string = CURRENT_SEASON): Promise<void> {
+  const partial = await loadWARPartial(env, season);
+
+  for (const [pidStr, gameIds] of Object.entries(partial.gamesSeenPerPlayer)) {
+    const pid = parseInt(pidStr, 10);
+    const row = partial.skaters[pid];
+    if (row) row.gamesPlayed = gameIds.length;
+  }
+
+  if (partial.perPlayerGameShots) {
+    applySplitHalfFromPerGame(partial.skaters, partial.perPlayerGameShots);
+  }
+
+  const [toi, goalieToi] = await Promise.all([fetchSkaterTOI(season), fetchGoalieTOI(season)]);
+  for (const t of toi) {
+    const row = partial.skaters[t.playerId];
+    if (row) {
+      row.toiTotalSeconds = t.total;
+      row.toiEvSeconds = t.ev;
+      row.toiPpSeconds = t.pp;
+      row.toiShSeconds = t.sh;
+      if (!row.positionCode) row.positionCode = t.positionCode;
+      if (!row.teamAbbrevs) row.teamAbbrevs = t.teamAbbrevs;
+    }
+  }
+  for (const t of goalieToi) {
+    const row = partial.goalies[t.playerId];
+    if (row) {
+      row.toiTotalSeconds = t.total;
+      row.gamesPlayed = t.gamesPlayed;
+      row.teamAbbrevs = t.teamAbbrevs;
+    }
+  }
+
+  await env.NHL_CACHE.put(`war_skaters_${season}`, JSON.stringify({
+    schemaVersion: 2,
+    season,
+    computedAt: new Date().toISOString(),
+    players: partial.skaters,
+  }), { expirationTtl: 7 * 24 * 60 * 60 });
+
+  await env.NHL_CACHE.put(`war_goalies_${season}`, JSON.stringify({
+    schemaVersion: 2,
+    season,
+    computedAt: new Date().toISOString(),
+    players: partial.goalies,
+  }), { expirationTtl: 7 * 24 * 60 * 60 });
+
+  // Persist the TOI-merged partial so the context stage doesn't need to
+  // re-fetch TOI. (loadWARPartial reads the same key the chunks wrote
+  // to; we update it here so the next stage's loadWARPartial sees the
+  // TOI fields populated.)
+  await storeWARPartial(env, partial, season);
+
+  console.log(`WAR tables finalized for ${season}: ${Object.keys(partial.skaters).length} skaters, ${Object.keys(partial.goalies).length} goalies`);
+}
+
+async function finalizeLeagueContextOnly(env: Env, season: string = CURRENT_SEASON): Promise<void> {
+  const partial = await loadWARPartial(env, season);
+  const context = await buildLeagueContext(
+    env, partial.skaters, partial.goalies,
+    partial.leagueCounters, partial.teamTotals,
+    season,
+  );
+  await env.NHL_CACHE.put(`league_context_${season}`, JSON.stringify(context), {
+    expirationTtl: 7 * 24 * 60 * 60,
+  });
+  console.log(`League context finalized for ${season}: marginalGoalsPerWin=${context.marginalGoalsPerWin.toFixed(3)}`);
 }
 
 function blankSkaterRow(playerId: number): WARSkaterRow {
@@ -4230,24 +4383,38 @@ async function buildLeagueContext(
     : 0;
 
   // PP xG per minute: aggregate from all skaters' PP ixG / total PP TOI.
-  // Players have ixG summed over ALL situations — we need to narrow.
-  // Approximation: treat PP xG share as proportional to PP TOI share.
+  // v6.4 — direct league-wide aggregation. Previous version used a SINGLE
+  // bucket-pair ratio (`en0|d05_10|a00_10|wrist|pp` vs same key at 5v5)
+  // as a strength multiplier on the all-situations league rate; that was
+  // fragile to small-sample noise in one bucket and the audit (§2.13)
+  // flagged it as a fragility. The new path sums the v5.5+ per-strength
+  // shooter splits — `ixG_pp` is exactly the league's PP xG when summed —
+  // and divides by league PP minutes (Σ skater.toiPpSeconds / 5 because
+  // 5 skaters are on PP simultaneously, ÷60 to get minutes).
   const allSkaters = Object.values(skaters);
   const totalIxG = allSkaters.reduce((s, r) => s + r.ixG, 0);
   const totalTOI = allSkaters.reduce((s, r) => s + r.toiTotalSeconds, 0);
   const totalPPToi = allSkaters.reduce((s, r) => s + r.toiPpSeconds, 0);
-  // League xG/60 across all situations:
+  const totalPPIxG = allSkaters.reduce((s, r) => s + (r.ixG_pp || 0), 0);
+  // League xG/60 across all situations (kept as a separate field for
+  // anyone who wanted the all-strength rate):
   const leagueXGPer60 = totalTOI > 0 ? totalIxG / (totalTOI / 3600) : 0;
-  // A rough PP multiplier: on PP, individual ixG per player per 60 is roughly
-  // ~1.8-2x the EV rate. We need an empirical number — derive from the xG
-  // lookup's strength buckets:
-  const xgLookupRaw = await env.NHL_CACHE.get(`xg_lookup_${season}`, 'json') as any;
-  const ppBucket = xgLookupRaw?.buckets?.['en0|d05_10|a00_10|wrist|pp'];
-  const evBucket = xgLookupRaw?.buckets?.['en0|d05_10|a00_10|wrist|5v5'];
-  const strengthMultiplier = (ppBucket?.rate && evBucket?.rate)
-    ? ppBucket.rate / evBucket.rate
-    : 1.0;
-  const ppXGPerMinute = (leagueXGPer60 / 60) * strengthMultiplier;
+  // Direct league-wide PP xG / PP-minute. `toiPpSeconds` sums per-skater
+  // (5× the wall-clock PP seconds), so divide by 5 to get league PP
+  // seconds, then by 60 for minutes.
+  const leaguePPMinutes = totalPPToi / 5 / 60;
+  let ppXGPerMinute = leaguePPMinutes > 0 ? totalPPIxG / leaguePPMinutes : 0;
+  // Fallback to the legacy single-bucket multiplier when the per-strength
+  // split fields aren't populated (older PBP without v5.5 emit).
+  if (!(ppXGPerMinute > 0)) {
+    const xgLookupRaw = await env.NHL_CACHE.get(`xg_lookup_${season}`, 'json') as any;
+    const ppBucket = xgLookupRaw?.buckets?.['en0|d05_10|a00_10|wrist|pp'];
+    const evBucket = xgLookupRaw?.buckets?.['en0|d05_10|a00_10|wrist|5v5'];
+    const strengthMultiplier = (ppBucket?.rate && evBucket?.rate)
+      ? ppBucket.rate / evBucket.rate
+      : 1.0;
+    ppXGPerMinute = (leagueXGPer60 / 60) * strengthMultiplier;
+  }
 
   // Position statistics — compute per-game GAR + per-60 ixG + per-60
   // micro-stat rates + on-ice xGF/xGA rates. Quantile calc on real dist.
@@ -4293,9 +4460,14 @@ async function buildLeagueContext(
   const dStats = computePositionStats(dArr, replacementD ?? undefined);
 
   // Goalie statistics.
+  // v6.4: cohort filter `GP >= 15` (was `GP >= 5`). Emergency call-up
+  // goalies' 5-game GSAx swings (often -2 to -3 per game) pulled the
+  // 10th-percentile far below realistic starter replacement, inflating
+  // elite goalie WAR by 3-4× vs public consensus. 15 GP filters call-ups
+  // while keeping every starter and most platoon backups.
   const gsaxPerGame: number[] = [];
   for (const g of Object.values(goalies)) {
-    if (g.gamesPlayed < 5) continue;
+    if (g.gamesPlayed < 15) continue;
     const gsax = g.xGFaced - g.goalsAllowed;
     gsaxPerGame.push(gsax / g.gamesPlayed);
   }
@@ -4430,10 +4602,17 @@ function computeReplacementByTeamTOI(
     if (position === 'D') return row.positionCode === 'D';
     return row.positionCode === 'C' || row.positionCode === 'L' || row.positionCode === 'R';
   };
+  // v6.4 — replace `gamesPlayed < 5` injury filter with a TOI-based one
+  // (≥100 wall-clock min on the season). On heavily-injured teams the
+  // gp-based filter could let a 6-GP top-9 forward at 18 min/GP rank
+  // 13th by total TOI — contaminating the cohort with non-replacement
+  // players. TOI≥100 min eliminates short stints regardless of team
+  // injury context. Aligns with EH's "stability filter" recommendation.
+  const MIN_TOI_SEC = 100 * 60;
   // Group by primary team (first abbrev in the comma-separated list).
   const byTeam = new Map<string, WARSkaterRow[]>();
   for (const row of Object.values(skaters)) {
-    if (row.gamesPlayed < 5) continue;
+    if (row.toiTotalSeconds < MIN_TOI_SEC) continue;
     if (!isPosition(row)) continue;
     const team = (row.teamAbbrevs || '').split(',')[0].trim();
     if (!team) continue;
@@ -4447,9 +4626,22 @@ function computeReplacementByTeamTOI(
     // Skaters ranked THRESHOLD and below (1-indexed) form the cohort.
     for (let rank1 = RANK_THRESHOLD; rank1 <= list.length; rank1++) {
       const row = list[rank1 - 1];
+      // v6.4 — use a slightly broader proxy GAR so the cohort baseline
+      // tracks the actual `computeSkaterWAR` output more faithfully than
+      // the prior 2-component proxy did. Components included: finishing
+      // residual (iG − ixG), penalty differential, plus turnover
+      // differential and on-ice xG residual when available. Components
+      // requiring RAPM (PP/PK, EV off/def via RAPM) remain absent here
+      // — the cohort by definition has minimal special-teams TOI and
+      // their RAPM coefficients aren't loaded in this worker context,
+      // so proxying with on-ice xG + turnovers is the closest we get
+      // without a full pipeline port. (§2.8 path B in the validation
+      // doc; full path A would port computeSkaterWAR into the worker.)
       const gax = row.iG - row.ixG;
       const pdiff = (row.penaltiesDrawn - row.penaltiesTaken) * penaltyValue;
-      const garPerGame = (gax + pdiff) / row.gamesPlayed;
+      const taGiveDiff = ((row.takeaways || 0) - (row.giveaways || 0)) * 0.005; // rough rate
+      const onIceDiff = ((row.onIceXGF || 0) - (row.onIceXGA || 0)) * 0.05;     // 5% credit; RAPM would replace this
+      const garPerGame = (gax + pdiff + taGiveDiff + onIceDiff) / row.gamesPlayed;
       replacementGARs.push(garPerGame);
     }
   }
@@ -4467,7 +4659,11 @@ function computeGoalieStats(gsaxPerGame: number[], marginalGoalsPerWin: number):
   return {
     count: sorted.length,
     medianGSAxPerGame: quantile(sorted, 0.5),
-    replacementGSAxPerGame: quantile(sorted, 0.10),
+    // v6.5: replacement raised from 10th → 25th percentile of GP≥15
+    // cohort. Mirrors warHistoryService / warTableService changes —
+    // 10th captured "worst regular backup who had a really bad season"
+    // (~-0.42 cGSAx/GP), inflating elite WAR/82 by 2-3× vs public.
+    replacementGSAxPerGame: quantile(sorted, 0.25),
     q90GSAxPerGame: quantile(sorted, 0.90),
     q99GSAxPerGame: quantile(sorted, 0.99),
     warPer82Quantiles,

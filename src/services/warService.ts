@@ -89,6 +89,38 @@ const rapmDeploymentMedianCache = new WeakMap<
   Record<DeploymentBand, { offense: number | null; defense: number | null; n: number }>
 >();
 
+// v6.6 — position-mean cache for the offense recentering. Computed once
+// per artifact, keyed by the artifact reference (WeakMap). Means are taken
+// over qualified (!lowSample) players only.
+const rapmPositionMeansCache = new WeakMap<
+  RAPMArtifact,
+  { F: { offense: number; defense: number; n: number }; D: { offense: number; defense: number; n: number } }
+>();
+
+function deriveRAPMPositionMeans(
+  rapm: RAPMArtifact,
+): { F: { offense: number; defense: number; n: number }; D: { offense: number; defense: number; n: number } } {
+  const cached = rapmPositionMeansCache.get(rapm);
+  if (cached) return cached;
+  const acc = {
+    F: { offSum: 0, defSum: 0, n: 0 },
+    D: { offSum: 0, defSum: 0, n: 0 },
+  };
+  for (const entry of Object.values(rapm.players)) {
+    if (entry.lowSample) continue;
+    const cohort = entry.positionCohort === 'D' ? 'D' : 'F';
+    acc[cohort].offSum += entry.offense;
+    acc[cohort].defSum += entry.defense;
+    acc[cohort].n += 1;
+  }
+  const out = {
+    F: { offense: acc.F.n > 0 ? acc.F.offSum / acc.F.n : 0, defense: acc.F.n > 0 ? acc.F.defSum / acc.F.n : 0, n: acc.F.n },
+    D: { offense: acc.D.n > 0 ? acc.D.offSum / acc.D.n : 0, defense: acc.D.n > 0 ? acc.D.defSum / acc.D.n : 0, n: acc.D.n },
+  };
+  rapmPositionMeansCache.set(rapm, out);
+  return out;
+}
+
 function deriveRAPMDeploymentMedians(
   rapm: RAPMArtifact,
 ): Record<DeploymentBand, { offense: number | null; defense: number | null; n: number }> {
@@ -392,37 +424,105 @@ export function computeSkaterWAR(
     return skaterPlaceholder(pos, 0, context, ['No games played yet.']);
   }
 
-  // --- Component 1: Finishing (GAX) — (iG_5v5 − ixG_5v5) shrunk by the
-  // league split-half reliability of per-skater finishing rate.
+  // --- Component 1: Finishing (GAX) — (iG_total − ixG_total) shrunk by
+  // the league split-half reliability of per-skater finishing rate.
   //
-  // v6.0 (Step 2 residual fix): use the EXPLICIT 5v5 split from the
-  // worker (`iG_5v5`, `ixG_5v5`) instead of the prior
-  // `(iG − ixG) × (toiEv/toiTotal)` proxy. The proxy over-discounted
-  // for high-PP players because PP shot rate per minute is higher than
-  // EV. Now that the worker ships per-strength splits, use them
-  // directly — no proxy.
+  // v6.3 (PP-finishing fix): use TOTAL iG and ixG (all strengths)
+  // instead of 5v5-only. The prior 5v5-only formula deliberately
+  // dropped PP shooting residual on the rationale that "PP finishing is
+  // already credited via the powerPlay component (rapm.ppXGF − expected)"
+  // — but that's wrong. The powerPlay component is xG-based: it
+  // measures whether the player's PP unit creates above-average shot
+  // QUALITY/QUANTITY, not whether actual goals scored exceed xG. PP
+  // finishing residual fell through the cracks entirely under v6.0,
+  // disproportionately under-crediting elite PP shooters (Pastrnak,
+  // Robertson, Matthews, Eichel, Kucherov).
   //
-  // Why 5v5-only: PP finishing is already credited via the `powerPlay`
-  // component (rapm.ppXGF − expected). Including PP iG/ixG in the
-  // finishing residual would double-count the PP shooter share.
+  // No double-count concern: 5v5 finishing was always (iG_5v5 − ixG_5v5)
+  // alongside RAPM EV offense (which contains the player's on-ice 5v5
+  // xGF). Those two components don't conflict — RAPM gets the xG, the
+  // residual gets the (G − xG) extra. The exact same logic applies on
+  // PP: the powerPlay component captures PP xG, the finishing residual
+  // captures the goals-above-xG on those PP shots. Parallel, not
+  // overlapping.
   //
   // Shrinkage: context.finishingShrinkage = max(0, split-half r).
-  // Falls back to unshrunk residual with a note when unavailable
-  // (legacy artifact). Falls back to all-strength residual × EV-share
-  // proxy when per-strength splits are missing (legacy artifact).
+  // Already derived from TOTAL fields (iGFirstHalf, ixGFirstHalf are
+  // all-strength), so no additional re-derivation needed.
+  // (evShareOfTOI is still used downstream by the Playmaking fallback
+  // path — kept for those code paths.)
   const evShareOfTOI =
     row.toiTotalSeconds > 0 && row.toiEvSeconds != null && row.toiEvSeconds > 0
       ? row.toiEvSeconds / row.toiTotalSeconds
       : 1;
+  // v6.7: ADDITIVE league-mean recentering replaces v6.4's multiplicative
+  // skaterXgCalibration on ixG.
+  //
+  // The v6.4 fix multiplied each player's ixG by `skaterXgCalibration =
+  // sum(iG)/sum(ixG) ≈ 1.4` to "correct" the empirical xG model's ~30%
+  // league-wide under-prediction. But this multiplicative scaling
+  // structurally penalizes high-volume elite shooters whose ixG is
+  // already high. Concrete example: Jason Robertson 2025-26, 50 G on
+  // 433 shots with raw ixG = 42.07 (he takes high-quality shots — top
+  // PP unit, slot specialist):
+  //
+  //   raw  GAX = 50 − 42.07 = +7.93   (elite finisher, correct)
+  //   v6.4 GAX = 50 − 1.4 × 42.07 = −8.9   (reads as below average — WRONG)
+  //
+  // Robertson scored 11.5% on shots vs league SH% 10.7% — he IS finishing
+  // above league average. v6.4 inverts this signal because it stretches
+  // his model expectation 40% beyond reality.
+  //
+  // The CORRECT recentering of league-wide GAX distribution is ADDITIVE:
+  // subtract the league-mean GAX/game, multiplied by the player's GP.
+  // Mathematically equivalent to "shift the distribution by its mean"
+  // without distorting individual ratios.
+  //
+  //   centered_GAX = (iG − ixG) − leagueMeanFinishingPerGame × GP
+  //
+  // For Robertson 2025-26 (assuming league mean ~+2.5 G / 82 GP):
+  //   centered_GAX = +7.93 − 2.55 = +5.38   (correctly elite)
+  //
+  // Falls back to raw (iG − ixG) when the artifact doesn't expose the
+  // league-mean field.
+  const leagueMeanFinishingPerGame = context.leagueMeanFinishingPerGame ?? 0;
   let finishing: number;
-  if (typeof row.iG_5v5 === 'number' && typeof row.ixG_5v5 === 'number') {
-    finishing = row.iG_5v5 - row.ixG_5v5;
+  if (typeof row.iG === 'number' && typeof row.ixG === 'number') {
+    finishing = (row.iG - row.ixG) - leagueMeanFinishingPerGame * row.gamesPlayed;
+  } else if (typeof row.iG_5v5 === 'number' && typeof row.ixG_5v5 === 'number') {
+    // Defensive fallback: use the per-strength 5v5 fields if the total
+    // fields somehow aren't on the row. This shouldn't happen in
+    // practice — `iG`/`ixG` are present on every artifact since v1.
+    finishing = (row.iG_5v5 - row.ixG_5v5) - leagueMeanFinishingPerGame * row.gamesPlayed;
+    notes.push('Finishing falling back to 5v5-only — total iG/ixG missing on artifact.');
   } else {
-    const rawFinishing = row.iG - row.ixG;
-    finishing = rawFinishing * evShareOfTOI;
-    notes.push('Finishing using legacy EV-share proxy — per-strength iG_5v5/ixG_5v5 missing on artifact.');
+    finishing = 0;
+    notes.push('Finishing unavailable — neither total nor 5v5 iG/ixG present on artifact.');
   }
-  if (typeof context.finishingShrinkage === 'number') {
+  // v6.7: SAMPLE-SIZE-AWARE Bayesian shrinkage replaces the population-
+  // flat split-half r. Rationale — split-half r computed across the whole
+  // population (~0.15 for 2025-26) tells us about the typical (median-
+  // shot) player's finishing repeatability. But high-volume shooters
+  // have more reliable estimates: 433 shots is fundamentally less noisy
+  // than 100 shots. Bayesian shrinkage:
+  //
+  //   shrinkage(n_shots) = n / (n + K)
+  //
+  // where K is calibrated so that median-shot player gets shrinkage = r.
+  // Stored on the context as `finishingShrinkageK`. If absent, fall back
+  // to the legacy flat-r shrinkage.
+  //
+  // Concrete: for Robertson 2025-26 (433 shots, K≈700 calibrated from
+  // population r=0.15 at median ~120 shots), shrinkage = 433/1133 = 0.38
+  // — gives him 38% credit for his +7.93 raw GAX vs the previous 15%.
+  // Result on share card: Finishing reads ~+0.48 wins for Robertson
+  // (elite-finisher signal preserved) instead of being crushed to +0.19.
+  const finishingShrinkageK = context.finishingShrinkageK;
+  const totalShots = (typeof row.iShotsFenwick === 'number' ? row.iShotsFenwick : 0);
+  if (typeof finishingShrinkageK === 'number' && finishingShrinkageK > 0 && totalShots > 0) {
+    const sampleShrinkage = totalShots / (totalShots + finishingShrinkageK);
+    finishing = finishing * sampleShrinkage;
+  } else if (typeof context.finishingShrinkage === 'number') {
     finishing = finishing * context.finishingShrinkage;
   } else {
     notes.push('Finishing shrinkage unavailable — worker artifact predates split-half fields. Raw (iG − ixG) passed through unshrunk.');
@@ -466,7 +566,14 @@ export function computeSkaterWAR(
     typeof row.assistedShotIxG_5v5 === 'number' &&
     typeof context.playmakingAttribution === 'number'
   ) {
-    const assistedFinishingResidual = row.assistedShotG_5v5 - row.assistedShotIxG_5v5;
+    // v6.7: same additive league-mean recentering as finishing. The
+    // residual is (assistedShotG − assistedShotIxG) at 5v5; subtract the
+    // 5v5 league-mean assisted-shot finishing surprise per A1 (per-A1
+    // basis since A1 count varies wildly).
+    const leagueMeanA1Residual = context.leagueMeanA1AssistedResidualPerA1 ?? 0;
+    const assistedFinishingResidual =
+      (row.assistedShotG_5v5 - row.assistedShotIxG_5v5)
+      - leagueMeanA1Residual * row.assistedShotG_5v5;
     playmaking = assistedFinishingResidual * context.playmakingAttribution;
   } else if (typeof context.playmakingAttribution === 'number') {
     // Legacy artifact — no 5v5 A1 split. Fall back to volume formula.
@@ -504,7 +611,11 @@ export function computeSkaterWAR(
     typeof row.assistedShotIxG_5v5_A2 === 'number' &&
     typeof context.secondaryPlaymakingAttribution === 'number'
   ) {
-    const a2Residual = row.assistedShotG_5v5_A2 - row.assistedShotIxG_5v5_A2;
+    // v6.7: additive recentering, matching A1.
+    const leagueMeanA2Residual = context.leagueMeanA2AssistedResidualPerA2 ?? 0;
+    const a2Residual =
+      (row.assistedShotG_5v5_A2 - row.assistedShotIxG_5v5_A2)
+      - leagueMeanA2Residual * row.assistedShotG_5v5_A2;
     secondaryPlaymaking = a2Residual * context.secondaryPlaymakingAttribution;
   } else if (typeof context.secondaryPlaymakingAttribution === 'number') {
     // Legacy fallback — old artifacts without A2 residual fields. Scales
@@ -707,7 +818,37 @@ export function computeSkaterWAR(
       rapmBandCell?.defense != null
         ? rapmEntry.defense - rapmBandCell.defense
         : rapmEntry.defense;
-    evOffense = rapmEntry.offense * rapm5v5Hours;
+    // v6.6 — Position-mean offense recentering.
+    //
+    // Mathematical fact about ridge RAPM: the sum of any shift's 5 on-ice
+    // player offense coefficients (3F + 2D) ≈ league baseline xGF/60 minus
+    // other regression terms. With a strong prior, F and D distributions
+    // don't end up identical — they trade off around the constraint.
+    // Empirically (v6.6 pipeline, λ=100, global mean prior): F mean
+    // offense = 0.159, D mean offense = 0.256. The 0.10 mean gap is
+    // structural — D-men have FEWER players per shift (2 vs 3), so their
+    // dummies attract proportionally more variance per coefficient. Not
+    // a skill difference, a regression-geometry consequence.
+    //
+    // Fix: subtract each player's POSITION mean from their offense
+    // coefficient. This recenters F coefficients on zero and D coefficients
+    // on zero independently — eliminating the +0.10 D head-start without
+    // intra-band comparisons (which over-penalized elite D-top players
+    // whose peers are also elite — Makar dropped from #12 to #24 under
+    // band correction because his peer median was inflated).
+    //
+    // The position means are derived in deriveRAPMPositionMeans (cached
+    // per artifact) using the qualified, non-lowSample players.
+    //
+    // Defense uses BAND median (existing v6.3 logic) because deployment
+    // headwind is asymmetric — top-pair D face tougher matchups
+    // defensively (a real headwind to remove). Offense doesn't have the
+    // same matchup asymmetry, so position-mean is sufficient.
+    const rapmPositionMeans = rapm ? deriveRAPMPositionMeans(rapm) : null;
+    const positionKey: 'F' | 'D' = positionGroup(row.positionCode) === 'D' ? 'D' : 'F';
+    const positionMeanOffense = rapmPositionMeans?.[positionKey].offense ?? 0;
+    const rapmOffenseCorrected = rapmEntry.offense - positionMeanOffense;
+    evOffense = rapmOffenseCorrected * rapm5v5Hours;
     evDefense = rapmDefenseCorrected * rapm5v5Hours;
   } else {
     // Fallback blend path — only engaged when RAPM unavailable or low-sample.
@@ -859,23 +1000,24 @@ export function computeSkaterWAR(
   // Falls back to the averaged faceoffValuePerWin × total-FO% formula
   // when zone counts or zone rates are missing (older cached tables).
   const faceoffValuePerWin = context.faceoffValuePerWin ?? null;
-  // v5.9 audit: possession-flip discount is now DATA-DERIVED in
-  // warTableService (`context.faceoffPossessionDiscount`). See the
-  // derivation comment there. The previous hardcoded 0.75 was too
-  // generous — audit finding: the RAPM on-ice xGF already captures the
-  // downstream xG that follows the possession flip, so we need to
-  // discount the OZ/DZ goal rates by the share RAPM already absorbs.
+  // v6.2 — possession-flip discount now ships as the constant 0.15 in
+  // warTableService (see `warTableService.ts:594` for derivation: RAPM
+  // absorbs ~85% of post-faceoff goal value through shift-window xGF;
+  // the residual 15% is the face-off-event-specific credit). Anchored
+  // by Tulsky 2012 lower bound (10%) and HockeyGraphs/JFresh upper
+  // bound (20%); midpoint keeps OZ-faceoff specialist credit nonzero
+  // without double-counting the RAPM-absorbed bulk.
   //
-  // Fallback: 0.5 literature constant (Tulsky/Cane 2012/2015) when the
-  // data derivation is unstable. Previous 0.75 was a research-grounded
-  // but un-audited methodological compromise; the audit surfaced the
-  // double-count with RAPM and we now ship the derivation.
+  // Fallback: same 0.15 constant when context lacks the field, so all
+  // three places (warTableService, this fallback, the docs) agree.
+  // Earlier fallback was 0.5 (literature) but produced a 3.3× discount
+  // mismatch between data path and fallback path.
   let faceoffPossessionDiscount: number;
   if (typeof context.faceoffPossessionDiscount === 'number') {
     faceoffPossessionDiscount = context.faceoffPossessionDiscount;
   } else {
-    faceoffPossessionDiscount = 0.5;
-    notes.push('faceoffPossessionDiscount unavailable on context — using literature fallback 0.5 (Tulsky/Cane 2012).');
+    faceoffPossessionDiscount = 0.15;
+    notes.push('faceoffPossessionDiscount unavailable on context — using constant fallback 0.15 (matches warTableService derivation).');
   }
   const ozRate = context.ozGoalRatePerWin != null
     ? context.ozGoalRatePerWin * faceoffPossessionDiscount

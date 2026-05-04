@@ -465,3 +465,215 @@ RAPM by construction. That's the load-bearing fact behind the audit
 verdict; preserve it when changing the model. Reach out to the audit
 agents' transcripts (in this session's Claude memory directory if still
 present) for the full reasoning chain.
+
+---
+
+## Shipped 2026-05-03 (v6.4 → v6.7 — calibration overhaul)
+
+Multi-session pass driven by a fresh validation audit
+([`docs/ANALYTICS_VALIDATION.md`](./docs/ANALYTICS_VALIDATION.md), regenerated
+2026-05-02 to supersede the stale 2026-02 doc) plus a chromium-based
+share-card audit. Worker rebuilt, RAPM re-fit, client redeployed.
+Cache key prefix: `war_tables_v6_7b`, `war_history_v6_7b_`.
+
+### v6.4 — Goalie pipeline calibration
+
+- **Goalie cohort filter `GP >= 5` → `GP >= 15`**
+  ([`workers/src/index.ts:4470`](./workers/src/index.ts#L4470),
+  [`warTableService.ts:732`](./src/services/warTableService.ts#L732),
+  [`warHistoryService.ts:215`](./src/services/warHistoryService.ts#L215)).
+  The 5-game cutoff was including emergency call-up goalies whose -2 to -3 GSAx/GP
+  swings pulled the 10th-percentile far below realistic starter level.
+- **Goalie replacement: 10th → 25th percentile** of GP≥15 cohort.
+  10th was capturing "the worst regular backup who had a really bad
+  season" (~-0.42 cGSAx/GP) — too generous. 25th (~-0.27 cGSAx/GP)
+  aligns elite WAR/82 with EH/JFresh public values.
+- **Effect:** Hellebuyck 2024-25 went +10.7 → +7.1 WAR/82 (closer to
+  EH's published ~+3-5); Bobrovsky 2025-26 went +0.43 → −0.51
+  (correctly negative for his down year).
+
+### v6.4 — Skater finishing+playmaking pipeline (later replaced by v6.7)
+
+Added `skaterXgCalibration = sum(iG)/sum(ixG)` as a multiplier on ixG
+in the finishing residual, motivated by an audit finding that the
+empirical xG model under-predicts league goals by ~30%. **Reverted by
+v6.7** (see below) because multiplicative scaling distorts elite
+shooters' signal — Robertson 2025-26 read as a below-average finisher
+under v6.4 despite scoring 50 G on 433 shots.
+
+### v6.5 — RAPM ridge improvements (build-rapm.cjs)
+
+- **1-SE rule for λ** ([`scripts/build-rapm.cjs:1505`](./scripts/build-rapm.cjs#L1505)).
+  CV picks the largest λ within 1 SE of the minimum-MSE λ, not the
+  technical minimum. Hastie/Tibshirani/Friedman ESL §7.10 standard
+  ridge heuristic. **CV curve is essentially flat from λ=0.3 to λ=30**
+  across 4 seasons (MSE varies <0.15%), so the technical minimum is
+  statistically indistinguishable from much stronger regularization.
+  λ went **10 → 100** in 2025-26. Coefficient distribution tightened
+  toward Bacon's published RAPM stdev (~0.122 vs our pre-fix ~0.22).
+- **Global mean prior** ([`buildPositionPrior`](./scripts/build-rapm.cjs#L1646)).
+  Replaced per-position F vs D cohort means with a single global mean.
+  The previous per-position prior systematically anchored D coefficients
+  on a +0.05 to +0.11 higher mean than F coefficients across seasons,
+  contributing to the D-positional bias on the leaderboard.
+- **Goalie replacement filter** mirror in worker
+  ([`computeGoalieStats`](./workers/src/index.ts#L4655)) bumped to 25th
+  percentile + GP≥15.
+
+### v6.6 — Position-mean offense recentering
+
+Even after global prior + λ=100, the F-D mean offense gap persisted
+(~0.10) because of regression geometry: 5 skaters per shift partition
+the league baseline, and 2 D vs 3 F per shift means each D coefficient
+attracts proportionally more variance. **Not a skill difference, a
+mathematical artifact.**
+
+Fix: subtract each player's POSITION mean from their offense
+coefficient before computing EV offense
+([`warService.ts:730`](./src/services/warService.ts#L730), with
+[`deriveRAPMPositionMeans`](./src/services/warService.ts#L97)).
+Cleaner than the band-median correction (which over-penalized elite
+D-top players whose peer median was inflated — Makar dropped from
+#12 to #24 under band correction).
+
+Defense correction unchanged — still uses band-median (existing v6.3
+deployment-band correction). Defense IS asymmetric across bands
+(top-pair D face tougher matchups), so band-median is the right
+adjustment.
+
+**Top-20 D count went 12 → 8** (matches public consensus typical
+5-8 range). McDavid restored to #2 (was #5 pre-fix).
+
+The earlier post-hoc 0.83× D-offense discount (empirically derived
+from YoY r² ratio of D vs F offensive RAPM) was REMOVED — the
+position-mean recentering does the structural work cleanly without
+multiplicative distortion.
+
+### v6.7 — Skater finishing rewrite (the Robertson fix)
+
+User noticed elite shooters not reading as elite on the share card.
+Root cause investigation: **the v6.4 multiplicative `skaterXgCalibration`
+was inverting elite shooter signals.** Concrete: Robertson 2025-26 had
+50 G on 433 shots with raw ixG=42.07 (he takes high-quality shots —
+top PP unit, slot specialist). Raw GAX = +7.93 (correctly elite). With
+v6.4: `50 − 1.4 × 42.07 = −8.9` (read as below-average — WRONG).
+
+The 1.4× multiplier was meant to recenter the league-wide GAX
+distribution to zero (because the empirical xG model historically
+under-predicts league goals by 30%). But:
+1. Empirical xG is now well-calibrated this season (sum iG / sum ixG = 0.996).
+2. Even when calibration WAS needed, multiplicative is the wrong
+   shape — it stretches individual residuals, distorting the signal
+   for high-ixG players whose shots are already high-quality.
+
+**Fix**: ADDITIVE league-mean recentering instead of multiplicative
+([`warService.ts:464`](./src/services/warService.ts#L464)):
+
+```
+finishing = (iG − ixG) − leagueMeanFinishingPerGame × GP
+```
+
+Same structure for A1 and A2 assisted-shot residuals (per-A1 / per-A2
+basis): `(assistedShotG − assistedShotIxG) − leagueMeanResidualPerAssist × A1count`.
+
+`leagueMeanFinishingPerGame`, `leagueMeanA1AssistedResidualPerA1`,
+`leagueMeanA2AssistedResidualPerA2` computed in `loadWARTables` from
+the same artifact rows. Robertson now reads **+0.53 wins finishing**,
+correctly elite (Kucherov +0.72, Draisaitl +0.53, McDavid +0.15,
+Pastrnak −0.15 down year).
+
+### v6.7 — Sample-size-aware Bayesian finishing shrinkage
+
+Replaces the flat split-half r shrinkage. The split-half r (~0.15
+in 2025-26) tells us about the typical median-shot player's
+repeatability, but high-volume shooters have more reliable estimates.
+
+```
+shrinkage(n_shots) = n / (n + K)
+```
+
+K calibrated so that median-shot player gets shrinkage = population r.
+For Robertson (433 shots, K≈700): shrinkage = 0.38 (vs prev flat 0.15).
+
+`finishingShrinkageK` field added to LeagueContext. Kept the old
+`finishingShrinkage` for fallback when artifacts predate v6.7.
+
+### Share-card UI fixes (parallel track this session)
+
+[`docs/ANALYTICS_VALIDATION.md` §5](./docs/ANALYTICS_VALIDATION.md):
+
+- **Timeline unit fix** ([`WARHistoryStrip.tsx:118-160`](./src/components/charts/WARHistoryStrip.tsx#L118-L160)).
+  Top breakdown bars in WIN units; timeline rows were rendering in
+  goal units (extract called `per82(value, gp)` but didn't divide by
+  `marginalGoalsPerWin`). Resulting visual bug: McDavid's "EV offense
+  +3.70 wins" at top, "+23.71 g/82" in timeline (6.4× ratio = goals-
+  per-win). Fix: timeline now divides by `e.marginalGoalsPerWin` for
+  goal-unit components.
+- **Total WAR clipping fix** ([`WARBreakdown.tsx:510`](./src/components/charts/WARBreakdown.tsx#L510)).
+  Ported per-segment collision-avoidance logic to the Total WAR row.
+- **Label trim**: "(on-ice)" suffix dropped from EV offense / EV defense
+  bars to fit narrow label column in compact mode.
+- **Mobile share card** verified end-to-end via Playwright with Galaxy
+  S23 emulation: ResizeObserver-driven `--card-scale` correctly
+  applies 0.307× scale at 332px slot width, full card visible.
+  `Share / Download` button generates 2160×2160 PNG (1080² logical
+  at scale 2).
+
+### Files of interest after this overhaul
+
+| File | What v6.4-v6.7 changed |
+|---|---|
+| [`scripts/build-rapm.cjs`](./scripts/build-rapm.cjs) | 1-SE rule λ selection; global prior μ |
+| [`workers/src/index.ts`](./workers/src/index.ts) | Goalie GP filter 5→15; replacement 10→25th percentile |
+| [`src/services/warTableService.ts`](./src/services/warTableService.ts) | League-mean GAX/A1/A2 fields; `finishingShrinkageK`; goalie filters mirrored |
+| [`src/services/warHistoryService.ts`](./src/services/warHistoryService.ts) | Same fields/filters mirrored for historical strip path |
+| [`src/services/warService.ts`](./src/services/warService.ts) | Additive recentering replaces multiplicative cal; position-mean offense recentering; sample-size shrinkage |
+| [`src/components/AdvancedAnalyticsDashboard.tsx`](./src/components/AdvancedAnalyticsDashboard.tsx) | Header card "Expected Goals" label fix (was team on-ice, now individual ixG) |
+| [`src/components/charts/WARHistoryStrip.tsx`](./src/components/charts/WARHistoryStrip.tsx) + .css | Unit fix to wins/82; clipping fixes |
+| [`src/components/charts/WARBreakdown.tsx`](./src/components/charts/WARBreakdown.tsx) | Total WAR collision-avoidance |
+| `public/data/rapm-20252026.json` | New build with λ=100, global prior |
+
+### Cache invalidation history this overhaul
+
+Bumped on every behavior-changing edit so old localStorage caches don't
+collide with new clients:
+
+| Version | What it captures |
+|---|---|
+| `war_tables_v6_4` | skaterXgCalibration on ixG, goalie GP≥15 |
+| `war_tables_v6_5` | + 1-SE rule λ, global prior |
+| `war_tables_v6_5b` | + 25th-percentile goalie replacement |
+| `war_tables_v6_5c` | + 0.83× D-offense empirical discount (later removed) |
+| `war_tables_v6_6` | Symmetric band correction (later replaced by position-mean) |
+| `war_tables_v6_6b/c` | Position-mean offense recentering |
+| `war_tables_v6_7` | Additive league-mean GAX recentering |
+| `war_tables_v6_7b` | + Bayesian sample-size shrinkage (current) |
+
+### What this means for future agents reading this doc
+
+If you're touching the finishing/playmaking pipeline:
+- **Don't multiply ixG by a calibration constant.** It distorts
+  high-ixG elite shooters. Use additive league-mean recentering
+  instead.
+- **Don't apply flat-r shrinkage to all players.** Bayesian shrinkage
+  by shot count is the right shape — high-volume shooters have more
+  reliable signal.
+- **The structural firewall (`RAPM regresses xGF/hr, not GF/hr`)
+  still holds.** v6.7 doesn't change that. Finishing residuals are
+  still orthogonal to RAPM.
+
+If you're touching the leaderboard / D-positional balance:
+- **D coefficients are mathematically biased upward** by ~0.10 xGF/60
+  compared to F coefficients (regression geometry: 2 D + 3 F per shift,
+  smaller D denominator gets more variance per dummy). Position-mean
+  recentering at consumption time is the cleanest fix; don't try to
+  remove the bias inside the regression itself.
+- **Top-pair D face genuine matchup headwinds for defense** (deployment-
+  band correction handles this). Don't apply the same correction to
+  offense — top-pair D don't get a symmetric tailwind.
+
+If you're touching CV λ selection:
+- **The CV curve is genuinely flat in our regime** (λ=0.3-30 vary
+  <0.15% MSE). The 1-SE rule picks λ=100 which is statistically
+  indistinguishable from λ=10 in CV terms but produces tighter
+  coefficients. Don't second-guess this.

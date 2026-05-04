@@ -65,8 +65,17 @@ export default function AdvancedAnalyticsDashboard({
         </div>
         <div className="overview-card">
           <div className="card-content">
-            <div className="card-value">{xGMetrics.xGF.toFixed(2)}</div>
-            <div className="card-label">Expected Goals</div>
+            {/* v6.5 — header card was labeled "Expected Goals" but the value
+                shown is `xGMetrics.xGF` (team-on-ice xG, not the player's
+                individual ixG that the other cards show). The other top-row
+                cards (Total Shots, Goals) are all individual; surfacing
+                team-on-ice here under the same banner caused users to read
+                "511 shots, 49 goals, 118 ixG" → "McDavid takes 0.23 ixG/shot
+                shots". Switched to individual ixG for consistency. The
+                team-on-ice number lives in the "xG For" tile below where
+                the label explicitly says "(on-ice)". */}
+            <div className="card-value">{(individualXG?.ixG ?? 0).toFixed(2)}</div>
+            <div className="card-label">Individual xG</div>
           </div>
         </div>
       </div>

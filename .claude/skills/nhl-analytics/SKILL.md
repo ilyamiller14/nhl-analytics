@@ -118,15 +118,63 @@ WAR pipeline: worker aggregates per-player PBP into `war_skaters` / `war_goalies
 - **EV offense / defense** — RAPM coefficients when available (`rapmEntry.offense/defense × 5v5 hours`). Fallback blend: `(team-relative + league-relative) × EV hours × 1/5` when RAPM absent or low-sample.
 - **Power play** — `rapm.ppXGF − (leaguePpXgfPerMin × ppMinutes)` (above-average PP value).
 - **Penalty kill** — `(leaguePkXgaPerMin × pkMinutes) − rapm.pkXGA` (suppression credit).
-- **Faceoffs** (centers only, v4 zone-aware) — per-zone win rate × `ozGoalRatePerWin` / `dzGoalRateAgainstPerWin`, each × 50% possession discount (the other 50% is downstream RAPM credit), shrunk with 50 phantom attempts per zone. Fallback to flat `faceoffValuePerWin` when zone counts/rates absent.
+- **Faceoffs** (centers only, v4 zone-aware) — per-zone win rate × `ozGoalRatePerWin` / `dzGoalRateAgainstPerWin`, each × `faceoffPossessionDiscount = 0.15` (v6.2; see `warTableService.ts:594`). Anchored by Tulsky 2012 lower bound (10%) and HockeyGraphs/JFresh upper bound (20%) — RAPM absorbs ~85% of post-draw downstream xG via shift-window xGF, leaving 15% as the face-off-event-specific residual. Shrunk with 50 phantom attempts per zone. Fallback to flat `faceoffValuePerWin` when zone counts/rates absent.
 - **Turnovers** — rate-normalized takeaway/giveaway per-60 vs position median × total hours × goal values.
 - **Discipline** (v4 severity-weighted) — `(penaltyMinutesDrawn − penaltyMinutesTaken) × ppXGPerMinute`. A 5-min major counts 2.5× a 2-min minor. Fallback to `(drawn − taken) × 2min × rate` when minutes absent.
 - **Zone-start deployment adjust** (v4, fallback blend only, centers only) — compares `ozShare = OZ/(OZ+DZ)` vs neutral 0.5; scales linearly at 1.0 xGF/60 per 100% skew; subtracts from BOTH evOffense and evDefense (the skew inflates both). Gated at ≥100 O/D faceoffs.
 - **Replacement adjust** — `−10thPctile GAR/game × games`. Anchors "above replacement".
 
+### v6.6 — Position-mean offense recentering (load-bearing)
+
+**Each skater's RAPM offense has their POSITION mean subtracted before
+the EV offense component is computed**:
+```
+evOffense = (rapm.offense − positionMeanOffense) × 5v5_hours
+```
+where `positionMeanOffense` is computed via `deriveRAPMPositionMeans`
+(F mean offense across qualified !lowSample F's; D mean across D's).
+Necessary because regression geometry (2 D + 3 F per shift) systematically
+pulls D mean offense ~0.10 above F mean — a structural bias, not a skill
+difference. Position-mean recenters F and D independently to zero.
+
+Defense uses BAND-median correction (existing v6.3): top-pair D face
+genuine matchup headwinds, so band-median (D-top vs D-mid vs D-bot
+median RAPM defense) is the right adjustment. Don't apply band
+correction to offense — it over-penalizes elite D-top players whose
+peer median is inflated.
+
+### v6.7 — Finishing residual: ADDITIVE league-mean recentering, NOT multiplicative
+
+**Do NOT multiply ixG by `skaterXgCalibration`.** The earlier (v6.4)
+multiplicative scaling distorted elite shooters' signal. Robertson 2025-26
+(50 G on 433 shots, raw GAX +7.93) read as −8.9 (below-average) under
+v6.4 because his already-high ixG got stretched 40% beyond his actual
+goals. Use additive recentering:
+
+```
+finishing = (iG − ixG) − leagueMeanFinishingPerGame × GP
+```
+
+Same shape for A1 / A2 assisted-shot residuals (per-A1 / per-A2
+basis using `leagueMeanA1AssistedResidualPerA1` / `leagueMeanA2AssistedResidualPerA2`).
+
+### v6.7 — Sample-size-aware Bayesian finishing shrinkage
+
+Replaces the flat split-half r shrinkage. High-volume shooters have
+more reliable estimates:
+
+```
+shrinkage(n_shots) = n / (n + finishingShrinkageK)
+```
+
+K calibrated so median-shot player gets `shrinkage = population r`.
+Robertson 433 shots → 0.38 credit (vs prev flat 0.15); a 90-shot
+fringe shooter → 0.13. Public WAR models (EH, JFresh) use ~0.4-0.5
+at elite-volume; this matches.
+
 ### Components deliberately ZERO (methodology, not data gap)
 - **Hits + blocks** (micro): published research (Evolving-Hockey / Hockey Graphs) shows raw hits correlate *negatively* with goal differential post-possession-control. Blocks correlate with DZ deployment not quality.
-- **Finishing (iG − ixG)** and **Playmaking (A1 × leagueIxGPerShot)**: computed but NOT summed into WAR — they overlap with RAPM's on-ice xGF coefficient (player's own shots / set-ups are already in the on-ice total).
+- ~~Finishing & Playmaking~~ — historical note: these were ZERO under earlier model versions due to suspected RAPM double-count. **As of v6.0+ they ARE in WAR** in residual form `(G − xG) × shrinkage / α`, which is orthogonal to RAPM by construction (RAPM regresses xGF/hr, not GF/hr; the residual is exactly the part the xG model didn't predict).
 
 ### Intangibles (researched, REJECTED)
 - Clutch scoring, playoff elevation, pressure faceoffs, heart/grit, EDGE intensity, comeback/trailing performance: **all fail year-over-year repeatability** tests in published NHL literature (McCurdy, Schuckers, Krzywicki, Evolving-Hockey). Small samples + dominant noise. Included as descriptive UI metrics only, never in WAR.
@@ -155,14 +203,19 @@ Surplus = predicted − actual cap hit. Single number. ELC/RFA badges on the car
 
 **Worker endpoint:** `/cached/skater-ages` returns `{ [playerId]: { age, birthDate, position } }` for every skater with a birthDate in NHL Stats' `/skater/bios`. 7-day KV cache.
 
-### Replacement level (v5)
-Switched from 10th-percentile GAR/game to "13th F / 7th D by team TOI" mean (Evolving-Hockey methodology). `workers/src/index.ts:computeReplacementByTeamTOI` ranks each team's skaters by TOI within position; rank ≥ threshold = replacement cohort; baseline = mean of their GAR/game. More principled than a quantile cut — "replacement" means fringe-roster TOI rank, not abstract percentile.
+### Replacement level (v5 skaters / v6.4 goalies)
+Skaters: switched from 10th-percentile GAR/game to "13th F / 7th D by team TOI" mean (Evolving-Hockey methodology). `workers/src/index.ts:computeReplacementByTeamTOI` ranks each team's skaters by TOI within position; rank ≥ threshold = replacement cohort; baseline = mean of their GAR/game. More principled than a quantile cut — "replacement" means fringe-roster TOI rank, not abstract percentile.
 
-### v5 WAR knob changes
-- Stabilization threshold **20 → 35 GP** (Schuckers ~1000-play YoY reliability).
-- Faceoff discount **50% → 25%** (Tulsky/Cane: possession flip is entirely the center).
-- Bar colors sign-driven red/green (colorblind-safe; replaces 8-hue component palette).
-- Pace projection → dashed tick at 82-GP endpoint (replaces faded tail).
+Goalies (v6.4): replacement = 25th percentile of `GP ≥ 15` cohort under calibrated GSAx/GP. The previous (10th percentile of `GP ≥ 5` cohort) was capturing emergency call-up tail goalies whose -2 to -3 GSAx/GP swings made elite goalie WAR read 2-3× too high vs EH/JFresh public values.
+
+### Knob changes by version
+- **v5**: Stabilization 20 → 35 GP; faceoff discount 50% → 25%.
+- **v6.2**: Faceoff discount **0.15** (current). RAPM regresses on shift-window xGF/hr and absorbs ~85% of post-faceoff goal value through the same regression; the residual 15% is the face-off-event-specific credit.
+- **v6.3**: Finishing uses TOTAL iG/ixG (not 5v5-only); deployment-band correction shipped for D defense.
+- **v6.4**: Goalie GP filter 5 → 15; goalie replacement 10th → 25th percentile. (Also added skaterXgCalibration as multiplier on ixG, REVERTED in v6.7.)
+- **v6.5**: 1-SE rule for RAPM λ (CV-min → 1-SE rule, λ went 10 → 100); global mean prior in RAPM ridge (not per-position cohort).
+- **v6.6**: Position-mean offense recentering (subtract F or D mean from RAPM offense). Replaces a post-hoc 0.83× D-offense discount that was empirically defensible but multiplicative — additive position-mean is cleaner.
+- **v6.7**: Additive league-mean GAX recentering (`(iG − ixG) − leagueMeanFinishing × GP`) replaces multiplicative `skaterXgCalibration`. Sample-size Bayesian finishing shrinkage (`n/(n+K)`) replaces flat split-half r.
 
 ---
 

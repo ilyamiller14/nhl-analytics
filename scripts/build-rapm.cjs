@@ -1474,8 +1474,7 @@ function selectLambdaFiveFoldCV(X, weights, y, lambdaGrid) {
 
   const results = [];
   for (const lambda of lambdaGrid) {
-    let totalMse = 0;
-    let totalFoldWeight = 0;
+    const foldMse = new Array(K_FOLDS);  // per-fold MSE (for 1-SE rule)
     const t0 = Date.now();
     for (let fold = 0; fold < K_FOLDS; fold++) {
       const wTrain = new Float64Array(nRows);
@@ -1499,21 +1498,45 @@ function selectLambdaFiveFoldCV(X, weights, y, lambdaGrid) {
         const r = y[i] - yHat[i];
         se += wHeld[i] * r * r;
       }
-      totalMse += se;
-      totalFoldWeight += heldWeightSum;
+      foldMse[fold] = heldWeightSum > 0 ? se / heldWeightSum : Infinity;
     }
-    const mse = totalFoldWeight > 0 ? totalMse / totalFoldWeight : Infinity;
+    // Mean MSE across folds + standard error of that mean.
+    const mse = foldMse.reduce((a, b) => a + b, 0) / K_FOLDS;
+    const variance = foldMse.reduce((a, b) => a + (b - mse) ** 2, 0) / Math.max(1, K_FOLDS - 1);
+    const seMean = Math.sqrt(variance / K_FOLDS);
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     console.log(
-      `[rapm]   λ=${String(lambda).padStart(5)} → CV MSE = ${mse.toFixed(4)}  (${elapsed}s)`
+      `[rapm]   λ=${String(lambda).padStart(5)} → CV MSE = ${mse.toFixed(4)} ± ${seMean.toFixed(4)} (${elapsed}s)`
     );
-    results.push({ lambda, mse });
+    results.push({ lambda, mse, seMean, foldMse });
   }
-  // Pick λ minimizing CV MSE.
-  results.sort((a, b) => a.mse - b.mse);
-  const best = results[0];
-  console.log(`[rapm]   best λ = ${best.lambda} (CV MSE = ${best.mse.toFixed(4)})`);
-  return { lambda: best.lambda, cvResults: results.slice().sort((a, b) => a.lambda - b.lambda) };
+  // 1-SE rule (Hastie/Tibshirani/Friedman, ESL §7.10): pick the LARGEST λ
+  // whose CV MSE is within 1 SE of the minimum-MSE λ. Rationale: when the
+  // CV curve is flat (as ours is — λ=0.3 to λ=30 vary by <0.15% MSE), the
+  // technical minimum is statistically indistinguishable from a more
+  // strongly-regularized solution. Picking the larger λ produces a more
+  // conservative, more stable model with negligible MSE cost.
+  //
+  // We retain the min-MSE λ for diagnostics but ship the 1-SE-rule λ.
+  const sortedByLambda = results.slice().sort((a, b) => a.lambda - b.lambda);
+  const minMseEntry = results.slice().sort((a, b) => a.mse - b.mse)[0];
+  const oneSeThreshold = minMseEntry.mse + minMseEntry.seMean;
+  const eligible = sortedByLambda.filter(r => r.mse <= oneSeThreshold);
+  const oneSeBest = eligible.length > 0
+    ? eligible[eligible.length - 1]  // largest λ that's within 1 SE
+    : minMseEntry;
+  console.log(
+    `[rapm]   min-MSE λ  = ${minMseEntry.lambda} (MSE = ${minMseEntry.mse.toFixed(4)} ± ${minMseEntry.seMean.toFixed(4)})`
+  );
+  console.log(
+    `[rapm]   1-SE-rule  = ${oneSeBest.lambda} (MSE = ${oneSeBest.mse.toFixed(4)}; threshold = ${oneSeThreshold.toFixed(4)})  ← chosen`
+  );
+  return {
+    lambda: oneSeBest.lambda,
+    cvResults: sortedByLambda.map(r => ({ lambda: r.lambda, mse: r.mse, seMean: r.seMean })),
+    minMseLambda: minMseEntry.lambda,
+    oneSeRuleLambda: oneSeBest.lambda,
+  };
 }
 
 /**
@@ -1637,41 +1660,51 @@ function buildPositionPrior({
 }) {
   const nPlayers = qualified.length;
 
-  // 1) Cohort means from high-TOI anchors only. Cohort = F vs D. We use
-  //    F vs D (not C/L/R/D split) because the C/L/R offense/defense
-  //    distributions are statistically indistinguishable on the F side
-  //    (Tulsky, Hockey Graphs) and splitting them adds variance to a
-  //    prior that's already a fallback when prior-season data is
-  //    unavailable.
-  const cohortAccumulator = {
-    F: { offSum: 0, defSum: 0, count: 0 },
-    D: { offSum: 0, defSum: 0, count: 0 },
-  };
-
+  // 1) GLOBAL cohort mean from high-TOI anchors (no F vs D split).
+  //
+  // v6.5 — recentered: previously F and D had separate cohort means,
+  // which inherited the standard-ridge bias that systematically gave
+  // D-men higher offense coefficients (D μ_off was 0.05-0.11 above F
+  // μ_off across seasons). The position-specific prior pulled D's
+  // coefficients toward this higher mean, structurally inflating D
+  // RAPM offense and producing the D-positional bias visible in the
+  // top-20 leaderboard (12/20 D pre-fix vs ~5-6 in public models).
+  //
+  // The fix: use ONE global mean for both positions. The prior now
+  // represents "the typical NHL skater" — a position-neutral baseline.
+  // Position-specific behavior (D play more 5v5, F more rotation) is
+  // already captured by the design matrix; the prior shouldn't
+  // additionally encode positional means.
+  //
+  // We still report F vs D anchor counts for diagnostics, but both
+  // positions share the same μ_off and μ_def values.
+  let globalOffSum = 0;
+  let globalDefSum = 0;
+  let globalCount = 0;
+  let fAnchorCount = 0;
+  let dAnchorCount = 0;
   for (const pid of qualified) {
     const i = playerIdx.get(pid);
     const toi = toiMap.get(pid) || 0;
     if (toi < minAnchorTOISec) continue;
     const pos = positions.get(pid);
     if (!pos) continue;
-    const cohortKey = pos === 'D' ? 'D' : 'F';
-    const cohort = cohortAccumulator[cohortKey];
-    cohort.offSum += betaStandard[i];
+    globalOffSum += betaStandard[i];
     // Defense column in betaStandard layout is at i+nPlayers; the sign
     // hasn't been flipped yet (raw "contribution to opponent xGF/60").
-    cohort.defSum += betaStandard[i + nPlayers];
-    cohort.count += 1;
+    globalDefSum += betaStandard[i + nPlayers];
+    globalCount += 1;
+    if (pos === 'D') dAnchorCount += 1;
+    else fAnchorCount += 1;
   }
 
-  const cohortMeans = {};
-  for (const key of ['F', 'D']) {
-    const c = cohortAccumulator[key];
-    cohortMeans[key] = {
-      offense: c.count > 0 ? c.offSum / c.count : 0,
-      defense: c.count > 0 ? c.defSum / c.count : 0,
-      anchorCount: c.count,
-    };
-  }
+  const globalOffense = globalCount > 0 ? globalOffSum / globalCount : 0;
+  const globalDefense = globalCount > 0 ? globalDefSum / globalCount : 0;
+  const cohortMeans = {
+    F: { offense: globalOffense, defense: globalDefense, anchorCount: fAnchorCount },
+    D: { offense: globalOffense, defense: globalDefense, anchorCount: dAnchorCount },
+    GLOBAL: { offense: globalOffense, defense: globalDefense, anchorCount: globalCount },
+  };
 
   // 2) Build the μ vector (length 2·nPlayers — offense block then defense).
   //    Priority order:

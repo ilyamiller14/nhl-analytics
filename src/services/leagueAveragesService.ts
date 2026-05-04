@@ -31,16 +31,29 @@ export interface LeagueAverages {
   faceoffWinPct: number;      // Should be ~50% by definition
 }
 
+// v6.4: per-distribution stats now include `quantiles` — an 11-element
+// array of values at p=0,10,20,...,100 — so consumers can compute
+// percentiles via empirical rank rather than the Gaussian-approximation
+// path. Right-skewed distributions (P/GP, G/GP, SH%) had elite players'
+// percentiles compressed to 99 too quickly under the Gaussian path.
+// Field is optional so older cached payloads still parse; consumers fall
+// back to mean+stdDev when absent.
+export interface DistributionStats {
+  mean: number;
+  stdDev: number;
+  quantiles?: number[];
+}
+
 export interface SkaterAverages {
   season: string;
   computedAt: number;
   skaterCount: number;
 
   // Per-player distributions (computed from all qualified skaters)
-  pointsPerGame: { mean: number; stdDev: number };
-  goalsPerGame: { mean: number; stdDev: number };
-  assistsPerGame: { mean: number; stdDev: number };
-  shootingPct: { mean: number; stdDev: number };
+  pointsPerGame: DistributionStats;
+  goalsPerGame: DistributionStats;
+  assistsPerGame: DistributionStats;
+  shootingPct: DistributionStats;
 }
 
 // ============================================================================
@@ -52,7 +65,8 @@ function leagueCacheKey(season: string): string {
 }
 
 function skaterCacheKey(season: string): string {
-  return `skater_averages_${season}`;
+  // v2 invalidates v1 caches that lacked the empirical quantiles array.
+  return `skater_averages_v2_${season}`;
 }
 
 // ============================================================================
@@ -232,7 +246,7 @@ export async function getSkaterAverages(season?: string): Promise<SkaterAverages
 // HELPERS
 // ============================================================================
 
-function computeMeanStdDev(values: number[]): { mean: number; stdDev: number } {
+function computeMeanStdDev(values: number[]): DistributionStats {
   if (values.length === 0) return { mean: 0, stdDev: 1 };
 
   const n = values.length;
@@ -240,19 +254,68 @@ function computeMeanStdDev(values: number[]): { mean: number; stdDev: number } {
   const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / n;
   const stdDev = Math.sqrt(variance);
 
+  // v6.4: empirical quantile breakpoints. Compute 11 values at
+  // p = 0, 10, 20, ..., 100 from the sorted distribution. Consumers
+  // call `computePercentile(value, distStats)` and get an empirical
+  // rank rather than a Gaussian approximation.
+  const sorted = values.slice().sort((a, b) => a - b);
+  const quantiles: number[] = [];
+  for (let p = 0; p <= 100; p += 10) {
+    const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * (sorted.length - 1)));
+    quantiles.push(Math.round(sorted[idx] * 1000) / 1000);
+  }
+
   return {
     mean: Math.round(mean * 1000) / 1000,
     stdDev: Math.round(stdDev * 1000) / 1000,
+    quantiles,
   };
 }
 
 /**
- * Compute a real percentile from actual distribution data
+ * Compute an empirical percentile (1-99) from a value and the cached
+ * distribution stats. Prefers the empirical quantile path — interpolates
+ * linearly between the two closest 10%-quantile breakpoints — and falls
+ * back to the Gaussian-approximation path (tanh CDF) when quantiles
+ * aren't on the stats blob (older cached payload).
+ *
+ * Backward-compatible signature: callers can still pass
+ * `(value, mean, stdDev)` — internally that wraps to `{mean, stdDev}`
+ * and goes through the Gaussian branch.
  */
-export function computePercentile(value: number, mean: number, stdDev: number): number {
-  if (stdDev === 0) return 50;
-  const zScore = (value - mean) / stdDev;
-  // Approximate CDF using tanh (fast, accurate within ~1%)
+export function computePercentile(
+  value: number,
+  meanOrStats: number | DistributionStats,
+  stdDev?: number,
+): number {
+  // Resolve to a DistributionStats object regardless of which signature
+  // the caller used.
+  const stats: DistributionStats = typeof meanOrStats === 'number'
+    ? { mean: meanOrStats, stdDev: stdDev ?? 0 }
+    : meanOrStats;
+
+  // Empirical path. Quantiles are an 11-point array at p=0,10,...,100.
+  // Find the bracket containing `value` and linear-interpolate within it.
+  const q = stats.quantiles;
+  if (q && q.length === 11) {
+    if (value <= q[0]) return 1;
+    if (value >= q[10]) return 99;
+    for (let i = 0; i < 10; i++) {
+      const lo = q[i];
+      const hi = q[i + 1];
+      if (value >= lo && value <= hi) {
+        const span = hi - lo;
+        const frac = span > 0 ? (value - lo) / span : 0;
+        const pct = i * 10 + frac * 10;
+        return Math.min(99, Math.max(1, Math.round(pct)));
+      }
+    }
+  }
+
+  // Gaussian fallback — kept for backward compat with cached payloads
+  // that predate v6.4 quantiles.
+  if (stats.stdDev === 0) return 50;
+  const zScore = (value - stats.mean) / stats.stdDev;
   const percentile = 50 * (1 + Math.tanh(zScore * 0.7));
   return Math.min(99, Math.max(1, Math.round(percentile)));
 }

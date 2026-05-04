@@ -70,7 +70,6 @@ const COLOR_POS = '#34d399';
 const COLOR_NEG = '#f87171';
 const COLOR_NEUTRAL = 'rgba(148, 163, 184, 0.6)';
 const COLOR_LINE = 'rgba(148, 163, 184, 0.45)';
-const COLOR_NODATA = 'rgba(148, 163, 184, 0.35)';
 
 function colorForValue(v: number): string {
   if (v > 0.01) return COLOR_POS;
@@ -93,6 +92,17 @@ function per82(value: number, gamesPlayed: number): number {
   return (value * 82) / gamesPlayed;
 }
 
+// Convert a goal-units WAR component into wins/82, using the season's
+// marginal-goals-per-win conversion. The top WARBreakdown bars are in
+// wins; this strip's per-component rows must use the same units so a
+// reader can compare "+3.70 EV offense" at the top with "+3.70 EV offense"
+// in the timeline. Without this, components render in goals and disagree
+// with the headline by a 6× factor (= goals-per-win).
+function compToWins82(value: number, gamesPlayed: number, mgpw: number): number {
+  const safeMgpw = Math.max(0.001, mgpw);
+  return per82(value, gamesPlayed) / safeMgpw;
+}
+
 // Metric definitions: how to extract a value from a WARHistoryEntry. The
 // `compactOnly` flag marks rows that show in the deep tab but not in the
 // share-card compact slot (vertical budget).
@@ -109,6 +119,9 @@ interface MetricDef {
 
 // Skater metrics — first 5 are visible in compact (share card), rest
 // are surfaced in the deep tab. Order top→bottom = importance.
+//
+// All goal-unit components convert to wins/82 via compToWins82() so
+// timeline rows match the WARBreakdown bars (which also render in wins).
 const SKATER_METRICS: MetricDef[] = [
   {
     key: 'war82',
@@ -119,101 +132,113 @@ const SKATER_METRICS: MetricDef[] = [
   {
     key: 'evOff',
     label: 'EV offense',
-    unit: 'g/82',
+    unit: 'wins/82',
     extract: e => {
       const c = e.components as Partial<WARComponents>;
-      return per82(num(c.evOffense), e.gamesPlayed);
+      return compToWins82(num(c.evOffense), e.gamesPlayed, e.marginalGoalsPerWin);
     },
   },
   {
     key: 'evDef',
     label: 'EV defense',
-    unit: 'g/82',
+    unit: 'wins/82',
     extract: e => {
       const c = e.components as Partial<WARComponents>;
-      return per82(num(c.evDefense), e.gamesPlayed);
+      return compToWins82(num(c.evDefense), e.gamesPlayed, e.marginalGoalsPerWin);
+    },
+  },
+  // Finishing + Playmaking are now in compact mode (replacing PP/PK).
+  // PP/PK depend on RAPM coefficients which only ship for the current
+  // season — historical PP/PK rows would render as +0.00 across two of
+  // three time-series points, which falsely implies zero specialty-team
+  // contribution. Finishing + Playmaking are derived from per-strength
+  // shooting/assist stats that ARE present in every season's artifact,
+  // so they compare honestly across the strip.
+  {
+    key: 'finishing',
+    label: 'Finishing',
+    unit: 'wins/82',
+    extract: e => {
+      const c = e.components as Partial<WARComponents>;
+      return compToWins82(num(c.finishing), e.gamesPlayed, e.marginalGoalsPerWin);
     },
   },
   {
-    key: 'pp',
-    label: 'Power play',
-    unit: 'g/82',
+    key: 'playmaking',
+    label: 'Playmaking',
+    unit: 'wins/82',
     extract: e => {
       const c = e.components as Partial<WARComponents>;
-      return per82(num(c.powerPlay), e.gamesPlayed);
+      return compToWins82(num(c.playmaking), e.gamesPlayed, e.marginalGoalsPerWin);
+    },
+  },
+  // Full-mode-only rows below — the deep tab still shows PP/PK + the
+  // remaining components for the current season.
+  {
+    key: 'pp',
+    label: 'Power play',
+    unit: 'wins/82',
+    fullModeOnly: true,
+    extract: e => {
+      const c = e.components as Partial<WARComponents>;
+      // Historical seasons have no RAPM → no PP signal. Return null so
+      // the renderer skips the data point entirely (no dot, no label).
+      if (e.rapmAvailable === false) return null;
+      return compToWins82(num(c.powerPlay), e.gamesPlayed, e.marginalGoalsPerWin);
     },
   },
   {
     key: 'pk',
     label: 'Penalty kill',
-    unit: 'g/82',
-    extract: e => {
-      const c = e.components as Partial<WARComponents>;
-      return per82(num(c.penaltyKill), e.gamesPlayed);
-    },
-  },
-  // Full-mode-only rows below
-  {
-    key: 'finishing',
-    label: 'Finishing',
-    unit: 'g/82',
+    unit: 'wins/82',
     fullModeOnly: true,
     extract: e => {
       const c = e.components as Partial<WARComponents>;
-      return per82(num(c.finishing), e.gamesPlayed);
-    },
-  },
-  {
-    key: 'playmaking',
-    label: 'Playmaking (A1)',
-    unit: 'g/82',
-    fullModeOnly: true,
-    extract: e => {
-      const c = e.components as Partial<WARComponents>;
-      return per82(num(c.playmaking), e.gamesPlayed);
+      if (e.rapmAvailable === false) return null;
+      return compToWins82(num(c.penaltyKill), e.gamesPlayed, e.marginalGoalsPerWin);
     },
   },
   {
     key: 'secPlaymaking',
-    label: 'Playmaking (A2)',
-    unit: 'g/82',
+    label: 'Secondary assists',
+    unit: 'wins/82',
     fullModeOnly: true,
     extract: e => {
       const c = e.components as Partial<WARComponents>;
-      return per82(num(c.secondaryPlaymaking), e.gamesPlayed);
+      return compToWins82(num(c.secondaryPlaymaking), e.gamesPlayed, e.marginalGoalsPerWin);
     },
   },
   {
     key: 'faceoffs',
     label: 'Faceoffs',
-    unit: 'g/82',
+    unit: 'wins/82',
     fullModeOnly: true,
     extract: e => {
       const c = e.components as Partial<WARComponents>;
       const v = num(c.faceoffs);
       // Hide row entirely (return null) if the player took no faceoffs
       // in any season. Centers will have non-zero; wings/D won't.
-      return v === 0 ? null : per82(v, e.gamesPlayed);
+      return v === 0 ? null : compToWins82(v, e.gamesPlayed, e.marginalGoalsPerWin);
     },
   },
   {
     key: 'turnovers',
     label: 'Turnovers',
-    unit: 'g/82',
+    unit: 'wins/82',
     fullModeOnly: true,
     extract: e => {
       const c = e.components as Partial<WARComponents>;
-      return per82(num(c.turnovers), e.gamesPlayed);
+      return compToWins82(num(c.turnovers), e.gamesPlayed, e.marginalGoalsPerWin);
     },
   },
   {
     key: 'penalties',
     label: 'Discipline',
-    unit: 'g/82',
+    unit: 'wins/82',
     fullModeOnly: true,
     extract: e => {
       const c = e.components as Partial<WARComponents>;
-      return per82(num(c.penalties), e.gamesPlayed);
+      return compToWins82(num(c.penalties), e.gamesPlayed, e.marginalGoalsPerWin);
     },
   },
 ];
@@ -297,6 +322,11 @@ function overrideCurrentSeasonEntry(
     WAR_per_82: currentSeasonResult.WAR_per_82,
     components: currentSeasonResult.components,
     gamesPlayed: currentSeasonResult.gamesPlayed,
+    // Carry the enriched-context conversion through so the strip's
+    // wins/82 conversion uses the same denominator the headline WAR
+    // does. WARResult.sources.marginalGoalsPerWin is always populated.
+    marginalGoalsPerWin:
+      currentSeasonResult.sources?.marginalGoalsPerWin ?? last.marginalGoalsPerWin,
   };
   // Goalie-only fields
   if ('GSAx' in currentSeasonResult) {
@@ -309,14 +339,15 @@ function overrideCurrentSeasonEntry(
   return out;
 }
 
-// SVG sparkline geometry constants. ViewBox tuned so the per-dot value
-// labels (fontSize 9, ~14px tall in viewBox units) fit above/below the
-// dots without clipping. Plot area = full viewBox minus padding;
-// labels float in the padding zone above/below.
+// SVG sparkline geometry constants. The SVG only renders the zero
+// baseline + connecting line + dots. Per-dot value labels are HTML
+// (absolutely positioned) so they render at native font size without
+// the preserveAspectRatio="none" horizontal stretching that makes
+// SVG <text> look "absurd" in this column-stretched layout.
 const VB_W = 140;
-const VB_H = 36;
-const PAD_X = 16;
-const PAD_Y = 12;
+const VB_H = 24;
+const PAD_X = 12;
+const PAD_Y = 4;
 
 function MetricRow({
   metric,
@@ -409,6 +440,19 @@ function MetricRow({
     })
     .join(' · ');
 
+  // Pre-compute per-dot label positions as percentages so the HTML
+  // overlay can place each label over its corresponding SVG dot at
+  // any rendered width. Labels render at native browser font size
+  // (no preserveAspectRatio stretching).
+  const labelOverlays = series.map((p, i) => {
+    const xPct =
+      series.length <= 1
+        ? 50
+        : (i / (series.length - 1)) * (1 - (2 * PAD_X) / VB_W) * 100 +
+          (PAD_X / VB_W) * 100;
+    return { idx: i, season: p.season, value: p.value, xPct };
+  });
+
   return (
     <div className="wh-metric-row" role="listitem" title={tooltip}>
       <div className="wh-metric-label">
@@ -438,78 +482,63 @@ function MetricRow({
               strokeWidth={1.5}
             />
           ))}
-          {/* Dots + per-dot value labels — sign-colored when present,
-              faded open circle + dash when absent. Labels float above
-              the dot when value >= 0 and below when negative so they
-              never cross the zero baseline ambiguously. The most-recent
-              dot's label leans LEFT of the dot so it doesn't get cut
-              off by the SVG right edge. */}
+        </svg>
+        {/* HTML overlay for dots + labels — both rendered above the SVG so
+            dots stay perfectly round (the SVG uses preserveAspectRatio="none"
+            which stretches any <circle> into an ellipse in this wide
+            column) and labels render at native font size. The yPct
+            mirrors the SVG's yFor() formula so dots line up vertically
+            with where the connecting line meets them. */}
+        <div className="wh-spark-overlay" aria-hidden="true">
           {series.map((p, i) => {
-            const cx = xFor(i, series.length);
-            const isLast = i === series.length - 1;
-            const isFirst = i === 0;
-            // Anchor / x-offset so labels don't clip:
-            //   first dot: anchor left, slight right offset
-            //   last dot: anchor right, slight left offset
-            //   middle: anchor middle
-            const labelAnchor: 'start' | 'middle' | 'end' = isFirst
-              ? 'start'
-              : isLast
-              ? 'end'
-              : 'middle';
-            const labelDx = isFirst ? -2 : isLast ? 2 : 0;
-            if (p.value == null) {
-              return (
-                <g key={p.season}>
-                  <circle
-                    cx={cx}
-                    cy={zeroY}
-                    r={2.2}
-                    fill="none"
-                    stroke={COLOR_NODATA}
-                    strokeWidth={1}
-                  />
-                  <text
-                    x={cx - labelDx}
-                    y={zeroY - 5}
-                    textAnchor={labelAnchor}
-                    fontSize={9}
-                    fill="rgba(148,163,184,0.55)"
-                  >
-                    —
-                  </text>
-                </g>
-              );
-            }
-            const dy = yFor(p.value);
-            // Label above when value >= 0, below when < 0 (away from
-            // zero line). With 4px offset for breathing room.
-            const labelY =
-              p.value >= 0
-                ? Math.max(VB_H * 0.18, dy - 4)
-                : Math.min(VB_H - 1, dy + 9);
+            // Skip null data points entirely — no dot, no placeholder.
+            // Honest representation: if the worker artifact didn't ship
+            // the field for this season (e.g. PP/PK with no historical
+            // RAPM), draw nothing rather than "+0.0" or a hollow dot
+            // that suggests "we measured this and it was zero".
+            if (p.value == null) return null;
+            const xPct = labelOverlays[i].xPct;
+            const yPct = (yFor(p.value) / VB_H) * 100;
             return (
-              <g key={p.season}>
-                <circle
-                  cx={cx}
-                  cy={dy}
-                  r={3.2}
-                  fill={colorForValue(p.value)}
-                />
-                <text
-                  x={cx - labelDx}
-                  y={labelY}
-                  textAnchor={labelAnchor}
-                  fontSize={9}
-                  fontWeight={700}
-                  fill={colorForValue(p.value)}
-                >
-                  {fmt(p.value, 1)}
-                </text>
-              </g>
+              <span
+                key={`dot-${p.season}`}
+                className="wh-spark-dot"
+                style={{
+                  left: `${xPct}%`,
+                  top: `${yPct}%`,
+                  background: colorForValue(p.value),
+                  borderColor: 'transparent',
+                }}
+              />
             );
           })}
-        </svg>
+          {labelOverlays.map(o => {
+            // Same null-skip rule for the value labels.
+            if (o.value == null) return null;
+            const isFirst = o.idx === 0;
+            const isLast = o.idx === series.length - 1;
+            const align = isFirst ? 'left' : isLast ? 'right' : 'center';
+            const transform =
+              align === 'left'
+                ? 'translateX(0)'
+                : align === 'right'
+                ? 'translateX(-100%)'
+                : 'translateX(-50%)';
+            return (
+              <span
+                key={o.season}
+                className={`wh-spark-label ${align}`}
+                style={{
+                  left: `${o.xPct}%`,
+                  transform,
+                  color: colorForValue(o.value),
+                }}
+              >
+                {fmt(o.value, 1)}
+              </span>
+            );
+          })}
+        </div>
       </div>
       <div
         className="wh-metric-current"

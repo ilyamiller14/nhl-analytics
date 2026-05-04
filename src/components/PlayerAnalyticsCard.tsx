@@ -362,9 +362,12 @@ export default function PlayerAnalyticsCard({
     const xgPercent = analytics?.xGMetrics?.xGPercent || 0;
 
     return {
-      ppg: computePercentile(pointsPerGame || 0, skaterAverages.pointsPerGame.mean, skaterAverages.pointsPerGame.stdDev),
-      gpg: computePercentile(goalsPerGame || 0, skaterAverages.goalsPerGame.mean, skaterAverages.goalsPerGame.stdDev),
-      xg: computePercentile(xgPercent, 50, 8), // xG% is naturally centered at 50
+      // v6.4: pass DistributionStats so computePercentile uses the
+      // empirical quantile path (right-skewed distributions get correct
+      // ranks instead of Gaussian-compressed ones).
+      ppg: computePercentile(pointsPerGame || 0, skaterAverages.pointsPerGame),
+      gpg: computePercentile(goalsPerGame || 0, skaterAverages.goalsPerGame),
+      xg: computePercentile(xgPercent, 50, 8), // xG% is naturally centered at 50; no quantiles needed
     };
   }, [pointsPerGame, goalsPerGame, analytics, skaterAverages]);
 
@@ -381,23 +384,23 @@ export default function PlayerAnalyticsCard({
     const isD = position === 'D';
 
     const shPctile = shPct != null
-      ? computePercentile(shPct, skaterAverages.shootingPct.mean, skaterAverages.shootingPct.stdDev)
+      ? computePercentile(shPct, skaterAverages.shootingPct)
       : 50;
 
     let axes: DNAAxis[];
     if (isD) {
       axes = [
-        { label: 'Offense', value: computePercentile(ppg, skaterAverages.pointsPerGame.mean, skaterAverages.pointsPerGame.stdDev) },
+        { label: 'Offense', value: computePercentile(ppg, skaterAverages.pointsPerGame) },
         { label: 'Mobility', value: edgeSpeed?.percentile ?? 50 },
         { label: 'Defense', value: cf },
         { label: 'Shooting', value: shPctile },
       ];
     } else {
       axes = [
-        { label: 'Scoring', value: computePercentile(gpg, skaterAverages.goalsPerGame.mean, skaterAverages.goalsPerGame.stdDev) },
+        { label: 'Scoring', value: computePercentile(gpg, skaterAverages.goalsPerGame) },
         { label: 'Shooting', value: shPctile },
         { label: 'Two-Way', value: cf },
-        { label: 'Playmaking', value: computePercentile(apg, skaterAverages.assistsPerGame.mean, skaterAverages.assistsPerGame.stdDev) },
+        { label: 'Playmaking', value: computePercentile(apg, skaterAverages.assistsPerGame) },
       ];
     }
     const archetype = getArchetype(axes, isD);
@@ -727,7 +730,11 @@ export default function PlayerAnalyticsCard({
                   <WARBreakdown
                     result={warResult}
                     title="Wins Above Replacement"
-                    width={760}
+                    /* Width tuned to match the bottom-war-full slot's
+                       wide-short aspect (~990×360 in the export) so the
+                       chart fills horizontally instead of being letter-
+                       boxed via preserveAspectRatio="xMidYMid meet". */
+                    width={1900}
                     compact
                   />
                 </div>

@@ -93,6 +93,12 @@ function PlayerProfile() {
   })();
   const [activeTab, setActiveTab] = useState<'stats' | 'charts' | 'analytics' | 'advanced' | 'edge' | 'deep' | 'card'>(initialTabFromQuery);
   const [isSharing, setIsSharing] = useState(false);
+  // Cached PNG dataURL from the most-recent successful share/download.
+  // Surfaces as an <img> below the action buttons so mobile users can
+  // long-press → "Save / Copy" via the native browser context menu
+  // (the live HTML/SVG card itself doesn't expose this menu).
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [warTables, setWarTables] = useState<WARTables | null>(null);
   const [rapm, setRapm] = useState<RAPMArtifact | null>(null);
   // Context with quantile tables rebuilt from the post-RAPM WAR
@@ -194,11 +200,15 @@ function PlayerProfile() {
   }, [playerId, searchParams]);
 
 
-  // Handle share functionality
-  const handleShare = useCallback(async () => {
+  // Handle share functionality.
+  // `silent: true` skips the download/share dialog and only caches the
+  // dataURL. Used by the auto-generation effect that primes the on-page
+  // <img> so mobile users can long-press → "Copy / Save" without first
+  // clicking the share button.
+  const handleShare = useCallback(async (silent: boolean = false) => {
     if (!cardRef.current) return;
 
-    setIsSharing(true);
+    if (!silent) setIsSharing(true);
 
     const fileName = `${player?.firstName.default}-${player?.lastName.default}-analytics.png`;
 
@@ -296,6 +306,15 @@ function PlayerProfile() {
         `[data-share-capture-target] .bottom-war-full .share-war-breakdown{height:100% !important}` +
         `[data-share-capture-target] .bottom-war-full .share-war-breakdown .war-break{height:100% !important}` +
         `[data-share-capture-target] .share-war-breakdown svg{max-height:none !important;height:100% !important;width:100% !important}` +
+        // Capture-only flex reallocation: give the WAR breakdown ~70% of
+        // the bottom row and cap the heatmap at ~30%. The default 3:2
+        // flex (PlayerAnalyticsCard.css:531-560) collapses the breakdown
+        // to ~594px in the 990px-wide capture target, which makes the
+        // SVG (viewBox width 1900) scale down so far that the bar labels
+        // render at ~8 actual px in the PNG. 700/280 split keeps the
+        // labels readable while still showing the heatmap clearly.
+        `[data-share-capture-target] .bottom-war-full .share-war-breakdown{flex:7 1 600px !important}` +
+        `[data-share-capture-target] .bottom-war-full .share-spatial-panel{flex:3 1 240px !important;max-width:320px !important}` +
         // Size bump: the card's base design was 16:9 1200×675; at 1080×1080
         // there's more vertical budget, so upsize the hero elements so
         // they read clearly in a small preview thumbnail.
@@ -433,24 +452,53 @@ function PlayerProfile() {
         }
       }
 
-      // Try to share, fall back to download
-      const shared = await tryShare(dataUrl);
-      if (!shared) {
-        downloadImage(dataUrl);
+      // Cache the dataURL so we can render an <img> below the share
+      // button — gives mobile users the native long-press → Save / Copy
+      // context menu (the live HTML/SVG card preview doesn't surface
+      // that menu since browsers only expose it for actual image
+      // elements).
+      setGeneratedImageUrl(dataUrl);
+      setCopyState('idle');
+
+      // Skip the share/download dialog when silent (auto-generation for
+      // long-press support). The dataURL is already cached on
+      // generatedImageUrl so the on-screen <img> can pick it up.
+      if (!silent) {
+        const shared = await tryShare(dataUrl);
+        if (!shared) {
+          downloadImage(dataUrl);
+        }
       }
 
     } catch (err) {
       console.error('Error generating image:', err);
-      alert('Unable to generate image. Please use your browser\'s screenshot feature:\n\n• Mac: Cmd+Shift+4\n• Windows: Win+Shift+S\n• Mobile: Volume+Power buttons');
+      if (!silent) {
+        alert('Unable to generate image. Please use your browser\'s screenshot feature:\n\n• Mac: Cmd+Shift+4\n• Windows: Win+Shift+S\n• Mobile: Volume+Power buttons');
+      }
     } finally {
       // Belt-and-suspenders: remove any stray root-font-lock style left
       // behind if an exception fired before the normal cleanup path ran.
       document
         .querySelectorAll('style[data-share-capture="root-font-lock"]')
         .forEach((el) => el.parentNode?.removeChild(el));
-      setIsSharing(false);
+      if (!silent) setIsSharing(false);
     }
   }, [player]);
+
+  // Tracks the `playerShots.length` value at the time of the last
+  // successful capture. Lets the auto-overlay effect re-fire when shots
+  // arrive after the initial snapshot so the on-page card always
+  // reflects the latest data (heatmap appears once shots load).
+  const lastCapturedShotCountRef = useRef<number | null>(null);
+
+  // Reset the cached share image whenever the player changes — otherwise
+  // navigating from one player's card view to another's would briefly
+  // render the previous player's PNG over the new live preview.
+  useEffect(() => {
+    setGeneratedImageUrl(null);
+    setCopyState('idle');
+    lastCapturedShotCountRef.current = null;
+  }, [playerId]);
 
   // Fetch real shot data from NHL API - must be called before any conditional returns
   const { data: gameData, isLoading: gameDataLoading } = usePlayerGameData(
@@ -510,6 +558,29 @@ function PlayerProfile() {
     }
     return [];
   }, [advancedAnalytics?.rollingMetrics]);
+
+  // Auto-generate the share PNG once the card tab is open + data is
+  // ready, so mobile users can long-press the on-screen card to get the
+  // native "Copy Image / Save Image" sheet without first clicking the
+  // share button. Re-fires when the shot count crosses 0 → N so the
+  // overlay updates after the heatmap mounts (otherwise the overlay
+  // would be locked to the no-shots snapshot from the first run).
+  const currentShotCount = advancedAnalytics?.playerShots?.length ?? 0;
+  useEffect(() => {
+    if (activeTab !== 'card') return;
+    if (!player) return;
+    if (isSharing) return;
+    if (lastCapturedShotCountRef.current === currentShotCount) return;
+    // First snapshot waits longer so async charts have time to mount;
+    // subsequent (shots-arrived) snapshots fire faster since the layout
+    // is already settled.
+    const settle = currentShotCount > 0 ? 700 : 4000;
+    const t = setTimeout(() => {
+      lastCapturedShotCountRef.current = currentShotCount;
+      handleShare(true).catch(() => { /* silent — user can still click */ });
+    }, settle);
+    return () => clearTimeout(t);
+  }, [activeTab, player, currentShotCount, isSharing, handleShare]);
 
   // Fetch EDGE tracking data
   const {
@@ -1563,6 +1634,20 @@ function PlayerProfile() {
                 </div>
 
                 <div className="card-preview" ref={previewRef}>
+                  {/* Once the share PNG has been generated (auto on tab
+                      open, or after the share button), overlay it on top
+                      of the live preview. Visually identical, but it's an
+                      <img> element — so iOS / Android long-press surfaces
+                      the native "Copy Image / Save Image" menu (the live
+                      HTML/SVG preview does not). */}
+                  {generatedImageUrl && (
+                    <img
+                      className="card-preview-overlay"
+                      src={generatedImageUrl}
+                      alt={`${player.firstName.default} ${player.lastName.default} share card — long-press to save or copy`}
+                      draggable={false}
+                    />
+                  )}
                   <div ref={cardRef}>
                   {isGoalie ? (
                     // Goalie share card. The skater card was silently
@@ -1653,15 +1738,50 @@ function PlayerProfile() {
                   </div>
                 </div>
                 <div className="card-actions">
-                  <button
-                    className="btn btn-primary share-btn"
-                    onClick={handleShare}
-                    disabled={isSharing}
-                  >
-                    {isSharing ? 'Generating...' : 'Share / Download'}
-                  </button>
+                  <div className="card-action-buttons">
+                    <button
+                      className="btn btn-primary share-btn"
+                      onClick={() => handleShare()}
+                      disabled={isSharing}
+                    >
+                      {isSharing ? 'Generating...' : 'Share / Download'}
+                    </button>
+                    {generatedImageUrl && (
+                      <button
+                        className="btn btn-secondary copy-btn"
+                        onClick={async () => {
+                          try {
+                            // Convert dataURL → Blob → ClipboardItem.
+                            // navigator.clipboard.write supports image/png on
+                            // modern desktop browsers + recent iOS / Android
+                            // Chrome. Safari iOS blocks it on some versions
+                            // — we surface the long-press image as a fallback.
+                            const res = await fetch(generatedImageUrl);
+                            const blob = await res.blob();
+                            // @ts-ignore — older lib.dom doesn't include
+                            // ClipboardItem in some toolchains
+                            const item = new ClipboardItem({ [blob.type]: blob });
+                            await navigator.clipboard.write([item]);
+                            setCopyState('copied');
+                            setTimeout(() => setCopyState('idle'), 2000);
+                          } catch (err) {
+                            console.warn('clipboard write failed', err);
+                            setCopyState('error');
+                            setTimeout(() => setCopyState('idle'), 2500);
+                          }
+                        }}
+                      >
+                        {copyState === 'copied'
+                          ? 'Copied ✓'
+                          : copyState === 'error'
+                          ? 'Long-press the card'
+                          : 'Copy image'}
+                      </button>
+                    )}
+                  </div>
                   <p className="card-tip">
-                    Click the button to share directly or download as an image.
+                    On mobile, long-press the card above to save or copy.
+                    Or click Share / Download for the system share sheet.
                   </p>
                 </div>
               </div>

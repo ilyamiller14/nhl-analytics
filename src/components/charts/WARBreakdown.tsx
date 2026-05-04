@@ -125,7 +125,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
     },
     {
       key: 'evOffense',
-      label: 'EV offense (on-ice)',
+      label: 'EV offense',
       value: c.evOffense,
       color: "",
       desc: evOffPending
@@ -136,7 +136,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
     },
     {
       key: 'evDefense',
-      label: 'EV defense (on-ice)',
+      label: 'EV defense',
       value: c.evDefense,
       color: "",
       desc: evDefPending
@@ -248,7 +248,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
   );
 
   const pad = compact
-    ? { top: 14, right: 44, bottom: 18, left: 250 }
+    ? { top: 14, right: 50, bottom: 18, left: 290 }
     : { top: 24, right: 44, bottom: 34, left: 150 };
   const plotW = width - pad.left - pad.right;
   const zeroX = pad.left + plotW / 2;
@@ -346,10 +346,10 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
         <line x1={zeroX} x2={zeroX}
           y1={pad.top} y2={pad.top + segments.length * (rowHeight + rowGap) + 54}
           stroke="rgba(148,163,184,0.5)" strokeDasharray="3 3" />
-        <text x={zeroX} y={pad.top - 8} textAnchor="middle" fontSize={compact ? 16 : 10} fill="#94a3b8">0</text>
+        <text x={zeroX} y={pad.top - 8} textAnchor="middle" fontSize={compact ? 22 : 10} fill="#94a3b8">0</text>
 
-        <text x={pad.left + 8} y={pad.top - 8} textAnchor="start" fontSize={compact ? 16 : 10} fill="#f87171">← costs wins</text>
-        <text x={pad.left + plotW - 8} y={pad.top - 8} textAnchor="end" fontSize={compact ? 16 : 10} fill="#34d399">earns wins →</text>
+        <text x={pad.left + 8} y={pad.top - 8} textAnchor="start" fontSize={compact ? 22 : 10} fill="#f87171">← costs wins</text>
+        <text x={pad.left + plotW - 8} y={pad.top - 8} textAnchor="end" fontSize={compact ? 22 : 10} fill="#34d399">earns wins →</text>
 
         {segments.map((seg, i) => {
           const wins = segValuesWin[i];
@@ -381,7 +381,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
           return (
             <g key={seg.key}>
               <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 7 : 4)}
-                textAnchor="end" fontSize={compact ? 22 : 12}
+                textAnchor="end" fontSize={compact ? 34 : 12}
                 fill={dim ? '#64748b' : '#cbd5f5'}>
                 {seg.label}
               </text>
@@ -392,7 +392,7 @@ export default function WARBreakdown({ result, title, playerName, width = 720, c
                     fill="rgba(71, 85, 105, 0.6)"
                     stroke="rgba(148, 163, 184, 0.4)" />
                   <text x={zeroX} y={y + rowHeight / 2 + (compact ? 5 : 3)}
-                    textAnchor="middle" fontSize={compact ? 14 : 9}
+                    textAnchor="middle" fontSize={compact ? 18 : 9}
                     fill="#e2e8f0" fontWeight={600}
                     data-pending="true">
                     data pending
@@ -441,7 +441,7 @@ source: ${seg.sourceLabel}`}
                       the "bar says X, label says Y" disagreement the
                       faded-tail variant had. */}
                   {(() => {
-                    const valueTextWidth = compact ? 64 : 44;
+                    const valueTextWidth = compact ? 84 : 44;
                     const gap = compact ? 12 : 6;
                     const outsideX = sign >= 0 ? barStartX + cumW + gap : barStartX - gap;
                     const collidesLeft = sign < 0 && (outsideX - valueTextWidth) < pad.left + 4;
@@ -452,7 +452,7 @@ source: ${seg.sourceLabel}`}
                       <text x={inside ? insideX : outsideX}
                         y={y + rowHeight / 2 + (compact ? 7 : 4)}
                         textAnchor={inside ? (sign >= 0 ? 'end' : 'start') : (sign >= 0 ? 'start' : 'end')}
-                        fontSize={compact ? 22 : 12}
+                        fontSize={compact ? 34 : 12}
                         fill={inside ? '#0f172a' : (wins > 0 ? '#34d399' : wins < 0 ? '#f87171' : '#64748b')}
                         fontWeight={600}>
                         {fmt(wins)}
@@ -487,7 +487,7 @@ source: ${seg.sourceLabel}`}
                 y1={y - 4} y2={y - 4}
                 stroke="rgba(148, 163, 184, 0.3)" />
               <text x={pad.left - 10} y={y + rowHeight / 2 + (compact ? 8 : 4)}
-                textAnchor="end" fontSize={compact ? 26 : 13} fill="#f3f4f6" fontWeight={700}>Total WAR</text>
+                textAnchor="end" fontSize={compact ? 40 : 13} fill="#f3f4f6" fontWeight={700}>Total WAR</text>
               <rect x={barStartX} y={y} width={Math.max(cumW, 1)} height={rowHeight}
                 fill={mainColor} rx={2}>
                 <title>{`Total WAR — cumulative: ${fmt(cum)} wins · 82-GP pace: ${fmt(proj)} wins`}</title>
@@ -507,14 +507,31 @@ source: ${seg.sourceLabel}`}
                   <title>{`82-GP pace marker at ${fmt(proj)} WAR`}</title>
                 </g>
               )}
-              <text x={sign >= 0 ? barStartX + cumW + (compact ? 14 : 6) : barStartX - (compact ? 14 : 6)}
-                y={y + rowHeight / 2 + (compact ? 8 : 4)}
-                textAnchor={sign >= 0 ? 'start' : 'end'}
-                fontSize={compact ? 26 : 13}
-                fill={mainColor === posColor ? '#34d399' : '#f87171'}
-                fontWeight={700}>
-                {fmt(cum)}
-              </text>
+              {(() => {
+                // Collision-avoidance: when the cumulative bar reaches near
+                // the right edge of the plot region, the outside-bar label
+                // would overflow the SVG viewBox (right-edge clipping
+                // observed for stars with WAR ≥ +6 in compact mode). Port
+                // the per-segment logic — flip to inside-bar with reversed
+                // text-anchor when the outside placement would collide.
+                const valueTextWidth = compact ? 110 : 56;
+                const gap = compact ? 14 : 6;
+                const outsideX = sign >= 0 ? barStartX + cumW + gap : barStartX - gap;
+                const collidesLeft = sign < 0 && (outsideX - valueTextWidth) < pad.left + 4;
+                const collidesRight = sign > 0 && (outsideX + valueTextWidth) > pad.left + plotW;
+                const inside = collidesLeft || collidesRight;
+                const insideX = sign >= 0 ? barStartX + cumW - gap : barStartX + gap;
+                return (
+                  <text x={inside ? insideX : outsideX}
+                    y={y + rowHeight / 2 + (compact ? 8 : 4)}
+                    textAnchor={inside ? (sign >= 0 ? 'end' : 'start') : (sign >= 0 ? 'start' : 'end')}
+                    fontSize={compact ? 40 : 13}
+                    fill={inside ? '#0f172a' : (mainColor === posColor ? '#34d399' : '#f87171')}
+                    fontWeight={700}>
+                    {fmt(cum)}
+                  </text>
+                );
+              })()}
             </g>
           );
         })()}
@@ -525,7 +542,7 @@ source: ${seg.sourceLabel}`}
           return (
             <g key={`tick-${i}`}>
               <line x1={x} x2={x} y1={yAxis - 6} y2={yAxis} stroke="rgba(148,163,184,0.4)" />
-              <text x={x} y={yAxis + 12} textAnchor="middle" fontSize={compact ? 16 : 10} fill="#94a3b8">
+              <text x={x} y={yAxis + 12} textAnchor="middle" fontSize={compact ? 22 : 10} fill="#94a3b8">
                 {t >= 0 ? '+' : ''}{t.toFixed(2)}
               </text>
             </g>

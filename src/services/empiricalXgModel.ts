@@ -176,21 +176,21 @@ export function computeEmpiricalXg(f: EmpiricalXgFeatures): number | null {
   const en = f.isEmptyNet ? 'en1' : 'en0';
   const r = f.isRebound === true ? 'r1' : f.isRebound === false ? 'r0' : null;
   const ru = f.isRush === true ? 'ru1' : f.isRush === false ? 'ru0' : null;
-  const sc = f.scoreState || null;
-  const pe = f.prevEventType || null;
+  // scoreState / prevEventType were part of the original 9-level hierarchy
+  // but the worker's `buildXgLookup` (workers/src/index.ts) only emits keys
+  // through the rebound/rush level. The two deeper levels never resolved
+  // in production — they always fell through to the level-2 bucket. v6.4
+  // removes the dead lookups to make the code match the actual stored
+  // schema. The fields are still accepted on the input interface (forward-
+  // compat: when the worker eventually emits score-state-aware buckets we
+  // can re-add the levels without breaking callers).
 
   const minShots = L.minShotsPerBucket || 30;
 
-  // Hierarchy from finest to coarsest. We only emit a level if all its
-  // dimensions are populated — otherwise we'd be looking up a key that
-  // doesn't exist in the worker's emitted set.
+  // Hierarchy from finest to coarsest, mirroring exactly what the worker
+  // emits. 7 levels total — was 9, but the score-state and prev-event
+  // levels were dead code (see comment above).
   const hierarchy: string[] = [];
-  if (r && ru && sc && pe) {
-    hierarchy.push(`${en}|${db}|${ab}|${f.shotType}|${f.strength}|${r}|${ru}|${sc}|${pe}`);
-  }
-  if (r && ru && sc) {
-    hierarchy.push(`${en}|${db}|${ab}|${f.shotType}|${f.strength}|${r}|${ru}|${sc}`);
-  }
   if (r && ru) {
     hierarchy.push(`${en}|${db}|${ab}|${f.shotType}|${f.strength}|${r}|${ru}`);
   }

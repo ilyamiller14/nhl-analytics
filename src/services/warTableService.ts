@@ -234,6 +234,13 @@ export interface LeagueContext {
    *  scale `finishing = (iG − ixG) × shrinkage` instead of summing the
    *  raw residual at 1×. */
   finishingShrinkage?: number;
+  /** v6.7: Bayesian shrinkage K-constant for finishing, calibrated so that
+   *  the median-shot player's `n / (n + K)` matches the population
+   *  finishingShrinkage (split-half r). High-volume shooters get more
+   *  skill credit (n/(n+K) approaches 1 as n grows); low-volume shooters
+   *  get more shrinkage (closer to 0). Replaces the flat-r shrinkage
+   *  formula for the dominant code path; flat-r is kept as fallback. */
+  finishingShrinkageK?: number;
   /** v5.4: fraction of a primary-assisted shot's ixG credited to the
    *  passer after accounting for the overlap with RAPM's on-ice xGF
    *  coefficient. Derived from cross-skater correlation structure — see
@@ -269,6 +276,39 @@ export interface LeagueContext {
    *  HockeyGraphs model per-60 takeaway value at ~0.01 goals with RAPM
    *  overlap). Addresses the audit's structural redundancy flag. */
   turnoverShrinkage?: number;
+  /** v6.7: additive league-mean GAX/game and assisted-residual-per-A1.
+   *  Replaces v6.4's multiplicative skaterXgCalibration on ixG, which
+   *  over-corrected for high-volume elite shooters (e.g., J. Robertson:
+   *  raw GAX +7.93 → multiplicative −8.9 — inverted his elite signal).
+   *  Additive recentering (subtract per-game league mean from each player's
+   *  raw GAX) shifts the league distribution to zero without distorting
+   *  individual ratios.
+   *
+   *    leagueMeanFinishingPerGame      = sum(iG − ixG) / sum(GP)
+   *    leagueMeanA1AssistedResidualPerA1 = sum(A1_5v5_G − A1_5v5_ixG) / sum(A1_5v5_count)
+   *    leagueMeanA2AssistedResidualPerA2 = sum(A2_5v5_G − A2_5v5_ixG) / sum(A2_5v5_count)
+   *
+   *  All optional so older cached artifacts degrade to no-recentering. */
+  leagueMeanFinishingPerGame?: number;
+  leagueMeanA1AssistedResidualPerA1?: number;
+  leagueMeanA2AssistedResidualPerA2?: number;
+  /** v6.4: skater-side xG calibration constant. The empirical xG model
+   *  under-predicts league goals by ~30% (avg ~0.074 xG/shot vs ~0.107
+   *  actual SH%); the goalies pipeline already rescales `xGFaced` by
+   *  `goalies.xgCalibration` to recover the standard "above/below average"
+   *  interpretation. Skaters were left uncalibrated through v6.3, which
+   *  inflated every skater's GAX (= iG − ixG) by ~30%. v6.4 mirrors the
+   *  goalie correction on the skater side: `skaterXgCalibration =
+   *  sum(iG) / sum(ixG)` over all qualified skaters, applied in
+   *  warService whenever ixG is consumed (finishing residual + assisted-
+   *  shot ixG residual for primary/secondary playmaking).
+   *
+   *  This is computed independently of goalies.xgCalibration because the
+   *  shot pools differ: skater ixG is over Fenwick (all unblocked attempts
+   *  including missed) while goalie xGFaced is over on-goal shots only,
+   *  and the goalie figure additionally has the strength-mismatch issue
+   *  flagged in §2.1 of the validation doc. */
+  skaterXgCalibration?: number;
   /** v6.3: position × TOI-band deployment baselines for the EV
    *  offense/defense components. Top-pair D and 1st-line F naturally
    *  face higher xGA/60 (their shifts are weighted to high-leverage
@@ -330,7 +370,7 @@ const BASE = (() => {
   return base;
 })();
 
-const CACHE_KEY = 'war_tables_v6_3';
+const CACHE_KEY = 'war_tables_v6_7b';
 
 let loaded: WARTables | null = null;
 let loadPromise: Promise<WARTables | null> | null = null;
@@ -369,12 +409,38 @@ export async function loadWARTables(): Promise<WARTables | null> {
     // Derive league-wide xG-per-shot from the real skater distribution.
     // This is the correct per-primary-assist credit (an assist leads to
     // a shot, and the league-average shot is worth this much xG).
-    let totIxG = 0, totShots = 0;
+    //
+    // Also derive `skaterXgCalibration = sum(iG) / sum(ixG)` — applied in
+    // warService to rescale ixG into goal-equivalents. Without this, the
+    // empirical xG model's ~30% league-wide under-prediction inflates
+    // every skater's GAX by the same fraction. Mirror of the goalie-side
+    // calibration further down. (v6.4 — see context.skaterXgCalibration
+    // doc for full rationale.)
+    let totIxG = 0, totShots = 0, totIG = 0;
+    let totGP = 0;
+    let totA1G_5v5 = 0, totA1IxG_5v5 = 0;
+    let totA2G_5v5 = 0, totA2IxG_5v5 = 0;
     for (const s of Object.values(skPayload.players)) {
       totIxG += s.ixG || 0;
       totShots += s.iShotsFenwick || 0;
+      totIG += s.iG || 0;
+      totGP += s.gamesPlayed || 0;
+      totA1G_5v5 += s.assistedShotG_5v5 || 0;
+      totA1IxG_5v5 += s.assistedShotIxG_5v5 || 0;
+      totA2G_5v5 += s.assistedShotG_5v5_A2 || 0;
+      totA2IxG_5v5 += s.assistedShotIxG_5v5_A2 || 0;
     }
     const leagueIxGPerShot = totShots > 0 ? totIxG / totShots : 0;
+    const skaterXgCalibration = totIxG > 0 ? totIG / totIxG : 1.0;
+    // v6.7 — additive league-mean recentering. Replaces the multiplicative
+    // skaterXgCalibration which over-corrected high-ixG shooters.
+    const leagueMeanFinishingPerGame = totGP > 0 ? (totIG - totIxG) / totGP : 0;
+    const leagueMeanA1AssistedResidualPerA1 = totA1G_5v5 > 0
+      ? (totA1G_5v5 - totA1IxG_5v5) / totA1G_5v5
+      : 0;
+    const leagueMeanA2AssistedResidualPerA2 = totA2G_5v5 > 0
+      ? (totA2G_5v5 - totA2IxG_5v5) / totA2G_5v5
+      : 0;
 
     // Derive the optimal blend weight between team-relative and league-
     // median baselines for the fallback EV offense/defense path. Under
@@ -462,9 +528,26 @@ export async function loadWARTables(): Promise<WARTables | null> {
       return denom > 0 ? num / denom : 0;
     };
     let finishingShrinkage: number | undefined = undefined;
+    let finishingShrinkageK: number | undefined = undefined;
     if (h1Rates.length >= 20) {
       const r = pearsonR(h1Rates, h2Rates);
       finishingShrinkage = Math.max(0, Math.min(1, r));
+      // v6.7: Bayesian K calibration. Solve `n_median / (n_median + K) = r`
+      // for K, where n_median is the population median shots/player.
+      // Clamp r away from 0 to prevent K → ∞ in low-r seasons.
+      const allShots = Object.values(skPayload.players)
+        .map(p => p.iShotsFenwick || 0)
+        .filter(n => n > 0)
+        .sort((a, b) => a - b);
+      if (allShots.length > 0 && finishingShrinkage > 0.01) {
+        const nMedian = allShots[Math.floor(allShots.length / 2)];
+        const rClamped = Math.max(0.10, finishingShrinkage);  // floor at 0.10 so K stays finite
+        finishingShrinkageK = nMedian * (1 - rClamped) / rClamped;
+      } else {
+        // Fallback: literature-anchored K from public WAR models that use
+        // ~50% shrinkage at ~250 shots → K = 250.
+        finishingShrinkageK = 250;
+      }
     }
 
     // v6.0: three-way playmaking attribution. Derivation:
@@ -751,9 +834,17 @@ export async function loadWARTables(): Promise<WARTables | null> {
     // adjust both shift by the calibration constant, breaking the
     // algebraic decomposition. Recomputing client-side keeps
     // computeGoalieWAR's invariants (sum=WAR) intact.
+    //
+    // v6.4: cohort filter tightened from `GP >= 5` to `GP >= 15` — same
+    // rationale as the historical-strip path in warHistoryService:
+    // emergency-call-up tail goalies pulled the 10th-percentile far
+    // below realistic starter replacement (we read -1.4/GP, public
+    // anchors put it at -0.05 to -0.10/GP), inflating elite goalie
+    // WAR by 3-4×. 15 GP filters call-ups but keeps every starter
+    // and most platoon backups.
     const calibratedGsaxPerGame: number[] = [];
     for (const g of Object.values(goPayload.players)) {
-      if (g.gamesPlayed >= 5) {
+      if (g.gamesPlayed >= 15) {
         const calibratedGSAx = g.xGFaced * xgCalibration - g.goalsAllowed;
         calibratedGsaxPerGame.push(calibratedGSAx / g.gamesPlayed);
       }
@@ -763,12 +854,15 @@ export async function loadWARTables(): Promise<WARTables | null> {
       calibratedGsaxPerGame.length > 0
         ? calibratedGsaxPerGame[Math.floor(calibratedGsaxPerGame.length / 2)]
         : 0;
-    // Replacement = 10th percentile of qualified goalies under the
-    // calibrated metric. This is the same definition as the worker's
-    // pre-calibration replacement (just on a different scale).
+    // v6.5: replacement bar moved from 10th → 25th percentile of GP≥15
+    // cohort (mirrors warHistoryService change). The 10th percentile was
+    // capturing "the worst regular backup who had a really bad season"
+    // (~-0.42 cGSAx/GP) — too generous to count as replacement, leading
+    // elite goalie WAR/82 to read 2-3× higher than EH/JFresh public
+    // values. 25th percentile (~-0.27 cGSAx/GP) aligns with public.
     const calibratedReplacementGSAxPerGame =
       calibratedGsaxPerGame.length > 0
-        ? calibratedGsaxPerGame[Math.floor(calibratedGsaxPerGame.length * 0.1)]
+        ? calibratedGsaxPerGame[Math.floor(calibratedGsaxPerGame.length * 0.25)]
         : 0;
 
     const tables: WARTables = {
@@ -783,6 +877,11 @@ export async function loadWARTables(): Promise<WARTables | null> {
           replacementGSAxPerGame: calibratedReplacementGSAxPerGame,
         },
         leagueIxGPerShot,
+        skaterXgCalibration,
+        leagueMeanFinishingPerGame,
+        leagueMeanA1AssistedResidualPerA1,
+        leagueMeanA2AssistedResidualPerA2,
+        finishingShrinkageK,
         baselineBlendTeamWeight,
         finishingShrinkage,
         playmakingAttribution,

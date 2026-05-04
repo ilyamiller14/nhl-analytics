@@ -37,23 +37,71 @@ load-bearing for several components).
 
 ---
 
-## WAR model (v4, current)
+## WAR model (v6.7, current — see HANDOFF-RAPM-ROADMAP.md "Shipped 2026-05-03" for the full v6.4 → v6.7 walk)
 
-`src/services/warService.ts` computes WAR from the worker-built `war_skaters` / `war_goalies` / `league_context` artifacts. `computeSkaterWAR(row, context, rapm)` returns `{WAR, WAR_per_82, components, percentile, ...}`.
+`src/services/warService.ts` computes WAR from the worker-built `war_skaters` / `war_goalies` / `league_context` artifacts. `computeSkaterWAR(row, context, rapm)` returns `{WAR, WAR_per_82, WAR_market, WAR_market_per_82, components, percentile, ...}`.
 
 ### Summed into WAR total
 - **EV offense / defense** — RAPM coefficients when available; fallback to blended team-relative + league-relative on-ice xG.
-- **Power play** — `rapm.ppXGF − (leaguePpXgfPerMin × ppMinutes)`.
-- **Penalty kill** — `(leaguePkXgaPerMin × pkMinutes) − rapm.pkXGA`.
-- **Faceoffs (centers only, v4 zone-aware)** — per-zone shrunk win-rate × `ozGoalRatePerWin` / `dzGoalRateAgainstPerWin`, with a 50% possession discount so we don't double-count follow-up goals that RAPM EV offense already attributes.
+  - **(v6.6) Position-mean offense recentering**: each player's RAPM offense has their position's mean subtracted before multiplying by 5v5 hours. Necessary because regression geometry (2 D + 3 F per shift) systematically pulls D mean offense ~0.10 above F mean. Position-mean recenters F and D independently to zero. See [`deriveRAPMPositionMeans`](./src/services/warService.ts#L97).
+  - **(v6.3) Defense band-median correction**: each player's RAPM defense has their deployment-band's median subtracted (D-top, D-mid, D-bot, F-top, F-mid, F-bot). Top-pair D face genuine matchup headwinds defensively; band-median removes that.
+  - **(v6.5) λ for RAPM is 1-SE-rule** (5-fold CV picks largest λ within 1 SE of MSE minimum). 2025-26 ships λ=100. Coefficients are tighter than at the technical CV minimum (λ=10) but statistically indistinguishable.
+- **Power play** — `rapm.ppXGF − (leaguePpXgfPerMin × ppMinutes)`. Above-average PP xG generation.
+- **Penalty kill** — `(leaguePkXgaPerMin × pkMinutes) − rapm.pkXGA`. Below-average PK xG suppression credit.
+- **Faceoffs (centers only, v4 zone-aware)** — per-zone shrunk win-rate × `ozGoalRatePerWin` / `dzGoalRateAgainstPerWin`, with a `faceoffPossessionDiscount = 0.15` (v6.2, see warTableService.ts:594 for derivation rationale) so we don't double-count follow-up goals that RAPM EV offense already attributes.
 - **Turnovers** — rate-normalized takeaways/giveaways per-60 vs position median × total hours × goal values.
 - **Discipline (v4 severity-weighted)** — `(penaltyMinutesDrawn − penaltyMinutesTaken) × ppXGPerMinute`. A 5-min major costs 2.5× a 2-min minor.
 - **Zone-start deployment adjust (v4, fallback EV only, centers only)** — subtracts deployment tailwind from both evOffense and evDefense when the player's OZ-faceoff share deviates from 50%.
-- **Replacement adjust** — `−10thPctile GAR/game × games`.
+- **Replacement adjust** — `−replacementGARPerGame × games`. Replacement defined per Evolving-Hockey methodology: 13th F / 7th D by team TOI cohort mean (v5).
+- **Goalie (`computeGoalieWAR`)** — calibrated GSAx − replacement, where replacement = **25th percentile of GP≥15 cohort** under calibrated GSAx/GP (v6.4 — was 10th percentile, was inflating elite goalie WAR by 2-3× vs public consensus).
+
+### v6.7 finishing + playmaking (the Robertson fix)
+
+**The shape of the residual recentering matters.** The previous v6.4
+multiplicative `skaterXgCalibration` (multiplied each player's ixG by
+`sum(iG)/sum(ixG) ≈ 1.4`) was meant to recenter the league GAX
+distribution to zero. But multiplicative scaling stretches individual
+residuals — high-ixG elite shooters (Robertson 50G/433sh on a heavy-PP
+diet) ended up with `ixG × 1.4 > iG`, reading as below-average finishers.
+
+v6.7 uses additive recentering instead:
+
+```
+finishing = (iG − ixG) − leagueMeanFinishingPerGame × GP
+```
+
+Same shape for A1 and A2 assisted-shot residuals (per-A1 / per-A2 basis).
+Recenters the population to zero without distorting individual ratios.
+
+**Sample-size-aware Bayesian shrinkage** (v6.7) replaces the flat
+split-half r:
+
+```
+shrinkage(n_shots) = n / (n + K)
+```
+
+K calibrated from population split-half r at median shots/player.
+High-volume shooters (Robertson 433 shots → 0.38 credit) get more
+skill credit than low-volume shooters (90 shots → 0.13). Public
+WAR models (EH, JFresh) use ~0.4-0.5 credit at elite-volume; this
+matches.
+
+**Result on the share card:** Robertson 2025-26 reads Finishing
+**+0.53 wins** (correctly elite); was −0.06 under broken v6.4.
 
 ### Deliberately ZERO (methodology, not data gap)
 - **Hits + blocks** — raw counts correlate negatively with goal differential after possession control (Evolving-Hockey).
-- **Finishing (iG − ixG) + Playmaking (A1 × leagueIxGPerShot)** — computed and surfaced as individual stats but NOT summed, since RAPM's on-ice xGF already includes the player's own shots and set-ups.
+
+### Deliberately ZERO (methodology, not data gap)
+- **Hits + blocks** — raw counts correlate negatively with goal differential after possession control (Evolving-Hockey).
+
+### v6.3 finishing fix (2026-05-02)
+
+Through v6.2 the **Finishing** component was 5v5-only: `(iG_5v5 − ixG_5v5) × shrinkage`. Rationale at the time: "PP finishing is already credited via the powerPlay component (rapm.ppXGF − expected)". That rationale was wrong. The powerPlay component is **xG-based** — it measures whether the player's PP unit creates above-average shot quality/quantity, not whether actual goals exceed xG on those shots. PP shooting residual fell through the cracks entirely, disproportionately under-crediting elite PP shooters (Pastrnak, Robertson, Matthews, Eichel, Kucherov can pile up 5–10 PP goals over expected per season that the model gave them no credit for).
+
+v6.3 changes Finishing to use total iG and ixG: `(iG_total − ixG_total) × shrinkage`. No double-count concern — RAPM EV offense and the PP component both measure xG, and the residual measures the (G − xG) extra; they're parallel, not overlapping. Same shrinkage factor (already derived from total `iGFirstHalf`/`ixGFirstHalf`, which are all-strength).
+
+Headline impact: elite PP-shooting forwards gain ~0.5–1.5 WAR/season; players who don't take many PP shots are unaffected. Cale Makar / pure-D types unchanged.
 
 ### WAR_market — defense-clipped variant for market value
 
@@ -90,7 +138,7 @@ Where:
 **Test cases (2025-26 season):**
 - McDavid (elite UFA): 4.67 WAR/82 × $/WAR × 1.0 ≈ $15.5M → vs $12.5M AAV = **+$3.0M SURPLUS** (matches consensus that McDavid is a bargain).
 - Hughes (RFA extension): 2.21 WAR/82 × $/WAR × 0.96 ≈ $7.3M → vs $8.0M AAV = **−$0.7M** (within model precision; he's roughly fair-value on 2025-26 production — multi-year bargain narrative isn't captured by single-season framing).
-- Bedard (ELC): −0.20 WAR/82 → floored at $775K vs $950K ELC cap = **−$0.2M** (negative-WAR season means no surplus even against the ELC floor).
+- Bedard (ELC): symmetric WAR=−0.20, but `computePlayerSurplus` is fed `WAR_market_per_82` (defense-clipped) = +1.56 → openMarketValue ≈ $4.5M vs $950K ELC cap = **+$3.5M SURPLUS** (matches the `warService.ts:1080` rationale block). The clip prevents an offensive ELC rookie's deep-negative defense from dragging surplus into the floor.
 - Kopitar (age 38 vet): 0.71 WAR/82 × $/WAR × 0.5 ≈ $2.3M vs $6.5M AAV = **−$4.2M** (decline-phase UFA, not producing at the rate his contract implies).
 
 **Why this is honest:** the surplus is INTENTIONALLY single-season. Long-term contracts that look like "overpriced this year, bargain over the full term" (like Hughes' 8-year deal signed at 2022 cap ceiling) will NOT show as bargains in this frame. The UI explicitly labels the metric "25-26 MKT SURPLUS" to prevent confusion with multi-year contract value.
@@ -102,7 +150,7 @@ Changed from "10th-percentile GAR/game" to Evolving-Hockey's **"13th F / 7th D b
 
 ### Misc v5 WAR knobs
 - Stabilization threshold: 20 GP → **35 GP** (Schuckers ~1000-play year-over-year stability threshold).
-- Faceoff possession discount: 50% → **25% discount** (Tulsky/Cane work attributes possession flip entirely to the center; RAPM doesn't credit the draw itself).
+- Faceoff possession discount: 50% → 25% (v5) → **0.15** (v6.2, current). Anchored by Tulsky 2012 lower bound (10%) and HockeyGraphs/JFresh upper bound (20%); midpoint keeps OZ-faceoff specialist credit nonzero without double-counting the RAPM-absorbed bulk.
 - Bar color: 8-hue component palette → **sign-driven diverging red/green** (colorblind-safe; agent flagged the old palette as failing deuter/protan/tritanopia simulations).
 - Pace projection: faded tail → **dashed tick marker** at the 82-GP endpoint (honest signaling of "projection, don't add this to cumulative").
 
