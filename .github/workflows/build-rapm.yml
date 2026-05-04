@@ -2,7 +2,11 @@ name: Build RAPM
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    # Regular-season months only (Oct–Apr). build-rapm filters to
+    # gameType === 2, so playoffs add nothing and the artifact is
+    # frozen May–Sep — running daily just burns CI and surfaces
+    # transient worker-cron failures (xG lookup 404s).
+    - cron: '0 6 * 1-4,10-12 *'
   workflow_dispatch:
 
 permissions:
